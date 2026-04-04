@@ -36,10 +36,10 @@ const Header = () => {
 				{/* Logo */}
 				<Link href="/" className="group flex items-center gap-2.5 mr-8">
 					<div className="relative w-7 h-7 rounded-lg bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center shadow-sm shadow-primary/20 group-hover:shadow-primary/40 transition-shadow">
-						<span className="text-xs font-black text-primary-foreground tracking-tighter">W</span>
+						<span className="text-xs font-black text-primary-foreground tracking-tighter">D</span>
 					</div>
 					<span className="text-base font-semibold tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
-						Workshop
+						Devy&apos;s Workshop
 					</span>
 				</Link>
 

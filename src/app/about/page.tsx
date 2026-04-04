@@ -28,9 +28,19 @@ const projectDescriptions = [
 		description: 'A music library browser that reads your local collection, displays album art, and lets you play tracks directly in the browser.',
 		borderColor: 'border-l-chart-4',
 	},
+	{
+		title: 'LoL Challenges',
+		description: 'Track League of Legends challenge progress across all categories with tier badges, progress bars, percentile rankings, and match history.',
+		borderColor: 'border-l-chart-5',
+	},
+	{
+		title: 'Server Dashboard',
+		description: 'Monitor system resources, manage systemd services, and view historical metrics with interactive charts for CPU, memory, disk, and network.',
+		borderColor: 'border-l-chart-1',
+	},
 ];
 
-const techStack = ['Next.js', 'React', 'TypeScript', 'TailwindCSS', 'shadcn/ui', 'motion'];
+const techStack = ['Next.js', 'React', 'TypeScript', 'TailwindCSS', 'PostgreSQL', 'shadcn/ui', 'motion'];
 
 export default function AboutPage() {
 	return (
@@ -40,18 +50,19 @@ export default function AboutPage() {
 					<FadeIn>
 						<div className="flex items-center gap-3 mb-8">
 							<h1 className="text-4xl font-bold tracking-tight text-foreground">
-								About Workshop
+								About Devy&apos;s Workshop
 							</h1>
-							<Badge variant="secondary">Portfolio</Badge>
+							<Badge variant="secondary">Dashboard</Badge>
 						</div>
 					</FadeIn>
 
 					<div className="space-y-6 text-muted-foreground">
 						<FadeIn delay={0.1}>
 							<p className="text-lg">
-								Workshop is a personal creative coding portfolio — a space for building
-								interactive projects and experiments in web development. Each project
-								explores a different idea, from algorithmic simulations to practical tools.
+								Devy&apos;s Workshop is a personal server dashboard and creative coding space —
+								a home for interactive projects, system monitoring, and experiments in
+								web development. Each project explores a different idea, from gaming
+								integrations to algorithmic simulations to practical tools.
 							</p>
 						</FadeIn>
 

@@ -17,8 +17,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-	title: "Workshop — Creative Code Portfolio",
-	description: "A collection of interactive projects and experiments in web development.",
+	title: "Devy's Workshop",
+	description: "A personal server dashboard and creative coding workshop.",
 };
 
 export default function RootLayout({
