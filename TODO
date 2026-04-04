@@ -1,0 +1,19 @@
+# Data Vis
+
+We can calculate like, infinite generations of any given grid.  So, if we start at a gridsize of 1x1, can we simulate every position on every given starting orientation of every possible grid dimensions.  Can we also calculate if a given starting orientation will ever settle?  Sample for X generations and a loop is defined as....? 
+
+
+Detecting the loop seems like the non-trivial part of this plan.  Loops can have a period of >400, which would mean storing thousands? of grid states, and checking if they ever equal? Are there aperiodic loops? Probably not, since the state could be considered a starting orientation, so it should always resolve to the same if it is indeed a loop.
+
+But, if we can get these problems solved, we can sim every starting orientation to see if it eventually ends in a loop.  Plot the 3d (heatmap?) yes/no % per x/y grid, see if something neat pops out.
+
+## want to know:
+
+how many generations we can theoretically store
+how quickly we can sim generations
+best way to store states
+
+## possible speedup
+store known loops with their smallest possible grid size, then set that as a loop for every x, y for the rest of the search.  check map before calculating anything.
+
+## nxt prompt

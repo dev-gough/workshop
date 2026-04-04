@@ -1,0 +1,175 @@
+@import "tailwindcss";
+
+@theme {
+  /* Base surfaces */
+  --color-background: hsl(0 0% 99%);
+  --color-foreground: hsl(224 71% 4%);
+
+  /* Card and popover */
+  --color-card: hsl(0 0% 100%);
+  --color-card-foreground: hsl(224 71% 4%);
+  --color-popover: hsl(0 0% 100%);
+  --color-popover-foreground: hsl(224 71% 4%);
+
+  /* Primary: deep indigo */
+  --color-primary: hsl(225 65% 40%);
+  --color-primary-foreground: hsl(0 0% 100%);
+
+  /* Secondary: cool gray */
+  --color-secondary: hsl(220 14% 96%);
+  --color-secondary-foreground: hsl(224 71% 4%);
+
+  /* Muted: subtle gray */
+  --color-muted: hsl(220 14% 96%);
+  --color-muted-foreground: hsl(220 9% 46%);
+
+  /* Accent: teal */
+  --color-accent: hsl(172 66% 50%);
+  --color-accent-foreground: hsl(224 71% 4%);
+
+  /* Destructive */
+  --color-destructive: hsl(0 84% 60%);
+  --color-destructive-foreground: hsl(0 0% 100%);
+
+  /* Borders and inputs */
+  --color-border: hsl(220 13% 91%);
+  --color-input: hsl(220 13% 91%);
+  --color-ring: hsl(225 65% 40%);
+
+  /* Radius */
+  --radius: 0.625rem;
+
+  /* Chart / visualization colors */
+  --color-chart-1: hsl(225 65% 40%);
+  --color-chart-2: hsl(172 66% 50%);
+  --color-chart-3: hsl(350 80% 60%);
+  --color-chart-4: hsl(45 93% 58%);
+  --color-chart-5: hsl(280 65% 60%);
+}
+
+.dark {
+  --color-background: hsl(224 40% 8%);
+  --color-foreground: hsl(210 20% 98%);
+
+  --color-card: hsl(224 35% 11%);
+  --color-card-foreground: hsl(210 20% 98%);
+  --color-popover: hsl(224 35% 11%);
+  --color-popover-foreground: hsl(210 20% 98%);
+
+  --color-primary: hsl(225 70% 65%);
+  --color-primary-foreground: hsl(224 40% 8%);
+
+  --color-secondary: hsl(224 30% 16%);
+  --color-secondary-foreground: hsl(210 20% 98%);
+
+  --color-muted: hsl(224 30% 16%);
+  --color-muted-foreground: hsl(218 15% 60%);
+
+  --color-accent: hsl(172 66% 40%);
+  --color-accent-foreground: hsl(210 20% 98%);
+
+  --color-destructive: hsl(0 62% 40%);
+  --color-destructive-foreground: hsl(210 20% 98%);
+
+  --color-border: hsl(224 25% 18%);
+  --color-input: hsl(224 25% 18%);
+  --color-ring: hsl(225 70% 65%);
+
+  --color-chart-1: hsl(225 70% 65%);
+  --color-chart-2: hsl(172 66% 40%);
+  --color-chart-3: hsl(350 80% 65%);
+  --color-chart-4: hsl(45 93% 58%);
+  --color-chart-5: hsl(280 65% 65%);
+}
+
+/* LoL Challenge Tracker theme */
+.lol-theme {
+  --lol-bg-deep: #010A13;
+  --lol-bg-surface: #0A1428;
+  --lol-bg-elevated: #1E2328;
+  --lol-border: #1E2328;
+  --lol-border-gold: #785A28;
+  --lol-text-primary: #F0E6D2;
+  --lol-text-secondary: #A09B8C;
+  --lol-text-muted: #5B5A56;
+  --lol-text-dim: #3C3C41;
+  --lol-gold: #C8AA6E;
+  --lol-gold-dark: #785A28;
+  --lol-blue: #0AC8B9;
+  --lol-red: #E84057;
+  --lol-gradient-start: #0A1428;
+  --lol-gradient-end: #010A13;
+}
+
+:root .lol-theme {
+  --lol-bg-deep: #F0EDE6;
+  --lol-bg-surface: #FFFFFF;
+  --lol-bg-elevated: #E8E4DC;
+  --lol-border: #D4CEBC;
+  --lol-border-gold: #C8AA6E;
+  --lol-text-primary: #1E2328;
+  --lol-text-secondary: #5B5A56;
+  --lol-text-muted: #8C8C84;
+  --lol-text-dim: #B0ACA0;
+  --lol-gold: #9A7B3E;
+  --lol-gold-dark: #6B5525;
+  --lol-blue: #068B82;
+  --lol-red: #C42D40;
+  --lol-gradient-start: #FFFFFF;
+  --lol-gradient-end: #F0EDE6;
+}
+
+.dark .lol-theme {
+  --lol-bg-deep: #010A13;
+  --lol-bg-surface: #0A1428;
+  --lol-bg-elevated: #1E2328;
+  --lol-border: #1E2328;
+  --lol-border-gold: #785A28;
+  --lol-text-primary: #F0E6D2;
+  --lol-text-secondary: #A09B8C;
+  --lol-text-muted: #5B5A56;
+  --lol-text-dim: #3C3C41;
+  --lol-gold: #C8AA6E;
+  --lol-gold-dark: #785A28;
+  --lol-blue: #0AC8B9;
+  --lol-red: #E84057;
+  --lol-gradient-start: #0A1428;
+  --lol-gradient-end: #010A13;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-muted;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-muted-foreground/30 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/50;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
