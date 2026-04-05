@@ -4,6 +4,8 @@ import "./globals.css";
 import Header from "../components/Header";
 import ThemeProvider from "../components/ThemeProvider";
 import ThemeScript from "../components/ThemeScript";
+import AudioProvider from "../components/AudioProvider";
+import FloatingPlayer from "../components/FloatingPlayer";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 const geistSans = Geist({
@@ -36,10 +38,13 @@ export default function RootLayout({
 			>
 				<ThemeProvider>
 					<TooltipProvider>
-						<Header />
-						<main>
-							{children}
-						</main>
+						<AudioProvider>
+							<Header />
+							<main>
+								{children}
+							</main>
+							<FloatingPlayer />
+						</AudioProvider>
 					</TooltipProvider>
 				</ThemeProvider>
 			</body>

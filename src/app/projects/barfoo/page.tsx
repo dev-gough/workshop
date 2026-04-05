@@ -7,13 +7,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { motion, AnimatePresence } from 'motion/react';
-
-interface Album {
-  name: string;
-  artist: string;
-  coverImage?: string;
-  songs: string[];
-}
+import { useAudio, type Album } from '@/components/AudioProvider';
+import { cleanSongDisplay, extractTrackNumber, sortedTrackIndices } from '@/lib/songUtils';
 
 interface Playlist {
   id: number;
@@ -281,7 +276,7 @@ function StatsView({ stats }: { stats: Stats }) {
                   <div className="absolute inset-y-0 left-0 rounded-md bg-primary/10 group-hover:bg-primary/15 transition-colors"
                     style={{ width: `${(s.play_count / maxSongPlays) * 100}%` }} />
                   <div className="relative flex items-center gap-2 px-2 py-1.5">
-                    <span className="text-sm truncate flex-1">{s.song}</span>
+                    <span className="text-sm truncate flex-1">{cleanSongDisplay(s.song, s.artist, s.album)}</span>
                     <span className="text-xs text-muted-foreground truncate max-w-28">{s.artist}</span>
                     <span className="text-xs font-mono text-muted-foreground tabular-nums">{s.play_count}</span>
                   </div>
@@ -345,7 +340,7 @@ function StatsView({ stats }: { stats: Stats }) {
         <div className="space-y-1">
           {stats.recentPlays.map((p, i) => (
             <div key={i} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted/40 transition-colors">
-              <span className="text-sm truncate flex-1">{p.song}</span>
+              <span className="text-sm truncate flex-1">{cleanSongDisplay(p.song, p.artist, p.album)}</span>
               <span className="text-xs text-muted-foreground truncate max-w-28">{p.artist}</span>
               <span className="text-xs text-muted-foreground">{p.username}</span>
               <span className="text-xs text-muted-foreground tabular-nums">
@@ -359,90 +354,50 @@ function StatsView({ stats }: { stats: Stats }) {
   );
 }
 
-function getCookie(name: string): string | null {
-  if (typeof document === 'undefined') return null;
-  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
-function setCookie(name: string, value: string) {
-  document.cookie = `${name}=${encodeURIComponent(value)};path=/;max-age=31536000`;
-}
-
 export default function BarFooPage() {
-  const [albums, setAlbums] = useState<Album[]>([]);
-  const [loading, setLoading] = useState(true);
+  // ── Audio context (global, persists across pages) ──
+  const {
+    albums, albumsLoading: loading,
+    currentTrack, isPlaying, progress, duration, volume, muted,
+    queue, queueIndex, shuffleMode,
+    username, setUsername,
+    playTrack: ctxPlayTrack, playSong, playAlbum, playPlaylist: ctxPlayPlaylist,
+    playFromQueue, playNext, playPrev, togglePlayPause, shuffleAll: ctxShuffleAll,
+    seek, setVolumeValue, changeVolume, handleVolumeWheel, toggleMute,
+    setQueue, setQueueIndex, setShuffleMode,
+    formatTime, currentAlbum, currentSongName,
+  } = useAudio();
+
+  // ── Local UI state ──
   const [selectedAlbum, setSelectedAlbum] = useState<number | null>(null);
-  const [currentTrack, setCurrentTrack] = useState<{ albumIndex: number; songIndex: number } | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(() => {
-    const saved = getCookie('barfoo_volume');
-    return saved ? parseFloat(saved) : 1;
-  });
-  const [muted, setMuted] = useState(false);
-  const [username, setUsername] = useState<string | null>(() => getCookie('barfoo_user'));
   const [nameInput, setNameInput] = useState('');
   const [showStats, setShowStats] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
-  const [queue, setQueue] = useState<{ albumIndex: number; songIndex: number }[]>([]);
-  const [queueIndex, setQueueIndex] = useState(-1);
-  const [shuffleMode, setShuffleMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const volumeRef = useRef(volume);
-  const mutedRef = useRef(muted);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [showPlaylists, setShowPlaylists] = useState(false);
   const [activePlaylist, setActivePlaylist] = useState<PlaylistDetail | null>(null);
   const [newPlaylistOpen, setNewPlaylistOpen] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState('');
   const [pendingSong, setPendingSong] = useState<{ artist: string; album: string; song: string } | null>(null);
-  useEffect(() => { volumeRef.current = volume; }, [volume]);
-  useEffect(() => { mutedRef.current = muted; }, [muted]);
-  const audioRef = useRef<HTMLAudioElement>(null);
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Sync selectedAlbum when track changes
+  useEffect(() => {
+    if (currentTrack) setSelectedAlbum(currentTrack.albumIndex);
+  }, [currentTrack]);
+
+  const playPlaylistLocal = (songs: PlaylistDetail['songs'], shuffle = false) => {
+    setSidebarOpen(true);
+    ctxPlayPlaylist(songs, shuffle);
+  };
+
+  const shuffleAll = () => {
+    setSidebarOpen(true);
+    ctxShuffleAll();
+  };
 
   // ── Data fetching ──
-
-  useEffect(() => {
-    const fetchAlbums = async () => {
-      try {
-        const response = await fetch('/api/music');
-        const data = await response.json();
-        setAlbums(data);
-      } catch (error) {
-        console.error('Error fetching albums:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchAlbums();
-  }, []);
-
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    const onTimeUpdate = () => setProgress(audio.currentTime);
-    const onDurationChange = () => setDuration(audio.duration || 0);
-    const onEnded = () => playNext();
-    const onPlay = () => setIsPlaying(true);
-    const onPause = () => setIsPlaying(false);
-
-    audio.addEventListener('timeupdate', onTimeUpdate);
-    audio.addEventListener('durationchange', onDurationChange);
-    audio.addEventListener('ended', onEnded);
-    audio.addEventListener('play', onPlay);
-    audio.addEventListener('pause', onPause);
-
-    return () => {
-      audio.removeEventListener('timeupdate', onTimeUpdate);
-      audio.removeEventListener('durationchange', onDurationChange);
-      audio.removeEventListener('ended', onEnded);
-      audio.removeEventListener('play', onPlay);
-      audio.removeEventListener('pause', onPause);
-    };
-  }, [currentTrack, albums]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -515,159 +470,9 @@ export default function BarFooPage() {
     setActivePlaylist(await res.json());
   };
 
-  const playPlaylist = (songs: PlaylistDetail['songs'], shuffle = false) => {
-    const resolved = songs.map(s => {
-      const albumIndex = albums.findIndex(a => a.artist === s.artist && a.name === s.album);
-      const songIndex = albumIndex >= 0 ? albums[albumIndex].songs.indexOf(s.song) : -1;
-      return { albumIndex, songIndex };
-    }).filter(t => t.albumIndex >= 0 && t.songIndex >= 0);
-
-    if (shuffle) {
-      for (let i = resolved.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [resolved[i], resolved[j]] = [resolved[j], resolved[i]];
-      }
-    }
-
-    setQueue(resolved);
-    setQueueIndex(0);
-    setShuffleMode(shuffle);
-    setSidebarOpen(true);
-    if (resolved.length > 0) playTrack(resolved[0].albumIndex, resolved[0].songIndex);
-  };
-
-  // ── Playback ──
-
-  const playTrack = (albumIndex: number, songIndex: number) => {
-    const album = albums[albumIndex];
-    const song = album.songs[songIndex];
-    const url = `/api/music/stream?artist=${encodeURIComponent(album.artist)}&album=${encodeURIComponent(album.name)}&song=${encodeURIComponent(song)}`;
-
-    setCurrentTrack({ albumIndex, songIndex });
-    setSelectedAlbum(albumIndex);
-
-    const audio = audioRef.current;
-    if (audio) {
-      audio.src = url;
-      audio.volume = mutedRef.current ? 0 : volumeRef.current;
-      audio.play();
-    }
-
-    if (username) {
-      fetch('/api/music/play', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ artist: album.artist, album: album.name, song, username }),
-      }).catch(() => {});
-    }
-  };
-
-  const playSong = (albumIndex: number, songIndex: number) => {
-    const album = albums[albumIndex];
-    const newQueue = album.songs.map((_, i) => ({ albumIndex, songIndex: i }));
-    setQueue(newQueue);
-    setQueueIndex(songIndex);
-    setShuffleMode(false);
-    playTrack(albumIndex, songIndex);
-  };
-
-  const playFromQueue = (idx: number) => {
-    if (idx < 0 || idx >= queue.length) return;
-    setQueueIndex(idx);
-    const track = queue[idx];
-    playTrack(track.albumIndex, track.songIndex);
-  };
-
-  const shuffleAll = () => {
-    const allTracks: { albumIndex: number; songIndex: number }[] = [];
-    albums.forEach((album, ai) => {
-      album.songs.forEach((_, si) => {
-        allTracks.push({ albumIndex: ai, songIndex: si });
-      });
-    });
-    for (let i = allTracks.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [allTracks[i], allTracks[j]] = [allTracks[j], allTracks[i]];
-    }
-    setQueue(allTracks);
-    setQueueIndex(0);
-    setShuffleMode(true);
-    setSidebarOpen(true);
-    if (allTracks.length > 0) {
-      playTrack(allTracks[0].albumIndex, allTracks[0].songIndex);
-    }
-  };
-
-  const playNext = () => {
-    if (queue.length > 0 && queueIndex < queue.length - 1) {
-      playFromQueue(queueIndex + 1);
-    } else {
-      setIsPlaying(false);
-    }
-  };
-
-  const playPrev = () => {
-    if (queue.length > 0 && queueIndex > 0) {
-      playFromQueue(queueIndex - 1);
-    }
-  };
-
-  const togglePlayPause = () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (audio.paused) audio.play(); else audio.pause();
-  };
-
-  const seek = (e: React.MouseEvent<HTMLDivElement>) => {
-    const audio = audioRef.current;
-    if (!audio || !duration) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const ratio = (e.clientX - rect.left) / rect.width;
-    audio.currentTime = ratio * duration;
-  };
-
-  const setVolumeValue = (v: number) => {
-    const clamped = Math.max(0, Math.min(1, v));
-    setVolume(clamped);
-    setMuted(clamped === 0);
-    if (audioRef.current) audioRef.current.volume = clamped;
-    setCookie('barfoo_volume', String(clamped));
-  };
-
-  const changeVolume = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setVolumeValue(parseFloat(e.target.value));
-  };
-
-  const handleVolumeWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const delta = e.deltaY > 0 ? -0.05 : 0.05;
-    setVolumeValue((muted ? 0 : volume) + delta);
-  };
-
-  const toggleMute = () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (muted) {
-      audio.volume = volume || 1;
-      setMuted(false);
-      if (volume === 0) setVolume(1);
-    } else {
-      audio.volume = 0;
-      setMuted(true);
-    }
-  };
-
-  const formatTime = (s: number) => {
-    if (!s || isNaN(s)) return '0:00';
-    const mins = Math.floor(s / 60);
-    const secs = Math.floor(s % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const currentAlbum = currentTrack ? albums[currentTrack.albumIndex] : null;
-  const currentSongName = currentTrack ? albums[currentTrack.albumIndex]?.songs[currentTrack.songIndex] : null;
-  const displaySongName = (s: string) => s.includes('/') ? s.split('/').pop()! : s;
+  const cleanSongName = cleanSongDisplay;
+  const displaySongName = cleanSongDisplay;
+  const sortedIndices = sortedTrackIndices;
   const sel = selectedAlbum !== null ? albums[selectedAlbum] : null;
 
   const VolumeIcon = muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
@@ -705,6 +510,7 @@ export default function BarFooPage() {
 
     const SongRow = ({ song, globalIdx, num }: { song: string; globalIdx: number; num: number }) => {
       const isCurrent = currentTrack?.albumIndex === albumIdx && currentTrack?.songIndex === globalIdx;
+      const cleaned = cleanSongName(song, alb.artist, alb.name);
       return (
         <SongContextMenu artist={alb.artist} album={alb.name} song={songs[globalIdx]}>
           <div
@@ -716,7 +522,7 @@ export default function BarFooPage() {
             onClick={() => playSong(albumIdx, globalIdx)}
           >
             <span className={`text-xs w-5 text-right tabular-nums ${isCurrent ? 'text-primary' : 'text-muted-foreground'}`}>{num}</span>
-            <span className="text-sm flex-1 truncate">{song}</span>
+            <span className="text-sm flex-1 truncate">{cleaned}</span>
             {isCurrent && isPlaying ? (
               <div className="flex items-center gap-0.5">
                 <div className="w-0.5 h-3 bg-primary rounded-full animate-pulse" />
@@ -740,18 +546,22 @@ export default function BarFooPage() {
         if (!groups[disc]) groups[disc] = [];
         groups[disc].push({ song: name, globalIdx: idx });
       });
-      return Object.entries(groups).map(([disc, tracks]) => (
-        <div key={disc} className="mb-4 last:mb-0">
-          <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1.5 px-3">{disc}</h4>
-          {tracks.map(({ song, globalIdx }, idx) => (
-            <SongRow key={globalIdx} song={song} globalIdx={globalIdx} num={idx + 1} />
-          ))}
-        </div>
-      ));
+      return Object.entries(groups).map(([disc, tracks]) => {
+        const sorted = [...tracks].sort((a, b) => extractTrackNumber(a.song) - extractTrackNumber(b.song) || a.song.localeCompare(b.song));
+        return (
+          <div key={disc} className="mb-4 last:mb-0">
+            <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1.5 px-3">{disc}</h4>
+            {sorted.map(({ song, globalIdx }, idx) => (
+              <SongRow key={globalIdx} song={song} globalIdx={globalIdx} num={idx + 1} />
+            ))}
+          </div>
+        );
+      });
     }
 
-    return songs.map((song, idx) => (
-      <SongRow key={idx} song={song} globalIdx={idx} num={idx + 1} />
+    const sorted = sortedIndices(songs);
+    return sorted.map((origIdx, displayIdx) => (
+      <SongRow key={origIdx} song={songs[origIdx]} globalIdx={origIdx} num={displayIdx + 1} />
     ));
   };
 
@@ -761,7 +571,7 @@ export default function BarFooPage() {
 
   return (
     <>
-      <audio ref={audioRef} preload="auto" />
+      {/* Audio element lives in AudioProvider */}
 
       {/* Full-viewport app shell — header is already 56px (h-14) */}
       <div className="flex flex-col" style={{ height: 'calc(100vh - 56px)' }}>
@@ -876,10 +686,10 @@ export default function BarFooPage() {
                           <ChevronLeft className="h-4 w-4 mr-1" />Back
                         </Button>
                         <h2 className="text-lg font-semibold flex-1 truncate">{activePlaylist.name}</h2>
-                        <Button size="sm" onClick={() => playPlaylist(activePlaylist.songs)} className="h-8 text-xs">
+                        <Button size="sm" onClick={() => playPlaylistLocal(activePlaylist.songs)} className="h-8 text-xs">
                           <Play className="h-3.5 w-3.5 mr-1" />Play
                         </Button>
-                        <Button size="sm" variant="outline" onClick={() => playPlaylist(activePlaylist.songs, true)} className="h-8 text-xs">
+                        <Button size="sm" variant="outline" onClick={() => playPlaylistLocal(activePlaylist.songs, true)} className="h-8 text-xs">
                           <Shuffle className="h-3.5 w-3.5 mr-1" />Shuffle
                         </Button>
                       </div>
@@ -894,7 +704,7 @@ export default function BarFooPage() {
                             >
                               <span className="text-xs w-5 text-right text-muted-foreground tabular-nums">{idx + 1}</span>
                               <div className="min-w-0 flex-1">
-                                <p className="text-sm truncate">{s.song.includes('/') ? s.song.split('/').pop() : s.song}</p>
+                                <p className="text-sm truncate">{cleanSongName(s.song, s.artist, s.album)}</p>
                                 <p className="text-xs text-muted-foreground truncate">{s.artist} — {s.album}</p>
                               </div>
                               <Button
@@ -930,7 +740,14 @@ export default function BarFooPage() {
                           className={`relative aspect-square rounded-xl overflow-hidden cursor-pointer shadow-md group ${
                             isSelected ? 'ring-2 ring-primary ring-offset-2 ring-offset-background' : ''
                           }`}
-                          onClick={() => setSelectedAlbum(isSelected ? null : index)}
+                          onClick={() => {
+                            if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
+                            clickTimerRef.current = setTimeout(() => setSelectedAlbum(isSelected ? null : index), 250);
+                          }}
+                          onDoubleClick={() => {
+                            if (clickTimerRef.current) { clearTimeout(clickTimerRef.current); clickTimerRef.current = null; }
+                            playAlbum(index);
+                          }}
                         >
                           {album.coverImage ? (
                             <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url(${album.coverImage})` }} />
@@ -1057,7 +874,7 @@ export default function BarFooPage() {
                                       >
                                         <span className="text-[10px] w-5 text-right tabular-nums text-muted-foreground">{idx + 1}</span>
                                         <div className="min-w-0 flex-1">
-                                          <p className="text-xs truncate font-medium">{displaySongName(song)}</p>
+                                          <p className="text-xs truncate font-medium">{displaySongName(song, alb.artist, alb.name)}</p>
                                           <p className={`text-[10px] truncate ${isCurrent ? 'text-primary/60' : 'text-muted-foreground'}`}>
                                             {alb.artist}
                                           </p>
@@ -1126,7 +943,7 @@ export default function BarFooPage() {
                     </div>
                   )}
                   <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{currentSongName ? displaySongName(currentSongName) : ''}</p>
+                    <p className="text-sm font-medium truncate">{currentSongName ? displaySongName(currentSongName, currentAlbum?.artist, currentAlbum?.name) : ''}</p>
                     <p className="text-xs text-muted-foreground truncate">{currentAlbum?.artist}</p>
                   </div>
                 </div>
@@ -1222,7 +1039,6 @@ export default function BarFooPage() {
               const name = nameInput.trim();
               if (name) {
                 setUsername(name);
-                setCookie('barfoo_user', name);
               }
             }}>
               <input
