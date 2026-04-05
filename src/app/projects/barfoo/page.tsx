@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Volume1, BarChart3, Music, Shuffle, ListMusic, X, Plus, Trash2, ListPlus, Disc3, ChevronLeft } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Volume1, BarChart3, Music, Shuffle, ListMusic, X, Plus, Trash2, ListPlus, Disc3, ChevronLeft, Flame, Calendar, Trophy, Disc } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -29,9 +29,334 @@ interface PlaylistDetail {
 
 interface Stats {
   topSongs: { artist: string; album: string; song: string; play_count: number }[];
-  topAlbums: { artist: string; album: string; play_count: number }[];
+  topAlbums: { artist: string; album: string; play_count: number; thumbnail?: string }[];
+  topArtists: { artist: string; play_count: number }[];
   topListeners: { username: string; play_count: number }[];
   recentPlays: { artist: string; album: string; song: string; username: string; played_at: string }[];
+  summary: { total_plays: number; unique_artists: number; unique_albums: number; unique_songs: number; active_listeners: number };
+  dailyPlays: { date: string; count: number }[];
+  hourlyHeatmap: { dow: number; hour: number; count: number }[];
+  streaks: { current: number; longest: number };
+  mostActiveDay: { date: string; count: number } | null;
+  firstPlay: string | null;
+}
+
+// ── Stats Charts & View ──
+
+function PlayActivityChart({ data, className }: { data: { date: string; count: number }[]; className?: string }) {
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [range, setRange] = useState<'30' | '90' | 'all'>('30');
+
+  const filtered = useMemo(() => {
+    if (range === 'all') return data;
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - (range === '30' ? 30 : 90));
+    return data.filter(d => new Date(d.date) >= cutoff);
+  }, [data, range]);
+
+  if (filtered.length === 0) return <div className="text-sm text-muted-foreground text-center py-8">No play data yet</div>;
+
+  const maxCount = Math.max(...filtered.map(d => d.count), 1);
+  const W = 600, H = 160, PX = 40, PY = 32, PB = 20;
+  const plotW = W - PX - 10, plotH = H - PY - PB;
+
+  const xScale = (i: number) => PX + (i / Math.max(filtered.length - 1, 1)) * plotW;
+  const yScale = (v: number) => PY + plotH - (v / maxCount) * plotH;
+
+  const linePath = filtered.map((d, i) => `${i === 0 ? 'M' : 'L'}${xScale(i).toFixed(1)},${yScale(d.count).toFixed(1)}`).join(' ');
+  const areaPath = `${linePath} L${xScale(filtered.length - 1).toFixed(1)},${yScale(0).toFixed(1)} L${xScale(0).toFixed(1)},${yScale(0).toFixed(1)} Z`;
+
+  const tickCount = Math.min(5, filtered.length);
+  const ticks = Array.from({ length: tickCount }, (_, i) => Math.round(i * (filtered.length - 1) / (tickCount - 1)));
+
+  return (
+    <div className={`rounded-xl border border-border/60 bg-card/40 p-5 ${className ?? ''}`}>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">Listening Activity</h3>
+        <div className="flex gap-1">
+          {(['30', '90', 'all'] as const).map(r => (
+            <button key={r} onClick={() => setRange(r)}
+              className={`px-2 py-0.5 text-xs rounded-md transition-colors ${range === r ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted/40'}`}
+            >{r === 'all' ? 'All' : `${r}D`}</button>
+          ))}
+        </div>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 180 }}
+        onMouseMove={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          const x = (e.clientX - rect.left) / rect.width * W;
+          if (x < PX || x > PX + plotW) { setHoverIdx(null); return; }
+          const idx = Math.round(((x - PX) / plotW) * (filtered.length - 1));
+          setHoverIdx(Math.max(0, Math.min(filtered.length - 1, idx)));
+        }}
+        onMouseLeave={() => setHoverIdx(null)}
+      >
+        {/* Grid lines */}
+        {[0, 0.25, 0.5, 0.75, 1].map(f => (
+          <g key={f}>
+            <line x1={PX} x2={W - 10} y1={yScale(f * maxCount)} y2={yScale(f * maxCount)} stroke="currentColor" strokeOpacity={0.08} />
+            <text x={PX - 4} y={yScale(f * maxCount) + 3} textAnchor="end" fontSize={9} fill="currentColor" fillOpacity={0.4} fontFamily="monospace">
+              {Math.round(f * maxCount)}
+            </text>
+          </g>
+        ))}
+        {/* Time labels */}
+        {ticks.map(i => (
+          <text key={i} x={xScale(i)} y={H - 2} textAnchor="middle" fontSize={9} fill="currentColor" fillOpacity={0.4} fontFamily="monospace">
+            {new Date(filtered[i].date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+          </text>
+        ))}
+        {/* Area + line */}
+        <path d={areaPath} fill="currentColor" fillOpacity={0.08} />
+        <path d={linePath} fill="none" stroke="currentColor" strokeWidth={1.5} strokeOpacity={0.6} />
+        {/* Hover */}
+        {hoverIdx !== null && filtered[hoverIdx] && (() => {
+          const cx = xScale(hoverIdx);
+          const cy = yScale(filtered[hoverIdx].count);
+          const tooltipY = cy < PY + 30 ? cy + 8 : cy - 28;
+          const textY = cy < PY + 30 ? cy + 22 : cy - 14;
+          return (
+            <g>
+              <line x1={cx} x2={cx} y1={PY} y2={yScale(0)} stroke="currentColor" strokeOpacity={0.2} strokeDasharray="3,3" />
+              <circle cx={cx} cy={cy} r={3} fill="currentColor" />
+              <rect x={cx - 40} y={tooltipY} width={80} height={22} rx={4} fill="currentColor" fillOpacity={0.1} />
+              <text x={cx} y={textY} textAnchor="middle" fontSize={10} fill="currentColor" fontFamily="monospace">
+                {filtered[hoverIdx].count} plays
+              </text>
+            </g>
+          );
+        })()}
+      </svg>
+    </div>
+  );
+}
+
+function ListeningHeatmap({ data }: { data: { dow: number; hour: number; count: number }[] }) {
+  const grid = useMemo(() => {
+    const g: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0));
+    data.forEach(d => { g[d.dow][d.hour] = d.count; });
+    return g;
+  }, [data]);
+
+  const maxCount = Math.max(...data.map(d => d.count), 1);
+  // Remap DOW: postgres DOW is 0=Sun, we want Mon-Sun order
+  const dayOrder = [1, 2, 3, 4, 5, 6, 0]; // Mon=1, Tue=2, ..., Sun=0
+  const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+  return (
+    <div className="rounded-xl border border-border/60 bg-card/40 p-5">
+      <h3 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground mb-3">When You Listen</h3>
+      <div className="overflow-x-auto">
+        <div className="min-w-[400px]">
+          {/* Hour labels */}
+          <div className="flex ml-9 mb-1">
+            {Array.from({ length: 24 }, (_, h) => (
+              <div key={h} className="flex-1 text-center text-[9px] text-muted-foreground tabular-nums">
+                {h % 3 === 0 ? `${h}` : ''}
+              </div>
+            ))}
+          </div>
+          {/* Grid rows */}
+          {dayOrder.map((dow, rowIdx) => (
+            <div key={dow} className="flex items-center gap-1 mb-0.5">
+              <span className="text-[10px] text-muted-foreground w-8 text-right">{dayLabels[rowIdx]}</span>
+              <div className="flex flex-1 gap-px">
+                {Array.from({ length: 24 }, (_, h) => {
+                  const count = grid[dow][h];
+                  const intensity = count / maxCount;
+                  return (
+                    <div
+                      key={h}
+                      className={`flex-1 aspect-square rounded-[2px] transition-colors ${count === 0 ? 'bg-muted/20' : ''}`}
+                      style={count > 0 ? { backgroundColor: `color-mix(in srgb, var(--color-primary) ${Math.round(15 + intensity * 85)}%, transparent)` } : undefined}
+                      title={`${dayLabels[rowIdx]} ${h}:00 — ${count} play${count !== 1 ? 's' : ''}`}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatsView({ stats }: { stats: Stats }) {
+  const summaryCards = [
+    { label: 'Total Plays', value: stats.summary.total_plays, icon: Play },
+    { label: 'Artists', value: stats.summary.unique_artists, icon: Music },
+    { label: 'Albums', value: stats.summary.unique_albums, icon: Disc },
+    { label: 'Songs', value: stats.summary.unique_songs, icon: Disc3 },
+    { label: 'Listeners', value: stats.summary.active_listeners, icon: BarChart3 },
+  ];
+
+  const maxArtistPlays = stats.topArtists.length > 0 ? stats.topArtists[0].play_count : 1;
+  const maxSongPlays = stats.topSongs.length > 0 ? stats.topSongs[0].play_count : 1;
+  const maxAlbumPlays = stats.topAlbums.length > 0 ? stats.topAlbums[0].play_count : 1;
+  const maxListenerPlays = stats.topListeners.length > 0 ? stats.topListeners[0].play_count : 1;
+
+  return (
+    <div className="space-y-4">
+      {/* Summary Row */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+        {summaryCards.map(c => (
+          <div key={c.label} className="rounded-xl border border-border/60 bg-card/40 p-4 flex flex-col items-center gap-1">
+            <c.icon className="h-4 w-4 text-muted-foreground" />
+            <span className="text-2xl font-bold tabular-nums">{c.value.toLocaleString()}</span>
+            <span className="text-[10px] uppercase tracking-widest text-muted-foreground">{c.label}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Activity Chart */}
+      <PlayActivityChart data={stats.dailyPlays} />
+
+      {/* Heatmap + Streaks */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <ListeningHeatmap data={stats.hourlyHeatmap} />
+
+        {/* Streak & Fun Stats */}
+        <div className="rounded-xl border border-border/60 bg-card/40 p-5 flex flex-col gap-4">
+          <h3 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">Highlights</h3>
+          <div className="grid grid-cols-2 gap-3 flex-1">
+            <div className="rounded-lg bg-muted/20 p-3 flex flex-col items-center justify-center text-center">
+              <Flame className="h-4 w-4 text-orange-400 mb-1" />
+              <span className="text-xl font-bold tabular-nums">{stats.streaks.current}</span>
+              <span className="text-[10px] uppercase tracking-widest text-muted-foreground">Day Streak</span>
+            </div>
+            <div className="rounded-lg bg-muted/20 p-3 flex flex-col items-center justify-center text-center">
+              <Trophy className="h-4 w-4 text-yellow-400 mb-1" />
+              <span className="text-xl font-bold tabular-nums">{stats.streaks.longest}</span>
+              <span className="text-[10px] uppercase tracking-widest text-muted-foreground">Best Streak</span>
+            </div>
+            <div className="rounded-lg bg-muted/20 p-3 flex flex-col items-center justify-center text-center">
+              <BarChart3 className="h-4 w-4 text-blue-400 mb-1" />
+              <span className="text-xl font-bold tabular-nums">{stats.mostActiveDay?.count ?? 0}</span>
+              <span className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                {stats.mostActiveDay ? new Date(stats.mostActiveDay.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'N/A'}
+              </span>
+            </div>
+            <div className="rounded-lg bg-muted/20 p-3 flex flex-col items-center justify-center text-center">
+              <Calendar className="h-4 w-4 text-green-400 mb-1" />
+              <span className="text-xs font-semibold">
+                {stats.firstPlay ? new Date(stats.firstPlay).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : 'N/A'}
+              </span>
+              <span className="text-[10px] uppercase tracking-widest text-muted-foreground">First Play</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Top Artists + Top Songs */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Top Artists - Horizontal Bar Chart */}
+        <div className="rounded-xl border border-border/60 bg-card/40 p-5">
+          <h3 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground mb-3">Top Artists</h3>
+          <div className="space-y-1.5">
+            {stats.topArtists.map((a, i) => (
+              <div key={i} className="flex items-center gap-2 group">
+                <span className="text-xs w-5 text-right text-muted-foreground tabular-nums">{i + 1}</span>
+                <div className="flex-1 relative">
+                  <div className="absolute inset-y-0 left-0 rounded-md bg-primary/10 group-hover:bg-primary/15 transition-colors"
+                    style={{ width: `${(a.play_count / maxArtistPlays) * 100}%` }} />
+                  <div className="relative flex items-center justify-between px-2 py-1.5">
+                    <span className="text-sm truncate">{a.artist}</span>
+                    <span className="text-xs font-mono text-muted-foreground tabular-nums ml-2">{a.play_count}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Top Songs */}
+        <div className="rounded-xl border border-border/60 bg-card/40 p-5">
+          <h3 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground mb-3">Top Songs</h3>
+          <div className="space-y-1">
+            {stats.topSongs.map((s, i) => (
+              <div key={i} className="flex items-center gap-2 group">
+                <span className="text-xs w-5 text-right text-muted-foreground tabular-nums">{i + 1}</span>
+                <div className="flex-1 relative min-w-0">
+                  <div className="absolute inset-y-0 left-0 rounded-md bg-primary/10 group-hover:bg-primary/15 transition-colors"
+                    style={{ width: `${(s.play_count / maxSongPlays) * 100}%` }} />
+                  <div className="relative flex items-center gap-2 px-2 py-1.5">
+                    <span className="text-sm truncate flex-1">{s.song}</span>
+                    <span className="text-xs text-muted-foreground truncate max-w-28">{s.artist}</span>
+                    <span className="text-xs font-mono text-muted-foreground tabular-nums">{s.play_count}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Top Albums + Top Listeners */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Top Albums with thumbnails */}
+        <div className="rounded-xl border border-border/60 bg-card/40 p-5">
+          <h3 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground mb-3">Top Albums</h3>
+          <div className="space-y-1">
+            {stats.topAlbums.map((a, i) => (
+              <div key={i} className="flex items-center gap-2 group">
+                <span className="text-xs w-5 text-right text-muted-foreground tabular-nums">{i + 1}</span>
+                {a.thumbnail && (
+                  <img src={a.thumbnail} alt="" className="h-7 w-7 rounded object-cover flex-shrink-0" />
+                )}
+                <div className="flex-1 relative min-w-0">
+                  <div className="absolute inset-y-0 left-0 rounded-md bg-primary/10 group-hover:bg-primary/15 transition-colors"
+                    style={{ width: `${(a.play_count / maxAlbumPlays) * 100}%` }} />
+                  <div className="relative flex items-center gap-2 px-2 py-1.5">
+                    <span className="text-sm truncate flex-1">{a.album}</span>
+                    <span className="text-xs text-muted-foreground truncate max-w-28">{a.artist}</span>
+                    <span className="text-xs font-mono text-muted-foreground tabular-nums">{a.play_count}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Top Listeners */}
+        <div className="rounded-xl border border-border/60 bg-card/40 p-5">
+          <h3 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground mb-3">Top Listeners</h3>
+          <div className="space-y-1">
+            {stats.topListeners.map((l, i) => (
+              <div key={i} className="flex items-center gap-2 group">
+                <span className="text-xs w-5 text-right text-muted-foreground tabular-nums">{i + 1}</span>
+                <div className="flex-1 relative">
+                  <div className="absolute inset-y-0 left-0 rounded-md bg-primary/10 group-hover:bg-primary/15 transition-colors"
+                    style={{ width: `${(l.play_count / maxListenerPlays) * 100}%` }} />
+                  <div className="relative flex items-center justify-between px-2 py-1.5">
+                    <span className="text-sm">{l.username}</span>
+                    <span className="text-xs font-mono text-muted-foreground tabular-nums">{l.play_count}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Recent Plays - Full width */}
+      <div className="rounded-xl border border-border/60 bg-card/40 p-5">
+        <h3 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground mb-3">Recent Plays</h3>
+        <div className="space-y-1">
+          {stats.recentPlays.map((p, i) => (
+            <div key={i} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted/40 transition-colors">
+              <span className="text-sm truncate flex-1">{p.song}</span>
+              <span className="text-xs text-muted-foreground truncate max-w-28">{p.artist}</span>
+              <span className="text-xs text-muted-foreground">{p.username}</span>
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {new Date(p.played_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function getCookie(name: string): string | null {
@@ -494,73 +819,19 @@ export default function BarFooPage() {
           <div className={`flex-1 min-w-0 overflow-y-auto ${hasPlayer ? 'pb-24' : 'pb-4'}`}>
             <AnimatePresence mode="wait">
               {showStats ? (
-                <motion.div key="stats" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="p-5 space-y-5">
+                <motion.div key="stats" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="p-5 space-y-4">
                   {!stats ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-64 rounded-xl" />)}
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+                        {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-20 rounded-xl" />)}
+                      </div>
+                      <Skeleton className="h-48 rounded-xl" />
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-64 rounded-xl" />)}
+                      </div>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* Top Songs */}
-                      <div className="rounded-xl border border-border/60 bg-card/40 p-5">
-                        <h3 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground mb-3">Top Songs</h3>
-                        <div className="space-y-1">
-                          {stats.topSongs.map((s, i) => (
-                            <div key={i} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted/40 transition-colors">
-                              <span className="text-xs w-5 text-right text-muted-foreground tabular-nums">{i + 1}</span>
-                              <span className="text-sm truncate flex-1">{s.song}</span>
-                              <span className="text-xs text-muted-foreground truncate max-w-28">{s.artist}</span>
-                              <span className="text-xs font-mono text-muted-foreground tabular-nums">{s.play_count}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Top Albums */}
-                      <div className="rounded-xl border border-border/60 bg-card/40 p-5">
-                        <h3 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground mb-3">Top Albums</h3>
-                        <div className="space-y-1">
-                          {stats.topAlbums.map((a, i) => (
-                            <div key={i} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted/40 transition-colors">
-                              <span className="text-xs w-5 text-right text-muted-foreground tabular-nums">{i + 1}</span>
-                              <span className="text-sm truncate flex-1">{a.album}</span>
-                              <span className="text-xs text-muted-foreground truncate max-w-28">{a.artist}</span>
-                              <span className="text-xs font-mono text-muted-foreground tabular-nums">{a.play_count}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Top Listeners */}
-                      <div className="rounded-xl border border-border/60 bg-card/40 p-5">
-                        <h3 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground mb-3">Top Listeners</h3>
-                        <div className="space-y-1">
-                          {stats.topListeners.map((l, i) => (
-                            <div key={i} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted/40 transition-colors">
-                              <span className="text-xs w-5 text-right text-muted-foreground tabular-nums">{i + 1}</span>
-                              <span className="text-sm flex-1">{l.username}</span>
-                              <span className="text-xs font-mono text-muted-foreground tabular-nums">{l.play_count}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Recent Plays */}
-                      <div className="rounded-xl border border-border/60 bg-card/40 p-5">
-                        <h3 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground mb-3">Recent Plays</h3>
-                        <div className="space-y-1">
-                          {stats.recentPlays.map((p, i) => (
-                            <div key={i} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted/40 transition-colors">
-                              <span className="text-sm truncate flex-1">{p.song}</span>
-                              <span className="text-xs text-muted-foreground">{p.username}</span>
-                              <span className="text-xs text-muted-foreground tabular-nums">
-                                {new Date(p.played_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
+                    <StatsView stats={stats} />
                   )}
                 </motion.div>
               ) : showPlaylists ? (
