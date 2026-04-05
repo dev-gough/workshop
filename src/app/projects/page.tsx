@@ -1,10 +1,12 @@
 'use client';
 
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { Clock, Grid3X3, Home, Music, Trophy, Server, ArrowRight } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
 import { motion } from 'motion/react';
+import { useAudio } from '@/components/AudioProvider';
 
 // ── Decorative visuals per project ──
 
@@ -82,16 +84,61 @@ function RoomPlannerVisual() {
 }
 
 function BarFooVisual() {
-  const bars = [0.4, 0.7, 0.5, 0.9, 0.3, 0.8, 0.6, 0.45, 0.75, 0.55, 0.85, 0.35, 0.65, 0.5, 0.7];
+  const { isPlaying, getFrequencyData } = useAudio();
+  const [bars, setBars] = useState<number[]>([0.4, 0.7, 0.5, 0.9, 0.3, 0.8, 0.6, 0.45, 0.75, 0.55, 0.85, 0.35, 0.65, 0.5, 0.7]);
+  const rafRef = useRef<number>(0);
+  const liveRef = useRef(false);
+
+  const tick = useCallback(() => {
+    const data = getFrequencyData();
+    if (data && data.some(v => v > 0)) {
+      liveRef.current = true;
+      // Sample 15 bars from the frequency data (skip first bin, focus on audible range)
+      const count = 15;
+      const step = Math.max(1, Math.floor((data.length - 1) / count));
+      const newBars = Array.from({ length: count }, (_, i) => {
+        const val = data[Math.min(1 + i * step, data.length - 1)];
+        return Math.max(0.04, val / 255);
+      });
+      setBars(newBars);
+    } else if (liveRef.current) {
+      liveRef.current = false;
+      setBars([0.4, 0.7, 0.5, 0.9, 0.3, 0.8, 0.6, 0.45, 0.75, 0.55, 0.85, 0.35, 0.65, 0.5, 0.7]);
+    }
+    rafRef.current = requestAnimationFrame(tick);
+  }, [getFrequencyData]);
+
+  useEffect(() => {
+    if (isPlaying) {
+      rafRef.current = requestAnimationFrame(tick);
+      return () => cancelAnimationFrame(rafRef.current);
+    } else if (liveRef.current) {
+      liveRef.current = false;
+      setBars([0.4, 0.7, 0.5, 0.9, 0.3, 0.8, 0.6, 0.45, 0.75, 0.55, 0.85, 0.35, 0.65, 0.5, 0.7]);
+    }
+  }, [isPlaying, tick]);
+
+  const isLive = liveRef.current && isPlaying;
+
   return (
     <div className="flex items-end gap-[3px] h-16 flex-shrink-0">
       {bars.map((h, i) => (
-        <motion.div key={i} className="w-1.5 rounded-full"
-          style={{ backgroundColor: `hsl(${270 + i * 4}, 70%, 65%)` }}
-          initial={{ height: 4 }}
-          animate={{ height: `${h * 100}%` }}
-          transition={{ duration: 0.8, delay: i * 0.04, repeat: Infinity, repeatType: 'reverse', repeatDelay: 1 + Math.random() * 2 }}
-        />
+        isLive ? (
+          <div key={i} className="w-1.5 rounded-full transition-[height] duration-75"
+            style={{
+              backgroundColor: `hsl(${270 + i * 4}, 70%, 65%)`,
+              height: `${h * 100}%`,
+              minHeight: 3,
+            }}
+          />
+        ) : (
+          <motion.div key={i} className="w-1.5 rounded-full"
+            style={{ backgroundColor: `hsl(${270 + i * 4}, 70%, 65%)` }}
+            initial={{ height: 4 }}
+            animate={{ height: `${h * 100}%` }}
+            transition={{ duration: 0.8, delay: i * 0.04, repeat: Infinity, repeatType: 'reverse', repeatDelay: 1 + Math.random() * 2 }}
+          />
+        )
       ))}
     </div>
   );

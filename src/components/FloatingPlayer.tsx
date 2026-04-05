@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Volume1, Music, ExternalLink, X } from 'lucide-react';
@@ -19,11 +19,18 @@ export default function FloatingPlayer() {
   } = useAudio();
 
   const [dismissed, setDismissed] = useState(false);
+  const prevPathname = useRef(pathname);
+
+  // Reset dismissed state when leaving barfoo (so the player reappears on other pages)
+  useEffect(() => {
+    if (prevPathname.current === '/projects/barfoo' && pathname !== '/projects/barfoo') {
+      setDismissed(false);
+    }
+    prevPathname.current = pathname;
+  }, [pathname]);
 
   // Hide on barfoo page (full player is there), when nothing is playing, or when dismissed
   if (pathname === '/projects/barfoo' || !currentTrack || dismissed) return null;
-
-  // Un-dismiss when track changes
   const VolumeIcon = muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
   const displayName = currentSongName ? cleanSongDisplay(currentSongName, currentAlbum?.artist, currentAlbum?.name) : '';
   const progressPct = duration ? (progress / duration) * 100 : 0;
@@ -59,7 +66,7 @@ export default function FloatingPlayer() {
               <p className="text-sm font-medium truncate">{displayName}</p>
               <p className="text-[11px] text-muted-foreground truncate">{currentAlbum?.artist}</p>
             </div>
-            <button onClick={() => setDismissed(true)} className="text-muted-foreground hover:text-foreground transition-colors p-0.5">
+            <button onClick={() => { if (isPlaying) togglePlayPause(); setDismissed(true); }} className="text-muted-foreground hover:text-foreground transition-colors p-0.5">
               <X className="h-3.5 w-3.5" />
             </button>
           </div>

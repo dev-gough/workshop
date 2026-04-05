@@ -58,6 +58,8 @@ interface AudioContextType {
   formatTime: (s: number) => string;
   currentAlbum: Album | null;
   currentSongName: string | null;
+  // Analyser for visualizations
+  getFrequencyData: () => Uint8Array | null;
 }
 
 function getCookie(name: string): string | null {
@@ -99,9 +101,67 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const volumeRef = useRef(volume);
   const mutedRef = useRef(muted);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const audioCtxRef = useRef<globalThis.AudioContext | null>(null);
+  const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
 
   useEffect(() => { volumeRef.current = volume; }, [volume]);
   useEffect(() => { mutedRef.current = muted; }, [muted]);
+
+  // ── Web Audio API analyser (lazy init on first play) ──
+  const ensureAnalyser = useCallback(() => {
+    if (analyserRef.current) return;
+    const audio = audioRef.current;
+    if (!audio) return;
+    try {
+      const ctx = new globalThis.AudioContext();
+      const source = ctx.createMediaElementSource(audio);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 64;
+      source.connect(analyser);
+      analyser.connect(ctx.destination);
+      audioCtxRef.current = ctx;
+      sourceRef.current = source;
+      analyserRef.current = analyser;
+    } catch { /* Web Audio not available */ }
+  }, []);
+
+  const getFrequencyData = useCallback((): Uint8Array | null => {
+    const analyser = analyserRef.current;
+    if (!analyser) return null;
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteFrequencyData(data);
+    return data;
+  }, []);
+
+  // ── Persist playback state ──
+  const restoredRef = useRef(false);
+
+  const savePlaybackState = useCallback(() => {
+    try {
+      const audio = audioRef.current;
+      const state = {
+        currentTrack,
+        queue,
+        queueIndex,
+        shuffleMode,
+        progress: audio?.currentTime ?? 0,
+      };
+      localStorage.setItem('barfoo_playback', JSON.stringify(state));
+    } catch { /* localStorage full or unavailable */ }
+  }, [currentTrack, queue, queueIndex, shuffleMode]);
+
+  // Save on every meaningful state change
+  useEffect(() => {
+    if (restoredRef.current || currentTrack) savePlaybackState();
+  }, [currentTrack, queueIndex, shuffleMode, savePlaybackState]);
+
+  // Save progress periodically (every 5s) so we don't spam localStorage on every timeupdate
+  useEffect(() => {
+    if (!currentTrack) return;
+    const interval = setInterval(savePlaybackState, 5000);
+    return () => clearInterval(interval);
+  }, [currentTrack, savePlaybackState]);
 
   // ── Fetch albums ──
   useEffect(() => {
@@ -111,6 +171,45 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
       .catch(e => console.error('Error fetching albums:', e))
       .finally(() => setAlbumsLoading(false));
   }, []);
+
+  // ── Restore playback state after albums load ──
+  useEffect(() => {
+    if (albums.length === 0 || restoredRef.current) return;
+    restoredRef.current = true;
+    try {
+      const raw = localStorage.getItem('barfoo_playback');
+      if (!raw) return;
+      const state = JSON.parse(raw);
+      if (!state.currentTrack) return;
+      const { albumIndex, songIndex } = state.currentTrack;
+      // Validate the track still exists
+      if (!albums[albumIndex]?.songs[songIndex]) return;
+
+      setCurrentTrack(state.currentTrack);
+      setQueue(state.queue ?? []);
+      setQueueIndex(state.queueIndex ?? 0);
+      setShuffleMode(state.shuffleMode ?? false);
+
+      // Set up the audio source at the saved position, but don't auto-play
+      const album = albums[albumIndex];
+      const song = album.songs[songIndex];
+      const url = `/api/music/stream?artist=${encodeURIComponent(album.artist)}&album=${encodeURIComponent(album.name)}&song=${encodeURIComponent(song)}`;
+      const audio = audioRef.current;
+      if (audio) {
+        audio.src = url;
+        audio.volume = mutedRef.current ? 0 : volumeRef.current;
+        // Seek to saved position once metadata loads
+        const savedProgress = state.progress ?? 0;
+        if (savedProgress > 0) {
+          const onCanPlay = () => {
+            audio.currentTime = savedProgress;
+            audio.removeEventListener('canplay', onCanPlay);
+          };
+          audio.addEventListener('canplay', onCanPlay);
+        }
+      }
+    } catch { /* corrupted data, ignore */ }
+  }, [albums]);
 
   // ── Audio event listeners ──
   useEffect(() => {
@@ -159,6 +258,7 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
 
     setCurrentTrack({ albumIndex, songIndex });
 
+    ensureAnalyser();
     const audio = audioRef.current;
     if (audio) {
       audio.src = url;
@@ -323,8 +423,9 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
       seek, setVolumeValue, changeVolume, handleVolumeWheel, toggleMute,
       setQueue, setQueueIndex, setShuffleMode,
       formatTime, currentAlbum, currentSongName,
+      getFrequencyData,
     }}>
-      <audio ref={audioRef} preload="auto" />
+      <audio ref={audioRef} preload="auto" crossOrigin="anonymous" />
       {children}
     </AudioContext.Provider>
   );
