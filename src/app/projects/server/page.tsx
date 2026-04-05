@@ -28,6 +28,12 @@ interface SystemStats {
   uptimeSeconds: number;
 }
 
+interface ServiceEndpoint {
+  port: number;
+  protocol?: string;
+  label?: string;
+}
+
 interface ServiceInfo {
   name: string;
   displayName: string;
@@ -40,6 +46,7 @@ interface ServiceInfo {
   memory: string | null;
   uptime: string | null;
   startedAt: string | null;
+  endpoints: ServiceEndpoint[] | null;
 }
 
 interface LogLine {
@@ -174,6 +181,15 @@ function ServiceRow({ service, onAction }: { service: ServiceInfo; onAction: (na
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          {service.endpoints && service.status === 'running' && (
+            <span className="text-xs font-mono text-muted-foreground hidden md:inline">
+              {service.endpoints.map(ep =>
+                ep.protocol === 'http'
+                  ? `${ep.protocol}://192.168.2.15:${ep.port}`
+                  : `192.168.2.15:${ep.port}`
+              ).join(', ')}
+            </span>
+          )}
           {service.memory && (
             <span className="text-xs font-mono text-muted-foreground hidden md:inline">{service.memory}</span>
           )}
@@ -248,6 +264,20 @@ function ServiceRow({ service, onAction }: { service: ServiceInfo; onAction: (na
                     <span className="font-mono">{service.memory}</span>
                   </div>
                 )}
+                {service.endpoints && service.endpoints.map((ep, i) => (
+                  <div key={i}>
+                    <span className="text-muted-foreground">{ep.label || 'Endpoint'}: </span>
+                    <span className="font-mono">
+                      {ep.protocol === 'http' ? (
+                        <a href={`http://192.168.2.15:${ep.port}`} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">
+                          192.168.2.15:{ep.port}
+                        </a>
+                      ) : (
+                        <>192.168.2.15:{ep.port}</>
+                      )}
+                    </span>
+                  </div>
+                ))}
               </div>
 
               {/* Logs */}

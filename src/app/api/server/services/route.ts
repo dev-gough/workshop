@@ -21,6 +21,25 @@ const TRACKED_SERVICES = [
   'minecraft-above-beyond',
 ];
 
+interface ServiceEndpoint {
+  port: number;
+  protocol?: string;
+  label?: string;
+}
+
+const SERVICE_ENDPOINTS: Record<string, ServiceEndpoint[]> = {
+  'nginx':                  [{ port: 80, protocol: 'http', label: 'Workshop' }],
+  'jellyfin':               [{ port: 8096, protocol: 'http', label: 'Jellyfin' }],
+  'ssh':                    [{ port: 22, protocol: 'ssh' }],
+  'postgresql@16-main':     [{ port: 5432, protocol: 'postgres', label: 'localhost only' }],
+  'minecraft-atm10':        [{ port: 25565, label: 'Minecraft' }],
+  'minecraft-atm6':         [{ port: 25565, label: 'Minecraft (shared port)' }],
+  'minecraft-stoneblock3':  [{ port: 25567, label: 'Minecraft' }],
+  'minecraft-meatballcraft': [{ port: 25568, label: 'Minecraft' }],
+  'minecraft-atm9sky':      [{ port: 25569, label: 'Minecraft' }],
+  'minecraft-above-beyond': [{ port: 25565, label: 'Minecraft (shared port)' }],
+};
+
 interface ServiceInfo {
   name: string;
   displayName: string;
@@ -33,6 +52,7 @@ interface ServiceInfo {
   memory: string | null;
   uptime: string | null;
   startedAt: string | null;
+  endpoints: ServiceEndpoint[] | null;
 }
 
 function getServiceInfo(name: string): ServiceInfo {
@@ -72,6 +92,7 @@ function getServiceInfo(name: string): ServiceInfo {
       memory: memBytes > 0 && !isNaN(memBytes) ? formatBytes(memBytes) : null,
       uptime: startedAt && status === 'running' ? startedAt : null,
       startedAt,
+      endpoints: SERVICE_ENDPOINTS[name] || null,
     };
   } catch {
     return {
@@ -86,6 +107,7 @@ function getServiceInfo(name: string): ServiceInfo {
       memory: null,
       uptime: null,
       startedAt: null,
+      endpoints: SERVICE_ENDPOINTS[name] || null,
     };
   }
 }
