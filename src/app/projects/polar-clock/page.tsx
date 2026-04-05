@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Settings, X, Maximize, Minimize, ChevronDown } from 'lucide-react';
+import { Settings, X, Maximize, Minimize, ChevronDown, Download } from 'lucide-react';
+import { generateWallpaperHTML, generateWEProjectJson, generateLivelyProperties, downloadZip, type WallpaperSettings } from './wallpaper-export';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTheme } from '@/components/ThemeProvider';
 
@@ -1692,6 +1693,52 @@ export default function PolarClockPage() {
                     onClick={() => setShowDate(!showDate)}
                     className={`px-2.5 py-1.5 rounded-md text-xs cursor-pointer ${showDate ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'}`}
                   >Date</button>
+                </div>
+              </SettingsSection>
+
+              <SettingsSection title="Export as Wallpaper" defaultOpen={false}>
+                <div className="space-y-2">
+                  <p className="text-[10px] text-muted-foreground">Export with your current settings as a standalone animated wallpaper.</p>
+                  <button
+                    onClick={() => {
+                      const ws: WallpaperSettings = {
+                        palette, background, bgOpacity, smooth, alignment,
+                        rings, showCity, showDate,
+                        timezone: slots[activeSlot]?.timezone ?? 'America/New_York',
+                        cityLabel: slots[activeSlot]?.label ?? 'New York',
+                      };
+                      const html = generateWallpaperHTML(ws);
+                      const proj = generateWEProjectJson();
+                      downloadZip('polar-clock-wallpaper-engine.zip', [
+                        { name: 'index.html', content: html },
+                        { name: 'project.json', content: proj },
+                      ]);
+                    }}
+                    className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                  >
+                    <Download className="h-3 w-3" />
+                    Wallpaper Engine
+                  </button>
+                  <button
+                    onClick={() => {
+                      const ws: WallpaperSettings = {
+                        palette, background, bgOpacity, smooth, alignment,
+                        rings, showCity, showDate,
+                        timezone: slots[activeSlot]?.timezone ?? 'America/New_York',
+                        cityLabel: slots[activeSlot]?.label ?? 'New York',
+                      };
+                      const html = generateWallpaperHTML(ws);
+                      const props = generateLivelyProperties();
+                      downloadZip('polar-clock-lively.zip', [
+                        { name: 'index.html', content: html },
+                        { name: 'LivelyProperties.json', content: props },
+                      ]);
+                    }}
+                    className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs cursor-pointer bg-muted hover:bg-muted/80 transition-colors"
+                  >
+                    <Download className="h-3 w-3" />
+                    Lively Wallpaper
+                  </button>
                 </div>
               </SettingsSection>
             </motion.div>
