@@ -1,220 +1,183 @@
 'use client';
 
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useTheme } from './ThemeProvider';
 import PatternSelector from './PatternSelector';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Slider } from '@/components/ui/slider';
-import { Zap } from 'lucide-react';
+import {
+  Play, Pause, RotateCcw, Trash2, Grid3X3, Zap, SkipForward,
+  ZoomIn, ZoomOut, Gauge, Home,
+} from 'lucide-react';
 
-interface GameOfLifeProps {
-  width: number;
-  height: number;
-  cellSize?: number;
+// ── Constants ────────────────────────────────────────────────────────────
+
+const SHIFT = 33554432;       // 1 << 25  (±33M range, packed keys stay within 2^52)
+const RANGE = 67108864;       // 1 << 26
+
+const NEIGHBOR_OFFSETS = [
+  -RANGE - 1, -RANGE, -RANGE + 1,
+  -1,                   1,
+   RANGE - 1,  RANGE,  RANGE + 1,
+];
+
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 40;
+const DEFAULT_ZOOM = 10;
+
+// ── Coordinate helpers ───────────────────────────────────────────────────
+
+function pack(x: number, y: number): number {
+  return (y + SHIFT) * RANGE + (x + SHIFT);
 }
 
-// ── Simulation Engine (decoupled from React) ──────────────────────────
+function unpackX(key: number): number {
+  return (key % RANGE) - SHIFT;
+}
+
+function unpackY(key: number): number {
+  return Math.floor(key / RANGE) - SHIFT;
+}
+
+interface Camera {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
+interface Bounds {
+  minX: number; maxX: number;
+  minY: number; maxY: number;
+}
+
+function getVisibleBounds(cam: Camera, w: number, h: number): Bounds {
+  const halfW = w / (2 * cam.zoom);
+  const halfH = h / (2 * cam.zoom);
+  return {
+    minX: Math.floor(cam.x - halfW) - 1,
+    maxX: Math.ceil(cam.x + halfW) + 1,
+    minY: Math.floor(cam.y - halfH) - 1,
+    maxY: Math.ceil(cam.y + halfH) + 1,
+  };
+}
+
+function screenToWorldX(sx: number, cam: Camera, canvasW: number): number {
+  return (sx - canvasW / 2) / cam.zoom + cam.x;
+}
+
+function screenToWorldY(sy: number, cam: Camera, canvasH: number): number {
+  return (sy - canvasH / 2) / cam.zoom + cam.y;
+}
+
+// ── Simulation Engine ────────────────────────────────────────────────────
 
 class GOLEngine {
-  rows: number;
-  cols: number;
-  // Double-buffered flat Uint8Array grids
-  current: Uint8Array;
-  next: Uint8Array;
-  // Track changed cells for dirty-rect rendering
-  changed: Uint32Array; // indices of changed cells
-  changedCount: number;
+  alive: Set<number>;
   generation: number;
 
-  constructor(rows: number, cols: number) {
-    this.rows = rows;
-    this.cols = cols;
-    const size = rows * cols;
-    this.current = new Uint8Array(size);
-    this.next = new Uint8Array(size);
-    this.changed = new Uint32Array(size);
-    this.changedCount = 0;
+  constructor() {
+    this.alive = new Set();
     this.generation = 0;
   }
 
-  index(r: number, c: number): number {
-    return r * this.cols + c;
+  get(x: number, y: number): boolean {
+    return this.alive.has(pack(x, y));
   }
 
-  get(r: number, c: number): number {
-    return this.current[r * this.cols + c];
+  set(x: number, y: number, val: boolean) {
+    const key = pack(x, y);
+    if (val) this.alive.add(key);
+    else this.alive.delete(key);
   }
 
-  set(r: number, c: number, val: number) {
-    const idx = r * this.cols + c;
-    if (this.current[idx] !== val) {
-      this.current[idx] = val;
-      this.changed[this.changedCount++] = idx;
+  toggle(x: number, y: number): boolean {
+    const key = pack(x, y);
+    if (this.alive.has(key)) {
+      this.alive.delete(key);
+      return false;
     }
+    this.alive.add(key);
+    return true;
   }
 
-  toggle(r: number, c: number) {
-    const idx = r * this.cols + c;
-    this.current[idx] ^= 1;
-    this.changed[this.changedCount++] = idx;
-  }
-
-  randomize() {
-    const size = this.rows * this.cols;
-    for (let i = 0; i < size; i++) {
-      this.current[i] = Math.random() > 0.7 ? 1 : 0;
-    }
-    this.generation = 0;
-    this.markAllChanged();
-  }
-
-  clear() {
-    this.current.fill(0);
-    this.generation = 0;
-    this.markAllChanged();
-  }
-
-  markAllChanged() {
-    const size = this.rows * this.cols;
-    this.changedCount = size;
-    for (let i = 0; i < size; i++) {
-      this.changed[i] = i;
-    }
-  }
-
-  // Optimized step: inline neighbor counting, no bounds checks for interior
   step() {
-    const { rows, cols, current, next } = this;
-    this.changedCount = 0;
-
-    for (let r = 0; r < rows; r++) {
-      const rAbove = r > 0 ? (r - 1) * cols : -1;
-      const rCur = r * cols;
-      const rBelow = r < rows - 1 ? (r + 1) * cols : -1;
-
-      for (let c = 0; c < cols; c++) {
-        let neighbors = 0;
-        const cL = c - 1;
-        const cR = c + 1;
-        const hasLeft = c > 0;
-        const hasRight = cR < cols;
-
-        // Row above
-        if (rAbove >= 0) {
-          if (hasLeft)  neighbors += current[rAbove + cL];
-          neighbors += current[rAbove + c];
-          if (hasRight) neighbors += current[rAbove + cR];
-        }
-        // Current row
-        if (hasLeft)  neighbors += current[rCur + cL];
-        if (hasRight) neighbors += current[rCur + cR];
-        // Row below
-        if (rBelow >= 0) {
-          if (hasLeft)  neighbors += current[rBelow + cL];
-          neighbors += current[rBelow + c];
-          if (hasRight) neighbors += current[rBelow + cR];
-        }
-
-        const idx = rCur + c;
-        const alive = current[idx];
-        // Birth: dead cell with exactly 3 neighbors
-        // Survive: alive cell with 2 or 3 neighbors
-        const newVal = neighbors === 3 || (neighbors === 2 && alive) ? 1 : 0;
-        next[idx] = newVal;
-
-        if (newVal !== alive) {
-          this.changed[this.changedCount++] = idx;
-        }
+    const counts = new Map<number, number>();
+    for (const key of this.alive) {
+      for (let i = 0; i < 8; i++) {
+        const nk = key + NEIGHBOR_OFFSETS[i];
+        counts.set(nk, (counts.get(nk) || 0) + 1);
       }
     }
-
-    // Swap buffers
-    const tmp = this.current;
-    this.current = this.next;
-    this.next = tmp;
+    const next = new Set<number>();
+    for (const [key, count] of counts) {
+      if (count === 3 || (count === 2 && this.alive.has(key))) {
+        next.add(key);
+      }
+    }
+    this.alive = next;
     this.generation++;
   }
 
-  // Run N steps without tracking changes (for benchmarking)
   stepN(n: number) {
-    const { rows, cols } = this;
     for (let s = 0; s < n; s++) {
-      const current = this.current;
-      const next = this.next;
-      for (let r = 0; r < rows; r++) {
-        const rAbove = r > 0 ? (r - 1) * cols : -1;
-        const rCur = r * cols;
-        const rBelow = r < rows - 1 ? (r + 1) * cols : -1;
-        for (let c = 0; c < cols; c++) {
-          let neighbors = 0;
-          const cL = c - 1;
-          const cR = c + 1;
-          const hasLeft = c > 0;
-          const hasRight = cR < cols;
-          if (rAbove >= 0) {
-            if (hasLeft)  neighbors += current[rAbove + cL];
-            neighbors += current[rAbove + c];
-            if (hasRight) neighbors += current[rAbove + cR];
-          }
-          if (hasLeft)  neighbors += current[rCur + cL];
-          if (hasRight) neighbors += current[rCur + cR];
-          if (rBelow >= 0) {
-            if (hasLeft)  neighbors += current[rBelow + cL];
-            neighbors += current[rBelow + c];
-            if (hasRight) neighbors += current[rBelow + cR];
-          }
-          next[rCur + c] = neighbors === 3 || (neighbors === 2 && current[rCur + c]) ? 1 : 0;
+      const counts = new Map<number, number>();
+      for (const key of this.alive) {
+        for (let i = 0; i < 8; i++) {
+          const nk = key + NEIGHBOR_OFFSETS[i];
+          counts.set(nk, (counts.get(nk) || 0) + 1);
         }
       }
-      const tmp = this.current;
-      this.current = this.next;
-      this.next = tmp;
+      const next = new Set<number>();
+      for (const [key, count] of counts) {
+        if (count === 3 || (count === 2 && this.alive.has(key))) {
+          next.add(key);
+        }
+      }
+      this.alive = next;
       this.generation++;
     }
-    this.markAllChanged();
   }
 
-  resize(newRows: number, newCols: number) {
-    // Preserve pattern in the overlapping region
-    const oldCurrent = this.current;
-    const oldRows = this.rows;
-    const oldCols = this.cols;
+  clear() {
+    this.alive = new Set();
+    this.generation = 0;
+  }
 
-    this.rows = newRows;
-    this.cols = newCols;
-    const size = newRows * newCols;
-    this.current = new Uint8Array(size);
-    this.next = new Uint8Array(size);
-    this.changed = new Uint32Array(size);
-
-    const copyRows = Math.min(oldRows, newRows);
-    const copyCols = Math.min(oldCols, newCols);
-    for (let r = 0; r < copyRows; r++) {
-      for (let c = 0; c < copyCols; c++) {
-        this.current[r * newCols + c] = oldCurrent[r * oldCols + c];
+  randomize(cx: number, cy: number, w: number, h: number) {
+    this.alive = new Set();
+    this.generation = 0;
+    const x0 = Math.round(cx - w / 2);
+    const y0 = Math.round(cy - h / 2);
+    for (let dy = 0; dy < h; dy++) {
+      for (let dx = 0; dx < w; dx++) {
+        if (Math.random() < 0.3) {
+          this.alive.add(pack(x0 + dx, y0 + dy));
+        }
       }
     }
-    this.markAllChanged();
   }
 
-  loadPattern(pattern: { x: number; y: number }[]) {
+  loadPattern(cells: { x: number; y: number }[], cx: number, cy: number) {
     this.clear();
-    const offsetX = Math.floor(this.cols / 2) - Math.floor(Math.max(...pattern.map(p => p.x)) / 2);
-    const offsetY = Math.floor(this.rows / 2) - Math.floor(Math.max(...pattern.map(p => p.y)) / 2);
-    for (const cell of pattern) {
-      const c = cell.x + offsetX;
-      const r = cell.y + offsetY;
-      if (c >= 0 && c < this.cols && r >= 0 && r < this.rows) {
-        this.current[r * this.cols + c] = 1;
-      }
+    const maxX = cells.reduce((m, c) => Math.max(m, c.x), 0);
+    const maxY = cells.reduce((m, c) => Math.max(m, c.y), 0);
+    const ox = Math.round(cx - maxX / 2);
+    const oy = Math.round(cy - maxY / 2);
+    for (const c of cells) {
+      this.alive.add(pack(c.x + ox, c.y + oy));
     }
     this.generation = 0;
-    this.markAllChanged();
+  }
+
+  clone(): GOLEngine {
+    const copy = new GOLEngine();
+    copy.alive = new Set(this.alive);
+    copy.generation = this.generation;
+    return copy;
   }
 }
 
-// ── Parse .lif file ───────────────────────────────────────────────────
+// ── Parse .lif file ──────────────────────────────────────────────────────
 
 function parseLif(content: string): { x: number; y: number }[] {
   const lines = content.split('\n').map(l => l.trim()).filter(l => l && (!l.startsWith('#') || l.startsWith('#P')));
@@ -237,100 +200,258 @@ function parseLif(content: string): { x: number; y: number }[] {
   return pattern.map(p => ({ x: p.x - minX, y: p.y - minY }));
 }
 
-// ── React Component ───────────────────────────────────────────────────
+// ── Drawing ──────────────────────────────────────────────────────────────
 
-const GameOfLife = ({ width, height, cellSize = 10 }: GameOfLifeProps) => {
+function drawFrame(
+  ctx: CanvasRenderingContext2D,
+  engine: GOLEngine,
+  cam: Camera,
+  canvasW: number,
+  canvasH: number,
+  isDark: boolean,
+) {
+  const fillColor = isDark ? '#e2e8f0' : '#0f172a';
+  const bgColor = isDark ? 'hsl(224,35%,11%)' : 'hsl(0,0%,99%)';
+  const gridColor = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
+  const originColor = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.1)';
+
+  const zoom = cam.zoom;
+  const bounds = getVisibleBounds(cam, canvasW, canvasH);
+
+  // Use ImageData for pixel-level rendering at very low zoom
+  if (zoom <= 2) {
+    const imageData = ctx.createImageData(canvasW, canvasH);
+    const data = imageData.data;
+
+    // Fill background
+    const bgR = isDark ? 19 : 252;
+    const bgG = isDark ? 22 : 252;
+    const bgB = isDark ? 33 : 252;
+    for (let i = 0; i < data.length; i += 4) {
+      data[i] = bgR; data[i + 1] = bgG; data[i + 2] = bgB; data[i + 3] = 255;
+    }
+
+    const fillR = isDark ? 226 : 15;
+    const fillG = isDark ? 232 : 23;
+    const fillB = isDark ? 240 : 42;
+    const halfW = canvasW / 2;
+    const halfH = canvasH / 2;
+
+    if (zoom <= 1) {
+      for (const key of engine.alive) {
+        const wx = unpackX(key);
+        const wy = unpackY(key);
+        const sx = Math.round((wx - cam.x) * zoom + halfW);
+        const sy = Math.round((wy - cam.y) * zoom + halfH);
+        if (sx >= 0 && sx < canvasW && sy >= 0 && sy < canvasH) {
+          const idx = (sy * canvasW + sx) * 4;
+          data[idx] = fillR; data[idx + 1] = fillG; data[idx + 2] = fillB;
+        }
+      }
+    } else {
+      // zoom ~2: draw 2x2 blocks
+      for (const key of engine.alive) {
+        const wx = unpackX(key);
+        const wy = unpackY(key);
+        const sx = Math.floor((wx - cam.x) * zoom + halfW);
+        const sy = Math.floor((wy - cam.y) * zoom + halfH);
+        const size = Math.ceil(zoom);
+        for (let py = sy; py < sy + size && py < canvasH; py++) {
+          if (py < 0) continue;
+          for (let px = sx; px < sx + size && px < canvasW; px++) {
+            if (px < 0) continue;
+            const idx = (py * canvasW + px) * 4;
+            data[idx] = fillR; data[idx + 1] = fillG; data[idx + 2] = fillB;
+          }
+        }
+      }
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+    return;
+  }
+
+  // Standard fillRect path
+  ctx.fillStyle = bgColor;
+  ctx.fillRect(0, 0, canvasW, canvasH);
+
+  // Grid lines at higher zoom
+  if (zoom >= 8) {
+    ctx.strokeStyle = gridColor;
+    ctx.lineWidth = 1;
+    const halfW = canvasW / 2;
+    const halfH = canvasH / 2;
+
+    ctx.beginPath();
+    for (let x = bounds.minX; x <= bounds.maxX; x++) {
+      const sx = Math.round((x - cam.x) * zoom + halfW) - 0.5;
+      if (sx >= -1 && sx <= canvasW + 1) {
+        ctx.moveTo(sx, 0);
+        ctx.lineTo(sx, canvasH);
+      }
+    }
+    for (let y = bounds.minY; y <= bounds.maxY; y++) {
+      const sy = Math.round((y - cam.y) * zoom + halfH) - 0.5;
+      if (sy >= -1 && sy <= canvasH + 1) {
+        ctx.moveTo(0, sy);
+        ctx.lineTo(canvasW, sy);
+      }
+    }
+    ctx.stroke();
+  }
+
+  // Origin crosshair
+  {
+    const halfW = canvasW / 2;
+    const halfH = canvasH / 2;
+    const ox = Math.round(-cam.x * zoom + halfW) - 0.5;
+    const oy = Math.round(-cam.y * zoom + halfH) - 0.5;
+    ctx.strokeStyle = originColor;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    if (ox >= 0 && ox <= canvasW) { ctx.moveTo(ox, 0); ctx.lineTo(ox, canvasH); }
+    if (oy >= 0 && oy <= canvasH) { ctx.moveTo(0, oy); ctx.lineTo(canvasW, oy); }
+    ctx.stroke();
+  }
+
+  // Draw alive cells
+  ctx.fillStyle = fillColor;
+  const halfW = canvasW / 2;
+  const halfH = canvasH / 2;
+  const gap = zoom >= 6 ? 0.5 : 0;
+
+  for (const key of engine.alive) {
+    const wx = unpackX(key);
+    const wy = unpackY(key);
+    if (wx < bounds.minX || wx > bounds.maxX || wy < bounds.minY || wy > bounds.maxY) continue;
+    const sx = (wx - cam.x) * zoom + halfW;
+    const sy = (wy - cam.y) * zoom + halfH;
+    ctx.fillRect(sx + gap, sy + gap, zoom - gap * 2, zoom - gap * 2);
+  }
+}
+
+// ── React Component ──────────────────────────────────────────────────────
+
+const GameOfLife = () => {
   const { theme } = useTheme();
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<GOLEngine | null>(null);
+  const cameraRef = useRef<Camera>({ x: 0, y: 0, zoom: DEFAULT_ZOOM });
   const rafRef = useRef<number>(0);
   const lastFrameRef = useRef<number>(0);
-  const isDraggingRef = useRef(false);
-  const draggedRef = useRef<Set<number>>(new Set());
+  const canvasSizeRef = useRef({ w: 0, h: 0 });
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
+
+  // Interaction state (not React state to avoid re-renders)
+  const interactionRef = useRef<{
+    mode: 'draw' | 'pan' | null;
+    drawMode: boolean | null; // true = set alive, false = set dead
+    startMouseX: number;
+    startMouseY: number;
+    startCamX: number;
+    startCamY: number;
+    lastCellKey: number;
+  }>({ mode: null, drawMode: null, startMouseX: 0, startMouseY: 0, startCamX: 0, startCamY: 0, lastCellKey: -1 });
 
   const [running, setRunning] = useState(false);
   const [generation, setGeneration] = useState(0);
+  const [population, setPopulation] = useState(0);
   const [speed, setSpeed] = useState(10);
-  const [scale, setScale] = useState(1);
+  const [zoomDisplay, setZoomDisplay] = useState(DEFAULT_ZOOM);
   const [showPatterns, setShowPatterns] = useState(false);
   const [benchResult, setBenchResult] = useState<string | null>(null);
   const [benchRunning, setBenchRunning] = useState(false);
 
-  const { rows, cols, scaledCellSize } = useMemo(() => {
-    const s = cellSize * scale;
-    return { scaledCellSize: s, rows: Math.floor(height / s), cols: Math.floor(width / s) };
-  }, [cellSize, scale, width, height]);
+  // Ensure engine exists
+  if (!engineRef.current) {
+    engineRef.current = new GOLEngine();
+  }
 
-  // Initialize or resize engine
+  // ── Imperative redraw ──
+
+  const redraw = useCallback(() => {
+    const canvas = canvasRef.current;
+    const engine = engineRef.current;
+    if (!canvas || !engine) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    drawFrame(ctx, engine, cameraRef.current, canvas.width, canvas.height, themeRef.current === 'dark');
+  }, []);
+
+  // ── Resize observer ──
+
   useEffect(() => {
-    if (!engineRef.current) {
-      engineRef.current = new GOLEngine(rows, cols);
-      engineRef.current.randomize();
-    } else {
-      engineRef.current.resize(rows, cols);
-    }
-    setGeneration(engineRef.current.generation);
-    drawFull();
-  }, [rows, cols]);
-
-  // Redraw on theme change
-  useEffect(() => { drawFull(); }, [theme]);
-
-  // ── Drawing ──
-
-  const getFillColor = () => theme === 'dark' ? '#e2e8f0' : '#0f172a';
-  const getBgColor = () => theme === 'dark' ? 'hsl(224,35%,11%)' : 'hsl(0,0%,99%)';
-
-  function drawFull() {
-    const canvas = canvasRef.current;
-    const engine = engineRef.current;
-    if (!canvas || !engine) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const cs = cellSize * scale;
-    ctx.fillStyle = getBgColor();
-    ctx.fillRect(0, 0, width, height);
-    ctx.fillStyle = getFillColor();
-    for (let r = 0; r < engine.rows; r++) {
-      const rOff = r * engine.cols;
-      for (let c = 0; c < engine.cols; c++) {
-        if (engine.current[rOff + c]) {
-          ctx.fillRect(c * cs, r * cs, cs, cs);
-        }
+    const el = wrapperRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      const entry = entries[0];
+      if (!entry) return;
+      const w = Math.floor(entry.contentRect.width);
+      const h = Math.floor(entry.contentRect.height);
+      canvasSizeRef.current = { w, h };
+      const canvas = canvasRef.current;
+      if (canvas) {
+        canvas.width = w;
+        canvas.height = h;
+        redraw();
       }
-    }
-  }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [redraw]);
 
-  function drawDirty() {
-    const canvas = canvasRef.current;
-    const engine = engineRef.current;
-    if (!canvas || !engine) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+  // ── Wheel zoom (cursor-centered) ──
 
-    const cs = cellSize * scale;
-    const fill = getFillColor();
-    const bg = getBgColor();
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      const cam = cameraRef.current;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
 
-    for (let i = 0; i < engine.changedCount; i++) {
-      const idx = engine.changed[i];
-      const r = (idx / engine.cols) | 0;
-      const c = idx % engine.cols;
-      if (engine.current[idx]) {
-        ctx.fillStyle = fill;
-      } else {
-        ctx.fillStyle = bg;
-      }
-      ctx.fillRect(c * cs, r * cs, cs, cs);
-    }
-  }
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
 
-  // ── Simulation loop using requestAnimationFrame ──
+      // World coord under cursor before zoom
+      const wx = screenToWorldX(mx, cam, canvas.width);
+      const wy = screenToWorldY(my, cam, canvas.height);
+
+      // Apply zoom
+      const factor = e.deltaY > 0 ? 0.9 : 1 / 0.9;
+      cam.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, cam.zoom * factor));
+
+      // Adjust camera so world coord stays under cursor
+      cam.x = wx - (mx - canvas.width / 2) / cam.zoom;
+      cam.y = wy - (my - canvas.height / 2) / cam.zoom;
+
+      setZoomDisplay(Math.round(cam.zoom * 10) / 10);
+      redraw();
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, [redraw]);
+
+  // ── Prevent context menu on canvas ──
+
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    const handler = (e: MouseEvent) => e.preventDefault();
+    el.addEventListener('contextmenu', handler);
+    return () => el.removeEventListener('contextmenu', handler);
+  }, []);
+
+  // ── Simulation loop ──
 
   useEffect(() => {
     if (!running) {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
       return;
     }
 
@@ -344,197 +465,324 @@ const GameOfLife = ({ width, height, cellSize = 10 }: GameOfLifeProps) => {
       const interval = 1000 / speed;
 
       if (elapsed >= interval) {
-        // Calculate how many steps to take (catch up if behind)
         const steps = Math.min(Math.floor(elapsed / interval), 5);
-        for (let i = 0; i < steps; i++) {
-          engine.step();
-        }
-        drawDirty();
-        setGeneration(engine.generation);
+        for (let i = 0; i < steps; i++) engine.step();
         lastFrameRef.current = time - (elapsed % interval);
+        setGeneration(engine.generation);
+        setPopulation(engine.alive.size);
       }
 
+      redraw();
       rafRef.current = requestAnimationFrame(loop);
     };
 
     rafRef.current = requestAnimationFrame(loop);
-    return () => { cancelAnimationFrame(rafRef.current); };
-  }, [running, speed, scale, theme]);
+    return () => { cancelAnimationFrame(rafRef.current); rafRef.current = 0; };
+  }, [running, speed, redraw]);
+
+  // Redraw on theme change
+  useEffect(() => { redraw(); }, [theme, redraw]);
 
   // ── Controls ──
 
-  const handleInit = () => {
+  const handleInit = useCallback(() => {
     const engine = engineRef.current;
     if (!engine) return;
-    engine.randomize();
+    const cam = cameraRef.current;
+    const { w, h } = canvasSizeRef.current;
+    const viewW = Math.ceil(w / cam.zoom);
+    const viewH = Math.ceil(h / cam.zoom);
+    engine.randomize(Math.round(cam.x), Math.round(cam.y), viewW, viewH);
     setGeneration(0);
-    drawFull();
-  };
+    setPopulation(engine.alive.size);
+    redraw();
+  }, [redraw]);
 
-  const handleClear = () => {
+  const handleClear = useCallback(() => {
     const engine = engineRef.current;
     if (!engine) return;
     engine.clear();
     setGeneration(0);
-    drawFull();
-  };
+    setPopulation(0);
+    redraw();
+  }, [redraw]);
 
-  const handleScaleChange = (newScale: number) => {
-    if (running) return;
-    setScale(newScale);
-    // Engine will resize via the useEffect on [rows, cols]
-  };
+  const handleStep = useCallback(() => {
+    const engine = engineRef.current;
+    if (!engine || running) return;
+    engine.step();
+    setGeneration(engine.generation);
+    setPopulation(engine.alive.size);
+    redraw();
+  }, [running, redraw]);
 
-  const handleSelectPattern = (content: string) => {
+  const handleHome = useCallback(() => {
+    cameraRef.current = { x: 0, y: 0, zoom: DEFAULT_ZOOM };
+    setZoomDisplay(DEFAULT_ZOOM);
+    redraw();
+  }, [redraw]);
+
+  const handleZoomSlider = useCallback((val: number) => {
+    const cam = cameraRef.current;
+    cam.zoom = val;
+    setZoomDisplay(Math.round(val * 10) / 10);
+    redraw();
+  }, [redraw]);
+
+  const handleSelectPattern = useCallback((content: string) => {
     const engine = engineRef.current;
     if (!engine) return;
-    engine.loadPattern(parseLif(content));
+    const cam = cameraRef.current;
+    engine.loadPattern(parseLif(content), Math.round(cam.x), Math.round(cam.y));
     setGeneration(0);
+    setPopulation(engine.alive.size);
     setShowPatterns(false);
-    drawFull();
-  };
+    redraw();
+  }, [redraw]);
 
   // ── Benchmark ──
 
-  const runBenchmark = () => {
+  const runBenchmark = useCallback(() => {
     if (running || benchRunning) return;
     setBenchRunning(true);
     setBenchResult(null);
 
-    // Use a separate engine instance so we don't modify the displayed grid
-    const benchEngine = new GOLEngine(rows, cols);
-    benchEngine.randomize();
+    const engine = engineRef.current;
+    if (!engine) return;
 
-    // Run in a setTimeout to let React render the "running" state
+    let benchEngine: GOLEngine;
+    if (engine.alive.size > 0) {
+      benchEngine = engine.clone();
+    } else {
+      benchEngine = new GOLEngine();
+      benchEngine.randomize(0, 0, 200, 200);
+    }
+
     setTimeout(() => {
       const iterations = 1000;
       const start = performance.now();
       benchEngine.stepN(iterations);
       const elapsed = performance.now() - start;
       const gps = Math.round(iterations / (elapsed / 1000));
-      setBenchResult(`${gps.toLocaleString()} gen/s (${iterations} gens in ${elapsed.toFixed(1)}ms on ${rows}x${cols} grid)`);
+      setBenchResult(`${gps.toLocaleString()} gen/s (${iterations} in ${elapsed.toFixed(1)}ms)`);
       setBenchRunning(false);
     }, 50);
-  };
+  }, [running, benchRunning]);
 
-  // ── Mouse interaction (refs, no React state updates per move) ──
+  // ── Mouse interaction ──
 
-  const getCellPos = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const getWorldCell = (e: React.MouseEvent<HTMLCanvasElement>): { x: number; y: number } | null => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const cs = cellSize * scale;
-    const c = Math.floor(x / cs);
-    const r = Math.floor(y / cs);
-    if (r >= 0 && r < rows && c >= 0 && c < cols) return { r, c };
-    return null;
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const cam = cameraRef.current;
+    return {
+      x: Math.floor(screenToWorldX(mx, cam, canvas.width)),
+      y: Math.floor(screenToWorldY(my, cam, canvas.height)),
+    };
   };
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const pos = getCellPos(e);
+    const inter = interactionRef.current;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+
+    if (e.button === 1 || e.button === 2) {
+      // Middle or right click: pan
+      inter.mode = 'pan';
+      inter.startMouseX = e.clientX - rect.left;
+      inter.startMouseY = e.clientY - rect.top;
+      inter.startCamX = cameraRef.current.x;
+      inter.startCamY = cameraRef.current.y;
+      return;
+    }
+
+    // Left click: draw
     const engine = engineRef.current;
-    if (!pos || !engine) return;
-    isDraggingRef.current = true;
-    draggedRef.current = new Set([pos.r * cols + pos.c]);
-    engine.toggle(pos.r, pos.c);
-    drawDirty();
+    if (!engine) return;
+    const cell = getWorldCell(e);
+    if (!cell) return;
+
+    inter.mode = 'draw';
+    const key = pack(cell.x, cell.y);
+    const isAlive = engine.toggle(cell.x, cell.y);
+    inter.drawMode = isAlive; // subsequent drags set cells to this state
+    inter.lastCellKey = key;
+    setPopulation(engine.alive.size);
+    redraw();
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDraggingRef.current) return;
-    const pos = getCellPos(e);
-    const engine = engineRef.current;
-    if (!pos || !engine) return;
-    const key = pos.r * cols + pos.c;
-    if (!draggedRef.current.has(key)) {
-      draggedRef.current.add(key);
-      engine.toggle(pos.r, pos.c);
-      drawDirty();
+    const inter = interactionRef.current;
+    if (!inter.mode) return;
+
+    if (inter.mode === 'pan') {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const cam = cameraRef.current;
+      cam.x = inter.startCamX - (mx - inter.startMouseX) / cam.zoom;
+      cam.y = inter.startCamY - (my - inter.startMouseY) / cam.zoom;
+      redraw();
+      return;
+    }
+
+    if (inter.mode === 'draw') {
+      const engine = engineRef.current;
+      if (!engine) return;
+      const cell = getWorldCell(e);
+      if (!cell) return;
+      const key = pack(cell.x, cell.y);
+      if (key === inter.lastCellKey) return;
+      inter.lastCellKey = key;
+      engine.set(cell.x, cell.y, inter.drawMode!);
+      setPopulation(engine.alive.size);
+      redraw();
     }
   };
 
-  const handleMouseUp = () => { isDraggingRef.current = false; };
+  const handleMouseUp = () => {
+    interactionRef.current.mode = null;
+  };
 
   // ── Render ──
 
   return (
-    <>
-      <div className="flex flex-col items-center">
+    <div className="flex flex-col gap-2 flex-1 min-h-0">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-2 p-2 bg-card rounded-lg border border-border">
+        {/* Playback */}
+        <div className="flex items-center gap-1">
+          <Button
+            variant="default"
+            size="sm"
+            className="h-7 w-7 p-0"
+            onClick={() => setRunning(!running)}
+            title={running ? 'Pause' : 'Play'}
+          >
+            {running ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5 ml-0.5" />}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            onClick={handleStep}
+            disabled={running}
+            title="Step forward"
+          >
+            <SkipForward className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+
+        <div className="w-px h-5 bg-border" />
+
+        {/* Speed */}
+        <div className="flex items-center gap-2">
+          <Gauge className="h-3.5 w-3.5 text-muted-foreground" />
+          <Slider
+            value={[speed]}
+            onValueChange={(v) => setSpeed(v[0])}
+            min={1}
+            max={60}
+            step={1}
+            className="w-20"
+          />
+          <span className="text-[10px] text-muted-foreground w-8 tabular-nums">{speed}/s</span>
+        </div>
+
+        <div className="w-px h-5 bg-border" />
+
+        {/* Zoom */}
+        <div className="flex items-center gap-2">
+          <ZoomOut className="h-3.5 w-3.5 text-muted-foreground" />
+          <Slider
+            value={[zoomDisplay]}
+            onValueChange={(v) => handleZoomSlider(v[0])}
+            min={MIN_ZOOM}
+            max={MAX_ZOOM}
+            step={0.5}
+            className="w-20"
+          />
+          <ZoomIn className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-[10px] text-muted-foreground w-10 tabular-nums">{zoomDisplay.toFixed(1)}x</span>
+        </div>
+
+        <div className="w-px h-5 bg-border" />
+
+        {/* Actions */}
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 px-2" onClick={handleInit} title="Randomize">
+            <RotateCcw className="h-3 w-3" /> Random
+          </Button>
+          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 px-2" onClick={handleClear} title="Clear">
+            <Trash2 className="h-3 w-3" /> Clear
+          </Button>
+          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 px-2" onClick={() => setShowPatterns(true)}>
+            <Grid3X3 className="h-3 w-3" /> Patterns
+          </Button>
+          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={handleHome} title="Reset view to origin">
+            <Home className="h-3 w-3" />
+          </Button>
+        </div>
+
+        <div className="w-px h-5 bg-border" />
+
+        {/* Benchmark */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 text-xs gap-1 px-2"
+          onClick={runBenchmark}
+          disabled={running || benchRunning}
+        >
+          <Zap className="h-3 w-3" />
+          {benchRunning ? 'Running...' : 'Bench'}
+        </Button>
+
+        {/* Stats */}
+        <div className="flex items-center gap-3 ml-auto">
+          {benchResult && (
+            <span className="text-[10px] text-muted-foreground font-mono hidden sm:inline">{benchResult}</span>
+          )}
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-muted-foreground">Gen</span>
+            <span className="font-mono tabular-nums font-medium">{generation.toLocaleString()}</span>
+          </div>
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-muted-foreground">Pop</span>
+            <span className="font-mono tabular-nums font-medium">{population.toLocaleString()}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Canvas */}
+      <div
+        ref={wrapperRef}
+        className="flex-1 min-h-0 border border-border rounded-lg overflow-hidden bg-card"
+      >
         <canvas
           ref={canvasRef}
-          width={width}
-          height={height}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
-          className="border border-border cursor-pointer rounded-md"
+          className="cursor-crosshair block w-full h-full"
         />
       </div>
-      <div className="mt-4 w-full flex items-center">
-        <div className="flex-1" />
-        <div className="flex gap-3 items-center flex-wrap justify-center">
-          <div className="flex flex-col items-center gap-1">
-            <label className="text-xs text-muted-foreground">Speed: {speed}/s</label>
-            <Slider
-              value={[speed]}
-              onValueChange={(v) => setSpeed(v[0])}
-              min={1}
-              max={60}
-              step={1}
-              className="w-24"
-            />
-          </div>
-          <div className="flex flex-col items-center gap-1">
-            <label className="text-xs text-muted-foreground">Scale: {scale.toFixed(1)}x</label>
-            <Slider
-              value={[scale]}
-              onValueChange={(v) => handleScaleChange(v[0])}
-              min={0.5}
-              max={3}
-              step={0.1}
-              className="w-24"
-            />
-          </div>
-          <Button onClick={() => setRunning(!running)}>
-            {running ? 'Pause' : 'Play'}
-          </Button>
-          <Button variant="secondary" onClick={handleInit}>
-            Reset
-          </Button>
-          <Button variant="destructive" onClick={handleClear}>
-            Clear
-          </Button>
-          <Button variant="outline" onClick={() => setShowPatterns(true)}>
-            Patterns
-          </Button>
-          <Button
-            variant="outline"
-            onClick={runBenchmark}
-            disabled={running || benchRunning}
-            className="gap-1"
-          >
-            <Zap className="h-4 w-4" />
-            {benchRunning ? 'Running...' : 'Benchmark'}
-          </Button>
-        </div>
-        <div className="flex-1 flex flex-col items-end gap-1">
-          <Badge variant="outline">Generation: {generation}</Badge>
-          {benchResult && (
-            <Badge variant="secondary" className="text-xs font-mono">
-              {benchResult}
-            </Badge>
-          )}
-        </div>
-      </div>
+
+      {/* Pattern Selector */}
       <PatternSelector
         open={showPatterns}
         onOpenChange={setShowPatterns}
         onSelect={handleSelectPattern}
       />
-    </>
+    </div>
   );
 };
 
