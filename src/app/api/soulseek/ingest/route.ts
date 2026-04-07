@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 import path from 'path';
 import pool from '@/lib/db';
-import { scanSingleAlbum } from '@/lib/musicScanner';
-import { sanitizeFilename } from '@/lib/songUtils';
+import { scanSingleAlbum, generateThumbnail } from '@/lib/musicScanner';
+import { sanitizeFilename, cleanSongDisplay } from '@/lib/songUtils';
 import { parseFile } from 'music-metadata';
 
 export const dynamic = 'force-dynamic';
@@ -27,8 +27,28 @@ export async function GET() {
       pendingFiles = await walkDir(DOWNLOADS_DIR);
     } catch { /* dir might not exist */ }
 
+    // Enrich staging items with cleaned names and cover art
+    const enriched = await Promise.all(stagingRows.map(async (row) => {
+      const cleanedName = cleanSongDisplay(row.filename, row.artist || undefined, row.album || undefined);
+      let coverImage: string | null = null;
+
+      // Try to extract embedded cover art from the actual file
+      const localFile = await findDownloadFile(row.filename);
+      if (localFile) {
+        try {
+          const metadata = await parseFile(localFile);
+          const picture = metadata.common.picture?.[0];
+          if (picture) {
+            coverImage = await generateThumbnail(Buffer.from(picture.data));
+          }
+        } catch { /* no metadata */ }
+      }
+
+      return { ...row, cleanedName, coverImage };
+    }));
+
     return NextResponse.json({
-      staging: stagingRows,
+      staging: enriched,
       pendingFiles: pendingFiles.filter(f => AUDIO_EXTENSIONS.has(path.extname(f).toLowerCase())),
     });
   } catch (error) {

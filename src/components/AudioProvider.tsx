@@ -10,6 +10,8 @@ export interface Album {
   artist: string;
   coverImage?: string;
   songs: string[];
+  source?: string;
+  addedAt?: string;
 }
 
 export interface TrackRef {

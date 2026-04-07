@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+@keyframes bar-bounce {
+  0%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(0.4); }
+}
+
 @theme {
   /* Base surfaces */
   --color-background: hsl(0 0% 99%);

@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Volume1, BarChart3, Music, Shuffle, ListMusic, X, Plus, Trash2, ListPlus, Disc3, ChevronLeft, Flame, Calendar, Trophy, Disc } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Volume1, BarChart3, Music, Shuffle, ListMusic, X, Plus, Trash2, ListPlus, Disc3, ChevronLeft, Flame, Calendar, Trophy, Disc, Search, Clock, Share2, ExternalLink } from 'lucide-react';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -380,7 +381,105 @@ export default function BarFooPage() {
   const [newPlaylistOpen, setNewPlaylistOpen] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState('');
   const [pendingSong, setPendingSong] = useState<{ artist: string; album: string; song: string } | null>(null);
+  const [activeArtist, setActiveArtist] = useState<string | null>(null);
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const albumGridRef = useRef<HTMLDivElement>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [recentSearches, setRecentSearches] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('barfoo_recent_searches') || '[]'); } catch { return []; }
+  });
+  const addRecentSearch = useCallback((q: string) => {
+    setRecentSearches(prev => {
+      const next = [q, ...prev.filter(s => s !== q)].slice(0, 8);
+      localStorage.setItem('barfoo_recent_searches', JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  // ── Fuzzy search index ──
+  const searchIndex = useMemo(() => {
+    if (!albums.length) return [];
+    const entries: { type: 'artist' | 'album' | 'song'; label: string; sub: string; albumIndex: number; songIndex?: number; tokens: string[] }[] = [];
+    const seenArtists = new Set<string>();
+    albums.forEach((album, ai) => {
+      // Artist entries (deduplicated)
+      if (!seenArtists.has(album.artist.toLowerCase())) {
+        seenArtists.add(album.artist.toLowerCase());
+        entries.push({ type: 'artist', label: album.artist, sub: `${albums.filter(a => a.artist === album.artist).length} albums`, albumIndex: ai, tokens: album.artist.toLowerCase().split(/\s+/) });
+      }
+      // Album entries
+      entries.push({ type: 'album', label: album.name, sub: album.artist, albumIndex: ai, tokens: [...album.name.toLowerCase().split(/\s+/), ...album.artist.toLowerCase().split(/\s+/)] });
+      // Song entries
+      album.songs.forEach((song, si) => {
+        const clean = cleanSongDisplay(song, album.artist, album.name);
+        entries.push({ type: 'song', label: clean, sub: `${album.artist} — ${album.name}`, albumIndex: ai, songIndex: si, tokens: [...clean.toLowerCase().split(/\s+/), ...album.artist.toLowerCase().split(/\s+/)] });
+      });
+    });
+    return entries;
+  }, [albums]);
+
+  const searchResults = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (q.length < 2) return [];
+    const qTokens = q.split(/\s+/);
+
+    // Simple fuzzy: for each query token, check if any entry token starts with it or has edit distance <= 1 for short tokens
+    function fuzzyMatch(entryTokens: string[], queryTokens: string[]): number {
+      let score = 0;
+      for (const qt of queryTokens) {
+        let best = 0;
+        for (const et of entryTokens) {
+          if (et === qt) { best = Math.max(best, 3); }
+          else if (et.startsWith(qt)) { best = Math.max(best, 2); }
+          else if (qt.length >= 3 && et.includes(qt)) { best = Math.max(best, 1); }
+          else if (qt.length >= 3 && editDist1(et, qt)) { best = Math.max(best, 1); }
+        }
+        if (best === 0) return 0; // All query tokens must match something
+        score += best;
+      }
+      return score;
+    }
+
+    // Check if two strings are within edit distance 1
+    function editDist1(a: string, b: string): boolean {
+      if (Math.abs(a.length - b.length) > 1) return false;
+      let diffs = 0;
+      if (a.length === b.length) {
+        for (let i = 0; i < a.length; i++) { if (a[i] !== b[i]) diffs++; if (diffs > 1) return false; }
+        return diffs === 1;
+      }
+      const [shorter, longer] = a.length < b.length ? [a, b] : [b, a];
+      let si = 0;
+      for (let li = 0; li < longer.length; li++) {
+        if (shorter[si] === longer[li]) si++;
+        else { diffs++; if (diffs > 1) return false; }
+      }
+      return true;
+    }
+
+    const scored = searchIndex
+      .map(entry => ({ ...entry, score: fuzzyMatch(entry.tokens, qTokens) }))
+      .filter(e => e.score > 0)
+      .sort((a, b) => {
+        // Prioritize: exact match > type (artist > album > song) > score
+        if (b.score !== a.score) return b.score - a.score;
+        const typeOrder = { artist: 0, album: 1, song: 2 };
+        return typeOrder[a.type] - typeOrder[b.type];
+      });
+
+    return scored.slice(0, 12);
+  }, [searchQuery, searchIndex]);
+
+  const scrollToAlbum = useCallback((index: number) => {
+    const container = albumGridRef.current;
+    if (!container) return;
+    const el = container.querySelector(`[data-album-index="${index}"]`) as HTMLElement | null;
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, []);
 
   // Sync selectedAlbum when track changes
   useEffect(() => {
@@ -497,6 +596,12 @@ export default function BarFooPage() {
             </ContextMenuItem>
           </ContextMenuSubContent>
         </ContextMenuSub>
+        <ContextMenuSeparator />
+        <ContextMenuItem asChild>
+          <Link href={`/projects/soulseek?search=${encodeURIComponent(artist)}`}>
+            <Share2 className="h-4 w-4 mr-2" />Find Artist on Soulseek
+          </Link>
+        </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   );
@@ -514,7 +619,7 @@ export default function BarFooPage() {
       return (
         <SongContextMenu artist={alb.artist} album={alb.name} song={songs[globalIdx]}>
           <div
-            className={`group flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-all ${
+            className={`group flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer ${
               isCurrent
                 ? 'bg-primary/15 text-primary'
                 : 'hover:bg-muted/60'
@@ -523,15 +628,14 @@ export default function BarFooPage() {
           >
             <span className={`text-xs w-5 text-right tabular-nums ${isCurrent ? 'text-primary' : 'text-muted-foreground'}`}>{num}</span>
             <span className="text-sm flex-1 truncate">{cleaned}</span>
-            {isCurrent && isPlaying ? (
-              <div className="flex items-center gap-0.5">
-                <div className="w-0.5 h-3 bg-primary rounded-full animate-pulse" />
-                <div className="w-0.5 h-4 bg-primary rounded-full animate-pulse" style={{ animationDelay: '0.15s' }} />
-                <div className="w-0.5 h-2 bg-primary rounded-full animate-pulse" style={{ animationDelay: '0.3s' }} />
+            <div className="w-4 h-4 flex items-center justify-center shrink-0">
+              <div className={`items-center gap-0.5 ${isCurrent && isPlaying ? 'flex' : 'hidden'}`}>
+                <div className="w-0.5 bg-primary rounded-full animate-[bar-bounce_0.8s_ease-in-out_infinite]" style={{ height: 12 }} />
+                <div className="w-0.5 bg-primary rounded-full animate-[bar-bounce_0.8s_ease-in-out_0.15s_infinite]" style={{ height: 16 }} />
+                <div className="w-0.5 bg-primary rounded-full animate-[bar-bounce_0.8s_ease-in-out_0.3s_infinite]" style={{ height: 8 }} />
               </div>
-            ) : (
-              <Play className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-            )}
+              <Play className={`h-3.5 w-3.5 text-muted-foreground ${isCurrent && isPlaying ? 'hidden' : 'hidden group-hover:block'}`} />
+            </div>
           </div>
         </SongContextMenu>
       );
@@ -587,6 +691,112 @@ export default function BarFooPage() {
               </span>
             )}
           </div>
+
+          {/* Search bar */}
+          {albums.length > 0 && (
+            <div className="relative flex-1 max-w-xs mx-4 hidden sm:block">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+              <input
+                ref={searchRef}
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                onFocus={() => setSearchFocused(true)}
+                onKeyDown={e => {
+                  if (e.key === 'Escape') { setSearchQuery(''); setSearchFocused(false); searchRef.current?.blur(); }
+                  if (e.key === 'Enter' && searchResults.length > 0) {
+                    const top = searchResults[0];
+                    addRecentSearch(searchQuery.trim());
+                    if (top.type === 'song' && top.songIndex !== undefined) {
+                      ctxPlayTrack(top.albumIndex, top.songIndex);
+                    } else if (top.type === 'artist') {
+                      setActiveArtist(top.label);
+                    } else {
+                      setSelectedAlbum(top.albumIndex);
+                    }
+                    setSearchQuery(''); setSearchFocused(false); searchRef.current?.blur();
+                    setShowStats(false); setShowPlaylists(false);
+                  }
+                }}
+                placeholder="Search..."
+                className="w-full pl-8 pr-3 py-1.5 rounded-md bg-muted/40 border border-border/40 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 transition-colors"
+              />
+              {/* Results dropdown */}
+              <AnimatePresence>
+                {searchFocused && (searchResults.length > 0 || (searchQuery.trim().length < 2 && recentSearches.length > 0)) && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.12 }}
+                    className="absolute z-50 top-full mt-1 w-80 rounded-lg bg-card border border-border/60 shadow-2xl overflow-hidden"
+                  >
+                    {/* Recent searches (when no query) */}
+                    {searchQuery.trim().length < 2 && recentSearches.length > 0 && (
+                      <div>
+                        <div className="px-3 py-1.5 border-b border-border/30">
+                          <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Recent</span>
+                        </div>
+                        {recentSearches.map((q, i) => (
+                          <button
+                            key={i}
+                            onMouseDown={e => e.preventDefault()}
+                            onClick={() => { setSearchQuery(q); }}
+                            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left hover:bg-muted/40 transition-colors"
+                          >
+                            <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
+                            <span className="text-xs text-foreground">{q}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {/* Search results */}
+                    <div className="max-h-72 overflow-y-auto">
+                      {searchResults.map((r, i) => (
+                        <button
+                          key={`${r.type}-${r.albumIndex}-${r.songIndex ?? ''}-${i}`}
+                          onMouseDown={e => e.preventDefault()}
+                          onClick={() => {
+                            addRecentSearch(searchQuery.trim());
+                            if (r.type === 'song' && r.songIndex !== undefined) {
+                              ctxPlayTrack(r.albumIndex, r.songIndex);
+                            } else if (r.type === 'artist') {
+                              setActiveArtist(r.label);
+                            } else {
+                              setSelectedAlbum(r.albumIndex);
+                              setSidebarOpen(true);
+                            }
+                            setSearchQuery(''); setSearchFocused(false);
+                            setShowStats(false); setShowPlaylists(false);
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-muted/40 transition-colors"
+                        >
+                          <div className={`shrink-0 h-5 w-5 rounded flex items-center justify-center text-[9px] font-bold uppercase ${
+                            r.type === 'artist' ? 'bg-primary/15 text-primary' :
+                            r.type === 'album' ? 'bg-amber-400/15 text-amber-400' :
+                            'bg-emerald-400/15 text-emerald-400'
+                          }`}>
+                            {r.type === 'artist' ? 'A' : r.type === 'album' ? 'AL' : <Music className="h-3 w-3" />}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-medium text-foreground truncate">{r.label}</p>
+                            <p className="text-[10px] text-muted-foreground truncate">{r.sub}</p>
+                          </div>
+                          {r.type === 'song' && (
+                            <Play className="h-3 w-3 text-muted-foreground shrink-0" />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
+
+          {/* Click-away to close search */}
+          {searchFocused && <div className="fixed inset-0 z-40" onClick={() => setSearchFocused(false)} />}
+
           <div className="flex items-center gap-1.5">
             {albums.length > 0 && (
               <Button
@@ -603,7 +813,7 @@ export default function BarFooPage() {
               <Button
                 variant={showPlaylists ? 'default' : 'ghost'}
                 size="sm"
-                onClick={() => { setShowPlaylists(!showPlaylists); setShowStats(false); }}
+                onClick={() => { setShowPlaylists(!showPlaylists); setShowStats(false); setActiveArtist(null); }}
                 className="h-8 text-xs"
               >
                 <ListMusic className="h-3.5 w-3.5 mr-1" />
@@ -613,7 +823,7 @@ export default function BarFooPage() {
             <Button
               variant={showStats ? 'default' : 'ghost'}
               size="sm"
-              onClick={() => { setShowStats(!showStats); setShowPlaylists(false); if (!showStats) fetchStats(); }}
+              onClick={() => { setShowStats(!showStats); setShowPlaylists(false); setActiveArtist(null); if (!showStats) fetchStats(); }}
               className="h-8 text-xs"
             >
               {showStats ? <Music className="h-3.5 w-3.5 mr-1" /> : <BarChart3 className="h-3.5 w-3.5 mr-1" />}
@@ -626,7 +836,7 @@ export default function BarFooPage() {
         <div className="flex-1 flex min-h-0">
 
           {/* ── Left: Album grid / Stats / Playlists (scrollable) ── */}
-          <div className={`flex-1 min-w-0 overflow-y-auto ${hasPlayer ? 'pb-24' : 'pb-4'}`}>
+          <div ref={albumGridRef} className={`flex-1 min-w-0 overflow-y-auto ${hasPlayer ? 'pb-24' : 'pb-4'}`}>
             <AnimatePresence mode="wait">
               {showStats ? (
                 <motion.div key="stats" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="p-5 space-y-4">
@@ -720,6 +930,165 @@ export default function BarFooPage() {
                     </>
                   )}
                 </motion.div>
+              ) : activeArtist ? (
+                <motion.div key={`artist-${activeArtist}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="p-5 space-y-5">
+                  {(() => {
+                    const artistAlbums = albums
+                      .map((a, i) => ({ album: a, index: i }))
+                      .filter(({ album }) => album.artist === activeArtist);
+                    const totalSongs = artistAlbums.reduce((sum, { album }) => sum + album.songs.length, 0);
+
+                    return (
+                      <>
+                        {/* Artist header */}
+                        <div className="flex items-center gap-4">
+                          <button onClick={() => setActiveArtist(null)} className="p-1.5 rounded-lg hover:bg-muted/40 transition-colors text-muted-foreground hover:text-foreground">
+                            <ChevronLeft className="h-5 w-5" />
+                          </button>
+                          {/* Composite cover: show first 4 album covers in a grid */}
+                          <div className="w-20 h-20 rounded-xl overflow-hidden grid grid-cols-2 grid-rows-2 shadow-lg shrink-0">
+                            {artistAlbums.slice(0, 4).map(({ album, index }) => (
+                              album.coverImage ? (
+                                <div key={index} className="bg-cover bg-center" style={{ backgroundImage: `url(${album.coverImage})` }} />
+                              ) : (
+                                <div key={index} className="bg-muted flex items-center justify-center">
+                                  <Music className="h-3 w-3 text-muted-foreground" />
+                                </div>
+                              )
+                            ))}
+                            {artistAlbums.length < 4 && Array.from({ length: 4 - Math.min(artistAlbums.length, 4) }).map((_, i) => (
+                              <div key={`empty-${i}`} className="bg-muted" />
+                            ))}
+                          </div>
+                          <div>
+                            <h2 className="text-xl font-bold tracking-tight">{activeArtist}</h2>
+                            <p className="text-sm text-muted-foreground">{artistAlbums.length} album{artistAlbums.length !== 1 ? 's' : ''} &middot; {totalSongs} tracks</p>
+                          </div>
+                          <div className="ml-auto flex items-center gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 text-xs"
+                              onClick={() => {
+                                const allSongs = artistAlbums.flatMap(({ album, index }) =>
+                                  album.songs.map((_, si) => ({ albumIndex: index, songIndex: si }))
+                                );
+                                const shuffled = allSongs.sort(() => Math.random() - 0.5);
+                                if (shuffled.length > 0) {
+                                  setQueue(shuffled);
+                                  setQueueIndex(0);
+                                  setShuffleMode(true);
+                                  ctxPlayTrack(shuffled[0].albumIndex, shuffled[0].songIndex);
+                                  setSidebarOpen(true);
+                                }
+                              }}
+                            >
+                              <Shuffle className="h-3.5 w-3.5 mr-1" /> Shuffle All
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 text-xs"
+                              asChild
+                            >
+                              <Link href={`/projects/soulseek?search=${encodeURIComponent(activeArtist!)}`}>
+                                <Share2 className="h-3.5 w-3.5 mr-1" /> Find on Soulseek
+                              </Link>
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* "Expand library" suggestion */}
+                        {artistAlbums.length <= 2 && (
+                          <Link
+                            href={`/projects/soulseek?search=${encodeURIComponent(activeArtist!)}`}
+                            className="flex items-center gap-3 px-4 py-3 rounded-lg border border-dashed border-primary/30 bg-primary/5 hover:bg-primary/10 transition-colors"
+                          >
+                            <Share2 className="h-4 w-4 text-primary shrink-0" />
+                            <div>
+                              <p className="text-sm font-medium text-foreground">Only {artistAlbums.length} album{artistAlbums.length !== 1 ? 's' : ''} in your library</p>
+                              <p className="text-xs text-muted-foreground">Search Soulseek for more by {activeArtist}</p>
+                            </div>
+                            <ExternalLink className="h-3.5 w-3.5 text-muted-foreground ml-auto shrink-0" />
+                          </Link>
+                        )}
+
+                        {/* Albums grid */}
+                        <div className="space-y-3">
+                          {artistAlbums.map(({ album, index }) => {
+                            const sorted = sortedTrackIndices(album.songs);
+                            const isCurrentAlbum = currentTrack?.albumIndex === index;
+                            return (
+                              <div key={index} className="rounded-xl border border-border/40 bg-card/30 overflow-hidden">
+                                {/* Album header row */}
+                                <div className="flex items-center gap-3 p-3">
+                                  <div
+                                    className="w-12 h-12 rounded-lg bg-cover bg-center shadow-md shrink-0 cursor-pointer hover:ring-2 hover:ring-primary/40 transition-shadow"
+                                    style={album.coverImage ? { backgroundImage: `url(${album.coverImage})` } : undefined}
+                                    onClick={() => { setSelectedAlbum(index); setSidebarOpen(true); }}
+                                  >
+                                    {!album.coverImage && (
+                                      <div className="w-full h-full rounded-lg bg-muted flex items-center justify-center">
+                                        <Music className="h-4 w-4 text-muted-foreground" />
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <h3
+                                      className="text-sm font-bold truncate cursor-pointer hover:text-primary transition-colors"
+                                      onClick={() => { setSelectedAlbum(index); setSidebarOpen(true); }}
+                                    >
+                                      {album.name}
+                                    </h3>
+                                    <p className="text-xs text-muted-foreground">{album.songs.length} tracks</p>
+                                  </div>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 text-xs shrink-0"
+                                    onClick={() => playAlbum(index)}
+                                  >
+                                    <Play className="h-3 w-3 mr-1" /> Play
+                                  </Button>
+                                </div>
+
+                                {/* Track list — grid layout (stable, no reflow on re-render) */}
+                                <div className="border-t border-border/30 px-1 py-1 grid grid-cols-2 lg:grid-cols-3">
+                                  {sorted.map((si, num) => {
+                                    const song = album.songs[si];
+                                    const isCurrent = isCurrentAlbum && currentTrack?.songIndex === si;
+                                    const cleaned = cleanSongDisplay(song, album.artist, album.name);
+                                    return (
+                                      <SongContextMenu key={si} artist={album.artist} album={album.name} song={song}>
+                                        <div
+                                          className={`group flex items-center gap-2 px-2.5 py-1 rounded cursor-pointer ${
+                                            isCurrent ? 'bg-primary/15 text-primary' : 'hover:bg-muted/40'
+                                          }`}
+                                          onClick={() => playSong(index, si)}
+                                        >
+                                          <span className={`text-xs w-4 text-right tabular-nums shrink-0 ${isCurrent ? 'text-primary' : 'text-muted-foreground'}`}>{num + 1}</span>
+                                          <span className="text-sm flex-1 truncate min-w-0">{cleaned}</span>
+                                          <div className="w-4 h-4 flex items-center justify-center shrink-0">
+                                            <div className={`items-center gap-0.5 ${isCurrent && isPlaying ? 'flex' : 'hidden'}`}>
+                                              <div className="w-0.5 bg-primary rounded-full animate-[bar-bounce_0.8s_ease-in-out_infinite]" style={{ height: 12 }} />
+                                              <div className="w-0.5 bg-primary rounded-full animate-[bar-bounce_0.8s_ease-in-out_0.15s_infinite]" style={{ height: 16 }} />
+                                              <div className="w-0.5 bg-primary rounded-full animate-[bar-bounce_0.8s_ease-in-out_0.3s_infinite]" style={{ height: 8 }} />
+                                            </div>
+                                            <Play className={`h-3 w-3 text-muted-foreground ${isCurrent && isPlaying ? 'hidden' : 'hidden group-hover:block'}`} />
+                                          </div>
+                                        </div>
+                                      </SongContextMenu>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </>
+                    );
+                  })()}
+                </motion.div>
               ) : loading ? (
                 <div className="p-5 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
                   {Array.from({ length: 18 }).map((_, i) => (
@@ -735,6 +1104,7 @@ export default function BarFooPage() {
                       return (
                         <motion.div
                           key={index}
+                          data-album-index={index}
                           whileHover={{ scale: 1.03 }}
                           whileTap={{ scale: 0.97 }}
                           className={`relative aspect-square rounded-xl overflow-hidden cursor-pointer shadow-md group ${
@@ -764,10 +1134,15 @@ export default function BarFooPage() {
                           {isPlaying_ && (
                             <div className="absolute top-2 right-2 h-6 w-6 rounded-full bg-primary flex items-center justify-center">
                               <div className="flex items-center gap-px">
-                                <div className="w-0.5 h-2 bg-primary-foreground rounded-full animate-pulse" />
-                                <div className="w-0.5 h-3 bg-primary-foreground rounded-full animate-pulse" style={{ animationDelay: '0.15s' }} />
-                                <div className="w-0.5 h-1.5 bg-primary-foreground rounded-full animate-pulse" style={{ animationDelay: '0.3s' }} />
+                                <div className="w-0.5 h-2 bg-primary-foreground rounded-full animate-[bar-bounce_0.8s_ease-in-out_infinite]" />
+                                <div className="w-0.5 h-3 bg-primary-foreground rounded-full animate-[bar-bounce_0.8s_ease-in-out_0.15s_infinite]" />
+                                <div className="w-0.5 h-1.5 bg-primary-foreground rounded-full animate-[bar-bounce_0.8s_ease-in-out_0.3s_infinite]" />
                               </div>
+                            </div>
+                          )}
+                          {!isPlaying_ && album.source === 'soulseek' && album.addedAt && (Date.now() - new Date(album.addedAt).getTime() < 7 * 24 * 60 * 60 * 1000) && (
+                            <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-violet-500/80 backdrop-blur-sm text-[9px] font-bold uppercase tracking-wider text-white">
+                              New
                             </div>
                           )}
                         </motion.div>
@@ -781,16 +1156,16 @@ export default function BarFooPage() {
 
           {/* ── Right: Song detail panel (when album selected) + Queue ── */}
           <AnimatePresence>
-            {(sel || sidebarOpen) && (
+            {((sel && !activeArtist) || sidebarOpen) && (
               <motion.div
                 initial={{ width: 0, opacity: 0 }}
-                animate={{ width: sel && sidebarOpen ? 640 : 320, opacity: 1 }}
+                animate={{ width: sel && !activeArtist && sidebarOpen ? 640 : 320, opacity: 1 }}
                 exit={{ width: 0, opacity: 0 }}
                 transition={{ type: 'spring', stiffness: 300, damping: 30 }}
                 className="shrink-0 border-l border-border/60 flex overflow-hidden"
               >
                 {/* Song detail */}
-                {sel && (
+                {sel && !activeArtist && (
                   <div className="w-80 shrink-0 flex flex-col border-r border-border/40 min-h-0">
                     {/* Album header */}
                     <div className="p-4 shrink-0">
@@ -804,7 +1179,7 @@ export default function BarFooPage() {
                         )}
                         <div className="min-w-0 flex-1 pt-1">
                           <h3 className="text-sm font-bold truncate leading-tight">{sel.name}</h3>
-                          <p className="text-xs text-muted-foreground truncate">{sel.artist}</p>
+                          <p className="text-xs text-muted-foreground truncate cursor-pointer hover:text-foreground transition-colors" onClick={() => { setActiveArtist(sel.artist); setShowStats(false); setShowPlaylists(false); }}>{sel.artist}</p>
                           <p className="text-[10px] text-muted-foreground mt-1">{sel.songs.length} tracks</p>
                         </div>
                         <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setSelectedAlbum(null)}>
@@ -933,8 +1308,17 @@ export default function BarFooPage() {
                   {currentAlbum?.coverImage && currentSongName ? (
                     <SongContextMenu artist={currentAlbum.artist} album={currentAlbum.name} song={currentSongName}>
                       <div
-                        className="w-11 h-11 rounded-lg bg-cover bg-center shadow-md cursor-pointer shrink-0"
+                        className="w-11 h-11 rounded-lg bg-cover bg-center shadow-md cursor-pointer shrink-0 hover:ring-2 hover:ring-primary/40 transition-shadow"
                         style={{ backgroundImage: `url(${currentAlbum.coverImage})` }}
+                        onClick={() => {
+                          if (currentTrack) {
+                            setSelectedAlbum(currentTrack.albumIndex);
+                            setSidebarOpen(true);
+                            setShowStats(false);
+                            setShowPlaylists(false);
+                            scrollToAlbum(currentTrack.albumIndex);
+                          }
+                        }}
                       />
                     </SongContextMenu>
                   ) : (
@@ -944,7 +1328,7 @@ export default function BarFooPage() {
                   )}
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate">{currentSongName ? displaySongName(currentSongName, currentAlbum?.artist, currentAlbum?.name) : ''}</p>
-                    <p className="text-xs text-muted-foreground truncate">{currentAlbum?.artist}</p>
+                    <p className="text-xs text-muted-foreground truncate cursor-pointer hover:text-foreground transition-colors" onClick={() => { if (currentAlbum) { setActiveArtist(currentAlbum.artist); setShowStats(false); setShowPlaylists(false); } }}>{currentAlbum?.artist}</p>
                   </div>
                 </div>
 

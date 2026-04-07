@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTheme } from './ThemeProvider';
 import { motion, AnimatePresence } from 'motion/react';
-import { Sun, Moon, Menu } from 'lucide-react';
+import { Sun, Moon, Menu, UserCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -69,6 +69,19 @@ const Header = () => {
 				<div className="flex flex-1 items-center justify-end gap-1">
 					<Tooltip>
 						<TooltipTrigger asChild>
+							<Button variant="ghost" size="icon" asChild className="h-8 w-8 rounded-full">
+								<Link href="/profile" aria-label="Profile & Settings">
+									<UserCircle className={`h-4 w-4 ${isActive('/profile') ? 'text-foreground' : 'text-muted-foreground'}`} />
+								</Link>
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="bottom">
+							<p className="text-xs">Profile & Settings</p>
+						</TooltipContent>
+					</Tooltip>
+
+					<Tooltip>
+						<TooltipTrigger asChild>
 							<Button
 								variant="ghost"
 								size="icon"
@@ -130,6 +143,16 @@ const Header = () => {
 										{link.label}
 									</Link>
 								))}
+								<Link
+									href="/profile"
+									className={`px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+										isActive('/profile')
+											? 'text-foreground bg-primary/10'
+											: 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+									}`}
+								>
+									Profile & Settings
+								</Link>
 								<Separator className="my-2" />
 								<Button variant="outline" size="sm" onClick={toggleTheme} className="justify-start">
 									{theme === 'light' ? <Sun className="h-4 w-4 mr-2" /> : <Moon className="h-4 w-4 mr-2" />}

@@ -8,10 +8,12 @@ import {
   CheckCircle, XCircle, Loader, Music, ArrowDown,
   ArrowUp, Wifi, WifiOff, RefreshCw, Trash2,
   Check, X, Edit3, Play, File, Folder,
-  HardDrive, Users, TrendingUp, Activity,
+  HardDrive, Users, TrendingUp, Activity, ExternalLink,
 } from 'lucide-react';
+import Link from 'next/link';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
+import { useAudio } from '@/components/AudioProvider';
 
 // ── Types ──
 
@@ -72,6 +74,8 @@ interface StagingItem {
   speed_bytes_per_sec: number;
   status: string;
   created_at: string;
+  cleanedName?: string;
+  coverImage?: string | null;
 }
 
 interface DownloadRecord {
@@ -218,7 +222,7 @@ function QualityTag({ file }: { file: SearchFile }) {
 
 // ── Search Tab ──
 
-function SearchTab() {
+function SearchTab({ libraryArtists, initialSearch }: { libraryArtists: Set<string>; initialSearch: string | null }) {
   const [query, setQuery] = useState('');
   const [searchId, setSearchId] = useState<string | null>(null);
   const [results, setResults] = useState<SearchResult | null>(null);
@@ -228,10 +232,35 @@ function SearchTab() {
   const [showHistory, setShowHistory] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const FILE_TYPES = ['flac', 'mp3', 'wav', 'ogg', 'm4a', 'aac', 'opus', 'wma'] as const;
+  const [enabledTypes, setEnabledTypes] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('slsk_file_types') || 'null')); }
+    catch { return new Set(FILE_TYPES); }
+  });
+  const toggleType = (ext: string) => {
+    setEnabledTypes(prev => {
+      const next = new Set(prev);
+      if (next.has(ext)) next.delete(ext); else next.add(ext);
+      localStorage.setItem('slsk_file_types', JSON.stringify([...next]));
+      return next;
+    });
+  };
+
   // Load search history
   useEffect(() => {
     fetch('/api/soulseek/search').then(r => r.json()).then(d => setHistory(d.searches || [])).catch(() => {});
   }, []);
+
+  // Auto-search from ?search= query param
+  const initialSearchHandled = useRef(false);
+  useEffect(() => {
+    if (initialSearch && !initialSearchHandled.current) {
+      initialSearchHandled.current = true;
+      setQuery(initialSearch);
+      handleSearch(initialSearch);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSearch]);
 
   // Poll for results when searching
   useEffect(() => {
@@ -275,20 +304,21 @@ function SearchTab() {
     }
   };
 
-  const [downloadFlash, setDownloadFlash] = useState<string | null>(null);
+  const [downloadingKeys, setDownloadingKeys] = useState<Set<string>>(new Set());
 
-  const handleDownload = async (username: string, files: SearchFile[]) => {
+  const handleDownload = async (username: string, files: SearchFile[], buttonKey: string) => {
+    setDownloadingKeys(prev => new Set(prev).add(buttonKey));
     try {
-      const res = await fetch('/api/soulseek/downloads', {
+      await fetch('/api/soulseek/downloads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, files: files.map(f => ({ filename: f.filename, size: f.size })) }),
       });
-      if (res.ok) {
-        setDownloadFlash(`Queued ${files.length} file${files.length > 1 ? 's' : ''} from ${username}`);
-        setTimeout(() => setDownloadFlash(null), 3000);
-      }
     } catch {}
+    // Keep green for 2s then clear
+    setTimeout(() => {
+      setDownloadingKeys(prev => { const next = new Set(prev); next.delete(buttonKey); return next; });
+    }, 2000);
   };
 
   const toggleUser = (username: string) => {
@@ -302,12 +332,21 @@ function SearchTab() {
 
   const sortedResponses = useMemo(() => {
     if (!results?.responses) return [];
-    return [...results.responses].sort((a, b) => {
-      // Sort: free slots first, then by file count desc
-      if (a.hasFreeUploadSlot !== b.hasFreeUploadSlot) return a.hasFreeUploadSlot ? -1 : 1;
-      return b.fileCount - a.fileCount;
-    });
-  }, [results]);
+    // Filter files by enabled types, then exclude empty responses
+    return results.responses
+      .map(r => {
+        const filtered = r.files.filter(f => {
+          const ext = f.filename.split('.').pop()?.toLowerCase() || '';
+          return enabledTypes.has(ext);
+        });
+        return { ...r, files: filtered, fileCount: filtered.length };
+      })
+      .filter(r => r.fileCount > 0)
+      .sort((a, b) => {
+        if (a.hasFreeUploadSlot !== b.hasFreeUploadSlot) return a.hasFreeUploadSlot ? -1 : 1;
+        return b.fileCount - a.fileCount;
+      });
+  }, [results, enabledTypes]);
 
   return (
     <div className="space-y-4">
@@ -375,20 +414,23 @@ function SearchTab() {
       {/* Click-away to close history */}
       {showHistory && <div className="fixed inset-0 z-10" onClick={() => setShowHistory(false)} />}
 
-      {/* Download flash */}
-      <AnimatePresence>
-        {downloadFlash && (
-          <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-sm text-emerald-400"
+      {/* File type filter */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Formats:</span>
+        {FILE_TYPES.map(ext => (
+          <button
+            key={ext}
+            onClick={() => toggleType(ext)}
+            className={`text-[11px] font-mono px-2 py-0.5 rounded transition-colors ${
+              enabledTypes.has(ext)
+                ? ext === 'flac' ? 'bg-amber-400/15 text-amber-400' : 'bg-muted/60 text-foreground'
+                : 'bg-transparent text-muted-foreground/40 line-through'
+            }`}
           >
-            <CheckCircle className="h-4 w-4" />
-            {downloadFlash}
-          </motion.div>
-        )}
-      </AnimatePresence>
+            {ext}
+          </button>
+        ))}
+      </div>
 
       {/* Search status */}
       {searching && (
@@ -443,36 +485,81 @@ function SearchTab() {
                         className="overflow-hidden"
                       >
                         <div className="border-t border-border/30">
-                          {/* Download all button */}
-                          <div className="px-3 py-1.5 flex justify-end border-b border-border/20">
-                            <button
-                              onClick={() => handleDownload(response.username, response.files)}
-                              className="text-xs px-2.5 py-1 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors flex items-center gap-1"
-                            >
-                              <Download className="h-3 w-3" /> Download All ({response.fileCount})
-                            </button>
-                          </div>
-                          <div className="max-h-80 overflow-y-auto">
-                            {response.files.map((file, i) => (
-                              <div
-                                key={i}
-                                className="flex items-center gap-2 px-3 py-1.5 hover:bg-muted/20 transition-colors text-xs group"
-                              >
-                                <Music className="h-3 w-3 text-muted-foreground shrink-0" />
-                                <span className="text-foreground truncate flex-1 min-w-0 font-mono" title={file.filename}>
-                                  {basename(file.filename)}
-                                </span>
-                                <QualityTag file={file} />
-                                {file.length ? <span className="text-muted-foreground w-10 text-right">{fmtDuration(file.length)}</span> : null}
-                                <span className="text-muted-foreground w-14 text-right">{fmtBytes(file.size)}</span>
-                                <button
-                                  onClick={() => handleDownload(response.username, [file])}
-                                  className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-primary/20 text-primary transition-all"
-                                >
-                                  <Download className="h-3 w-3" />
-                                </button>
-                              </div>
-                            ))}
+                          <div className="max-h-96 overflow-y-auto">
+                            {(() => {
+                              // Group files by parent folder
+                              const folders = new Map<string, SearchFile[]>();
+                              for (const file of response.files) {
+                                const normalized = file.filename.replace(/\\/g, '/');
+                                const lastSlash = normalized.lastIndexOf('/');
+                                const folder = lastSlash >= 0 ? normalized.substring(0, lastSlash) : '';
+                                if (!folders.has(folder)) folders.set(folder, []);
+                                folders.get(folder)!.push(file);
+                              }
+
+                              return Array.from(folders.entries()).map(([folder, files]) => {
+                                // Show last 2 path segments as folder name
+                                const folderParts = folder.split('/').filter(Boolean);
+                                const folderDisplay = folderParts.slice(-2).join(' / ') || 'Root';
+                                const folderInLibrary = folderParts.some(p => libraryArtists.has(p.toLowerCase()));
+
+                                return (
+                                  <div key={folder} className="border-b border-border/20 last:border-b-0">
+                                    {/* Folder header */}
+                                    <div className="flex items-center gap-2 px-3 py-1.5 bg-muted/20">
+                                      <Folder className="h-3 w-3 text-amber-400 shrink-0" />
+                                      <span className="text-xs font-medium text-foreground truncate flex-1" title={folder}>{folderDisplay}</span>
+                                      {folderInLibrary && <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-violet-400/10 text-violet-400 shrink-0">In Library</span>}
+                                      <span className="text-[10px] text-muted-foreground">{files.length} files</span>
+                                      {(() => {
+                                        const key = `${response.username}:${folder}`;
+                                        const active = downloadingKeys.has(key);
+                                        return (
+                                          <button
+                                            onClick={() => handleDownload(response.username, files, key)}
+                                            disabled={active}
+                                            className={`text-xs px-2 py-0.5 rounded flex items-center gap-1 transition-colors ${
+                                              active ? 'bg-emerald-500/20 text-emerald-400' : 'bg-primary/10 text-primary hover:bg-primary/20'
+                                            }`}
+                                          >
+                                            {active ? <Loader className="h-2.5 w-2.5 animate-spin" /> : <Download className="h-2.5 w-2.5" />}
+                                            {active ? 'Queued' : 'All'}
+                                          </button>
+                                        );
+                                      })()}
+                                    </div>
+                                    {/* Files in folder */}
+                                    {files.map((file, i) => {
+                                      const fileKey = `${response.username}:${file.filename}`;
+                                      const fileActive = downloadingKeys.has(fileKey);
+                                      return (
+                                      <div
+                                        key={i}
+                                        className="flex items-center gap-2 px-3 pl-8 py-1 hover:bg-muted/20 transition-colors text-xs group"
+                                      >
+                                        <Music className="h-3 w-3 text-muted-foreground shrink-0" />
+                                        <span className="text-foreground truncate flex-1 min-w-0 font-mono" title={file.filename}>
+                                          {basename(file.filename)}
+                                        </span>
+                                        <QualityTag file={file} />
+                                        {file.length ? <span className="text-muted-foreground w-10 text-right">{fmtDuration(file.length)}</span> : null}
+                                        <span className="text-muted-foreground w-14 text-right">{fmtBytes(file.size)}</span>
+                                        <button
+                                          onClick={() => handleDownload(response.username, [file], fileKey)}
+                                          disabled={fileActive}
+                                          className={`p-1 rounded transition-all ${
+                                            fileActive ? 'opacity-100 text-emerald-400' : 'opacity-0 group-hover:opacity-100 text-primary hover:bg-primary/20'
+                                          }`}
+                                        >
+                                          {fileActive ? <CheckCircle className="h-3 w-3" /> : <Download className="h-3 w-3" />}
+                                        </button>
+                                      </div>
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              });
+                            })()}
                           </div>
                         </div>
                       </motion.div>
@@ -505,6 +592,38 @@ function SearchTab() {
 
 // ── Downloads Tab ──
 
+const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
+
+function Pagination({ page, totalPages, pageSize, onPageChange, onPageSizeChange }: {
+  page: number; totalPages: number; pageSize: number;
+  onPageChange: (p: number) => void; onPageSizeChange: (s: number) => void;
+}) {
+  if (totalPages <= 1 && pageSize === PAGE_SIZE_OPTIONS[0]) return null;
+  return (
+    <div className="flex items-center justify-between pt-2">
+      <div className="flex items-center gap-1">
+        <span className="text-[10px] text-muted-foreground mr-1">Per page:</span>
+        {PAGE_SIZE_OPTIONS.map(s => (
+          <button key={s} onClick={() => onPageSizeChange(s)}
+            className={`text-[11px] px-1.5 py-0.5 rounded transition-colors ${pageSize === s ? 'bg-muted/60 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+          >{s}</button>
+        ))}
+      </div>
+      {totalPages > 1 && (
+        <div className="flex items-center gap-1">
+          <button onClick={() => onPageChange(page - 1)} disabled={page === 0}
+            className="text-xs px-2 py-0.5 rounded text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+          >Prev</button>
+          <span className="text-[11px] text-muted-foreground tabular-nums">{page + 1} / {totalPages}</span>
+          <button onClick={() => onPageChange(page + 1)} disabled={page >= totalPages - 1}
+            className="text-xs px-2 py-0.5 rounded text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+          >Next</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DownloadsTab() {
   const [liveDownloads, setLiveDownloads] = useState<Record<string, Transfer[]>>({});
   const [staging, setStaging] = useState<StagingItem[]>([]);
@@ -513,6 +632,12 @@ function DownloadsTab() {
   const [editArtist, setEditArtist] = useState('');
   const [editAlbum, setEditAlbum] = useState('');
   const eventSourceRef = useRef<EventSource | null>(null);
+
+  // Pagination state
+  const [activePage, setActivePage] = useState(0);
+  const [activePageSize, setActivePageSize] = useState(10);
+  const [completedPage, setCompletedPage] = useState(0);
+  const [completedPageSize, setCompletedPageSize] = useState(10);
 
   // SSE for live transfers
   useEffect(() => {
@@ -532,7 +657,7 @@ function DownloadsTab() {
     try {
       const [stg, comp] = await Promise.all([
         fetch('/api/soulseek/ingest').then(r => r.json()),
-        fetch('/api/soulseek/downloads?status=completed&limit=30').then(r => r.json()),
+        fetch('/api/soulseek/downloads?status=completed&limit=100').then(r => r.json()),
       ]);
       setStaging(stg.staging || []);
       setCompleted(comp.downloads || []);
@@ -587,7 +712,7 @@ function DownloadsTab() {
           </div>
         ) : (
           <div className="space-y-1">
-            {activeTransfers.map(t => {
+            {activeTransfers.slice(activePage * activePageSize, (activePage + 1) * activePageSize).map(t => {
               const stateInfo = transferStateLabel(t.state);
               return (
                 <div key={t.id} className="rounded-lg border border-border/40 bg-card/60 px-3 py-2 space-y-1.5">
@@ -603,6 +728,12 @@ function DownloadsTab() {
                 </div>
               );
             })}
+            <Pagination
+              page={activePage} totalPages={Math.ceil(activeTransfers.length / activePageSize)}
+              pageSize={activePageSize}
+              onPageChange={setActivePage}
+              onPageSizeChange={s => { setActivePageSize(s); setActivePage(0); }}
+            />
           </div>
         )}
       </div>
@@ -624,11 +755,22 @@ function DownloadsTab() {
               const isEditing = editingId === item.id;
               return (
                 <div key={item.id} className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2.5 space-y-2">
-                  <div className="flex items-center gap-2 text-xs">
-                    <Music className="h-3 w-3 text-amber-400" />
-                    <span className="font-mono text-foreground truncate flex-1">{item.filename}</span>
-                    <span className="text-muted-foreground">from {item.username}</span>
-                    <span className="text-muted-foreground">{fmtBytes(item.size_bytes)}</span>
+                  <div className="flex items-center gap-3">
+                    {/* Cover art */}
+                    {item.coverImage ? (
+                      <div className="w-10 h-10 rounded bg-cover bg-center shadow shrink-0" style={{ backgroundImage: `url(${item.coverImage})` }} />
+                    ) : (
+                      <div className="w-10 h-10 rounded bg-muted/60 flex items-center justify-center shrink-0">
+                        <Music className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{item.cleanedName || item.filename}</p>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span>from {item.username}</span>
+                        <span>{fmtBytes(item.size_bytes)}</span>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -708,17 +850,34 @@ function DownloadsTab() {
             No completed downloads yet
           </div>
         ) : (
-          <div className="rounded-lg border border-border/40 bg-card/60 overflow-hidden">
-            {completed.map((dl, i) => (
-              <div key={dl.id} className={`flex items-center gap-2 px-3 py-2 text-xs ${i > 0 ? 'border-t border-border/20' : ''}`}>
-                <CheckCircle className="h-3 w-3 text-emerald-400 shrink-0" />
-                <span className="font-mono text-foreground truncate flex-1">{dl.filename}</span>
-                <span className="text-muted-foreground">{dl.artist} — {dl.album}</span>
-                <span className="text-muted-foreground">{fmtBytes(dl.size_bytes)}</span>
-                {dl.completed_at && <span className="text-muted-foreground">{fmtTime(dl.completed_at)}</span>}
-              </div>
-            ))}
-          </div>
+          <>
+            <div className="rounded-lg border border-border/40 bg-card/60 overflow-hidden">
+              {completed.slice(completedPage * completedPageSize, (completedPage + 1) * completedPageSize).map((dl, i) => (
+                <div key={dl.id} className={`flex items-center gap-2 px-3 py-2 text-xs ${i > 0 ? 'border-t border-border/20' : ''}`}>
+                  <CheckCircle className="h-3 w-3 text-emerald-400 shrink-0" />
+                  <span className="font-mono text-foreground truncate flex-1">{dl.filename}</span>
+                  <span className="text-muted-foreground">{dl.artist} — {dl.album}</span>
+                  <span className="text-muted-foreground">{fmtBytes(dl.size_bytes)}</span>
+                  {dl.completed_at && <span className="text-muted-foreground">{fmtTime(dl.completed_at)}</span>}
+                  {dl.artist && dl.album && (
+                    <Link
+                      href={`/projects/barfoo`}
+                      className="p-1 rounded hover:bg-primary/20 text-primary transition-colors"
+                      title="Play in Barfoo"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                    </Link>
+                  )}
+                </div>
+              ))}
+            </div>
+            <Pagination
+              page={completedPage} totalPages={Math.ceil(completed.length / completedPageSize)}
+              pageSize={completedPageSize}
+              onPageChange={setCompletedPage}
+              onPageSizeChange={s => { setCompletedPageSize(s); setCompletedPage(0); }}
+            />
+          </>
         )}
       </div>
     </div>
@@ -1147,6 +1306,27 @@ function DailyChart({ downloads, uploads }: { downloads: { date: string; count: 
 export default function SoulseekPage() {
   const [activeTab, setActiveTab] = useState<TabId>('search');
   const [connected, setConnected] = useState<boolean | null>(null);
+  const { albums } = useAudio();
+
+  // Build a set of lowercase artist names for "In Library" matching
+  const libraryArtists = useMemo(() => {
+    const set = new Set<string>();
+    for (const a of albums) set.add(a.artist.toLowerCase());
+    return set;
+  }, [albums]);
+
+  // Handle ?search= query param from Barfoo links
+  const [initialSearch, setInitialSearch] = useState<string | null>(null);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get('search');
+    if (q) {
+      setInitialSearch(q);
+      setActiveTab('search');
+      // Clean the URL
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
 
   useEffect(() => {
     fetch('/api/soulseek/status')
@@ -1157,7 +1337,7 @@ export default function SoulseekPage() {
 
   return (
     <PageTransition>
-      <div className="min-h-screen bg-background">
+      <div className="bg-background" style={{ minHeight: 'calc(100vh - 57px)' }}>
         <div className="mx-auto max-w-5xl px-4 py-8">
           {/* Header */}
           <FadeIn>
@@ -1204,7 +1384,7 @@ export default function SoulseekPage() {
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.2 }}
               >
-                {activeTab === 'search' && <SearchTab />}
+                {activeTab === 'search' && <SearchTab libraryArtists={libraryArtists} initialSearch={initialSearch} />}
                 {activeTab === 'downloads' && <DownloadsTab />}
                 {activeTab === 'uploads' && <UploadsTab />}
                 {activeTab === 'browse' && <BrowseTab />}
