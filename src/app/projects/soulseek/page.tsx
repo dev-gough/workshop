@@ -712,22 +712,24 @@ function DownloadsTab() {
           </div>
         ) : (
           <div className="space-y-1">
-            {activeTransfers.slice(activePage * activePageSize, (activePage + 1) * activePageSize).map(t => {
-              const stateInfo = transferStateLabel(t.state);
-              return (
-                <div key={t.id} className="rounded-lg border border-border/40 bg-card/60 px-3 py-2 space-y-1.5">
-                  <div className="flex items-center gap-2 text-xs">
-                    <User className="h-3 w-3 text-muted-foreground" />
-                    <span className="text-muted-foreground">{t.username}</span>
-                    <span className="text-foreground font-mono truncate flex-1">{basename(t.filename)}</span>
-                    <span className={stateInfo.color}>{stateInfo.label}</span>
-                    <span className="text-muted-foreground">{fmtSpeed(t.averageSpeed)}</span>
-                    <span className="text-muted-foreground">{fmtBytes(t.bytesTransferred)} / {fmtBytes(t.size)}</span>
+            <div style={{ minHeight: activePageSize * 52 }}>
+              {activeTransfers.slice(activePage * activePageSize, (activePage + 1) * activePageSize).map(t => {
+                const stateInfo = transferStateLabel(t.state);
+                return (
+                  <div key={t.id} className="rounded-lg border border-border/40 bg-card/60 px-3 py-2 space-y-1.5 mb-1">
+                    <div className="flex items-center gap-2 text-xs">
+                      <User className="h-3 w-3 text-muted-foreground" />
+                      <span className="text-muted-foreground">{t.username}</span>
+                      <span className="text-foreground font-mono truncate flex-1">{basename(t.filename)}</span>
+                      <span className={stateInfo.color}>{stateInfo.label}</span>
+                      <span className="text-muted-foreground">{fmtSpeed(t.averageSpeed)}</span>
+                      <span className="text-muted-foreground">{fmtBytes(t.bytesTransferred)} / {fmtBytes(t.size)}</span>
+                    </div>
+                    <ProgressBar percent={t.percentComplete} />
                   </div>
-                  <ProgressBar percent={t.percentComplete} />
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
             <Pagination
               page={activePage} totalPages={Math.ceil(activeTransfers.length / activePageSize)}
               pageSize={activePageSize}
@@ -851,7 +853,7 @@ function DownloadsTab() {
           </div>
         ) : (
           <>
-            <div className="rounded-lg border border-border/40 bg-card/60 overflow-hidden">
+            <div className="rounded-lg border border-border/40 bg-card/60 overflow-hidden" style={{ minHeight: completedPageSize * 33 }}>
               {completed.slice(completedPage * completedPageSize, (completedPage + 1) * completedPageSize).map((dl, i) => (
                 <div key={dl.id} className={`flex items-center gap-2 px-3 py-2 text-xs ${i > 0 ? 'border-t border-border/20' : ''}`}>
                   <CheckCircle className="h-3 w-3 text-emerald-400 shrink-0" />
