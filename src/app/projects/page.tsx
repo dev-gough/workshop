@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
-import { Clock, Grid3X3, Home, Music, Trophy, Server, ArrowRight } from 'lucide-react';
+import { Clock, Grid3X3, Home, Music, Trophy, Server, ArrowRight, Palette, Bug, Brain, Atom, Share2 } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
 import { motion } from 'motion/react';
@@ -168,6 +168,31 @@ function LOLVisual() {
   );
 }
 
+function SoulseekVisual() {
+  return (
+    <svg viewBox="0 0 120 50" className="w-full h-12 mt-1">
+      {/* Network nodes */}
+      <circle cx={60} cy={25} r={4} fill="hsl(270,70%,60%)" opacity={0.7} />
+      <circle cx={25} cy={15} r={3} fill="hsl(270,60%,50%)" opacity={0.5} />
+      <circle cx={95} cy={18} r={3} fill="hsl(270,60%,50%)" opacity={0.5} />
+      <circle cx={30} cy={40} r={2.5} fill="hsl(270,50%,45%)" opacity={0.4} />
+      <circle cx={90} cy={38} r={2.5} fill="hsl(270,50%,45%)" opacity={0.4} />
+      <circle cx={50} cy={8} r={2} fill="hsl(270,50%,40%)" opacity={0.3} />
+      <circle cx={75} cy={42} r={2} fill="hsl(270,50%,40%)" opacity={0.3} />
+      {/* Connections */}
+      <line x1={60} y1={25} x2={25} y2={15} stroke="hsl(270,60%,55%)" strokeWidth={0.5} opacity={0.3} />
+      <line x1={60} y1={25} x2={95} y2={18} stroke="hsl(270,60%,55%)" strokeWidth={0.5} opacity={0.3} />
+      <line x1={60} y1={25} x2={30} y2={40} stroke="hsl(270,60%,55%)" strokeWidth={0.5} opacity={0.3} />
+      <line x1={60} y1={25} x2={90} y2={38} stroke="hsl(270,60%,55%)" strokeWidth={0.5} opacity={0.3} />
+      <line x1={25} y1={15} x2={50} y2={8} stroke="hsl(270,50%,50%)" strokeWidth={0.4} opacity={0.2} />
+      <line x1={95} y1={18} x2={75} y2={42} stroke="hsl(270,50%,50%)" strokeWidth={0.4} opacity={0.2} />
+      {/* Transfer arrows */}
+      <line x1={42} y1={20} x2={55} y2={24} stroke="hsl(150,80%,50%)" strokeWidth={1} opacity={0.4} strokeLinecap="round" />
+      <line x1={65} y1={24} x2={80} y2={20} stroke="hsl(210,80%,55%)" strokeWidth={1} opacity={0.4} strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function ServerVisual() {
   return (
     <svg viewBox="0 0 120 60" className="w-full h-14">
@@ -182,6 +207,65 @@ function ServerVisual() {
       <rect x={88} y={24} width={22} height={2} rx={1} fill="white" opacity={0.12} />
       <rect x={88} y={30} width={14} height={2} rx={1} fill="hsl(150,80%,50%)" opacity={0.2} />
       <rect x={88} y={36} width={20} height={2} rx={1} fill="white" opacity={0.12} />
+    </svg>
+  );
+}
+
+// ── GA Project Visuals ──
+
+function ImageEvolverVisual() {
+  return (
+    <svg viewBox="0 0 120 50" className="w-full h-12 mt-1">
+      <polygon points="15,45 45,8 60,40" fill="hsl(350,70%,55%)" fillOpacity={0.35} />
+      <polygon points="30,42 55,5 80,38" fill="hsl(330,60%,60%)" fillOpacity={0.3} />
+      <polygon points="50,45 75,10 100,42" fill="hsl(350,80%,65%)" fillOpacity={0.25} />
+      <polygon points="20,35 40,15 70,45" fill="hsl(10,70%,55%)" fillOpacity={0.2} />
+      <polygon points="60,40 90,8 110,35" fill="hsl(340,60%,50%)" fillOpacity={0.3} />
+    </svg>
+  );
+}
+
+function EcosystemVisual() {
+  return (
+    <svg viewBox="0 0 120 50" className="w-full h-12 mt-1">
+      {/* Prey (green circles) */}
+      <circle cx={20} cy={20} r={3.5} fill="#4ade80" opacity={0.7} />
+      <circle cx={40} cy={35} r={3} fill="#4ade80" opacity={0.6} />
+      <circle cx={55} cy={15} r={4} fill="#4ade80" opacity={0.7} />
+      <circle cx={75} cy={30} r={3} fill="#4ade80" opacity={0.5} />
+      <circle cx={90} cy={18} r={3.5} fill="#4ade80" opacity={0.6} />
+      <circle cx={105} cy={38} r={2.5} fill="#4ade80" opacity={0.5} />
+      {/* Predators (red triangles) */}
+      <polygon points="32,28 38,20 35,32" fill="#f87171" opacity={0.7} />
+      <polygon points="68,22 74,14 71,26" fill="#f87171" opacity={0.6} />
+      <polygon points="95,32 101,24 98,36" fill="#f87171" opacity={0.5} />
+      {/* Food (tiny green dots) */}
+      <circle cx={10} cy={40} r={1.5} fill="#22c55e" opacity={0.3} />
+      <circle cx={48} cy={42} r={1.5} fill="#22c55e" opacity={0.3} />
+      <circle cx={82} cy={10} r={1.5} fill="#22c55e" opacity={0.3} />
+      <circle cx={112} cy={25} r={1.5} fill="#22c55e" opacity={0.3} />
+    </svg>
+  );
+}
+
+function NeuroevolutionVisual() {
+  return (
+    <svg viewBox="0 0 160 80" className="w-48 h-20 shrink-0">
+      {/* Track outline */}
+      <path d="M 30 60 Q 20 20, 60 15 Q 100 10, 120 30 Q 140 50, 110 65 Q 80 80, 30 60 Z"
+        fill="none" stroke="white" strokeOpacity={0.1} strokeWidth={14} strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M 30 60 Q 20 20, 60 15 Q 100 10, 120 30 Q 140 50, 110 65 Q 80 80, 30 60 Z"
+        fill="none" stroke="white" strokeOpacity={0.06} strokeWidth={6} strokeDasharray="3 4" />
+      {/* Car */}
+      <polygon points="58,16 64,12 64,20" fill="#facc15" opacity={0.8} />
+      {/* Sensor rays */}
+      <line x1={64} y1={16} x2={80} y2={8} stroke="#facc15" strokeOpacity={0.3} strokeWidth={0.7} />
+      <line x1={64} y1={14} x2={82} y2={14} stroke="#facc15" strokeOpacity={0.3} strokeWidth={0.7} />
+      <line x1={64} y1={18} x2={78} y2={24} stroke="#facc15" strokeOpacity={0.3} strokeWidth={0.7} />
+      {/* Other cars (faded) */}
+      <polygon points="100,28 106,24 106,32" fill="#60a5fa" opacity={0.3} />
+      <polygon points="118,48 124,44 124,52" fill="#60a5fa" opacity={0.2} />
+      <polygon points="45,55 51,51 51,59" fill="#60a5fa" opacity={0.25} />
     </svg>
   );
 }
@@ -319,6 +403,83 @@ export default function ProjectsPage() {
                 Monitor CPU, memory, disk, and network metrics. Manage services and view real-time logs.
               </p>
               <ServerVisual />
+            </ProjectCard>
+
+            {/* ── Soulseek ── */}
+            <ProjectCard href="/projects/soulseek" delay={0.35}
+              className="bg-gradient-to-br from-violet-950/70 to-purple-950/40">
+              <div className="flex items-center gap-2 mb-3">
+                <Share2 className="h-4 w-4 text-violet-400" />
+                <span className="text-[10px] uppercase tracking-[0.2em] text-violet-400/60 font-medium">P2P Network</span>
+              </div>
+              <h2 className="text-lg font-bold text-white mb-1.5">Soulseek</h2>
+              <p className="text-sm text-white/45 leading-relaxed mb-2">
+                Search, download, and share music on the Soulseek P2P network. Track transfers and manage library ingestion.
+              </p>
+              <SoulseekVisual />
+            </ProjectCard>
+
+            {/* ── Genetic Algorithms section divider ── */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.5, delay: 0.35 }}
+              className="col-span-1 md:col-span-2 mt-4 mb-1"
+            >
+              <div className="flex items-center gap-3">
+                <div className="h-px flex-1 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                <span className="text-[10px] uppercase tracking-[0.25em] text-white/30 font-medium flex items-center gap-2">
+                  <Atom className="h-3 w-3" />
+                  Genetic Algorithms
+                </span>
+                <div className="h-px flex-1 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+              </div>
+            </motion.div>
+
+            {/* ── Image Evolver ── */}
+            <ProjectCard href="/projects/image-evolver" delay={0.4}
+              className="bg-gradient-to-br from-rose-950/70 to-pink-950/40">
+              <div className="flex items-center gap-2 mb-3">
+                <Palette className="h-4 w-4 text-rose-400" />
+                <span className="text-[10px] uppercase tracking-[0.2em] text-rose-400/60 font-medium">Genetic Algorithm</span>
+              </div>
+              <h2 className="text-lg font-bold text-white mb-1.5">Image Evolver</h2>
+              <p className="text-sm text-white/45 leading-relaxed mb-3">
+                Evolve semi-transparent polygons to approximate a target image. Watch abstract shapes converge into recognizable art.
+              </p>
+              <ImageEvolverVisual />
+            </ProjectCard>
+
+            {/* ── Ecosystem Sim ── */}
+            <ProjectCard href="/projects/ecosystem" delay={0.45}
+              className="bg-gradient-to-br from-lime-950/60 to-teal-950/40">
+              <div className="flex items-center gap-2 mb-3">
+                <Bug className="h-4 w-4 text-lime-400" />
+                <span className="text-[10px] uppercase tracking-[0.2em] text-lime-400/60 font-medium">Genetic Algorithm</span>
+              </div>
+              <h2 className="text-lg font-bold text-white mb-1.5">Ecosystem Sim</h2>
+              <p className="text-sm text-white/45 leading-relaxed mb-3">
+                Predator-prey co-evolution in a 2D world. Observe emergent behaviors as species adapt competing survival strategies.
+              </p>
+              <EcosystemVisual />
+            </ProjectCard>
+
+            {/* ── Neuroevolution (featured) ── */}
+            <ProjectCard href="/projects/neuroevolution" featured delay={0.5}
+              className="bg-gradient-to-br from-blue-950/70 via-blue-900/50 to-indigo-950/40">
+              <div className="flex items-center justify-between gap-6">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Brain className="h-4 w-4 text-blue-300" />
+                    <span className="text-[10px] uppercase tracking-[0.2em] text-blue-300/70 font-medium">Genetic Algorithm</span>
+                  </div>
+                  <h2 className="text-xl font-bold text-white mb-2">Neuroevolution</h2>
+                  <p className="text-sm text-white/50 leading-relaxed">
+                    Evolve neural networks to drive cars around a procedural track. Watch populations of agents learn to navigate through natural selection, with real-time sensor visualization.
+                  </p>
+                </div>
+                <NeuroevolutionVisual />
+              </div>
             </ProjectCard>
 
           </div>

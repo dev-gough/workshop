@@ -141,7 +141,11 @@ function ServiceRow({ service, onAction }: { service: ServiceInfo; onAction: (na
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [logSince, setLogSince] = useState('1h');
+  const [streaming, setStreaming] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
+  const logContainerRef = useRef<HTMLDivElement>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const autoScrollRef = useRef(true);
 
   const fetchLogs = useCallback(async (since: string) => {
     setLogsLoading(true);
@@ -153,17 +157,64 @@ function ServiceRow({ service, onAction }: { service: ServiceInfo; onAction: (na
     setLogsLoading(false);
   }, [service.name]);
 
+  // Track whether user has scrolled up (disable auto-scroll)
+  const handleLogScroll = useCallback(() => {
+    const el = logContainerRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    autoScrollRef.current = atBottom;
+  }, []);
+
+  // Connect/disconnect SSE stream
+  useEffect(() => {
+    if (streaming && expanded) {
+      const es = new EventSource(`/api/server/logs/stream?service=${service.name}`);
+      eventSourceRef.current = es;
+
+      es.onmessage = (event) => {
+        try {
+          const line: LogLine = JSON.parse(event.data);
+          setLogs(prev => {
+            const next = [...prev, line];
+            // Cap at 500 lines to avoid memory bloat
+            return next.length > 500 ? next.slice(-500) : next;
+          });
+        } catch { /* ignore parse errors */ }
+      };
+
+      es.onerror = () => {
+        // EventSource auto-reconnects, nothing extra needed
+      };
+
+      return () => {
+        es.close();
+        eventSourceRef.current = null;
+      };
+    } else {
+      // Not streaming — close any existing connection
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+    }
+  }, [streaming, expanded, service.name]);
+
+  // Auto-scroll to bottom when new logs arrive (if user hasn't scrolled up)
+  useEffect(() => {
+    const el = logContainerRef.current;
+    if (autoScrollRef.current && el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [logs]);
+
   useEffect(() => {
     if (expanded) {
       fetchLogs(logSince);
     }
-  }, [expanded, logSince, fetchLogs]);
-
-  useEffect(() => {
-    if (expanded && logEndRef.current) {
-      logEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (!expanded) {
+      setStreaming(false);
     }
-  }, [logs, expanded]);
+  }, [expanded, logSince, fetchLogs]);
 
   const isWorkshop = service.name === 'workshop';
 
@@ -286,6 +337,12 @@ function ServiceRow({ service, onAction }: { service: ServiceInfo; onAction: (na
                   <div className="flex items-center gap-2">
                     <Terminal className="h-3.5 w-3.5 text-muted-foreground" />
                     <span className="text-xs font-medium text-muted-foreground">Logs</span>
+                    {streaming && (
+                      <span className="flex items-center gap-1 text-xs text-emerald-400">
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        live
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-1">
                     {['30m', '1h', '6h', '1d'].map(s => (
@@ -302,6 +359,16 @@ function ServiceRow({ service, onAction }: { service: ServiceInfo; onAction: (na
                       </button>
                     ))}
                     <button
+                      onClick={(e) => { e.stopPropagation(); setStreaming(s => !s); }}
+                      className={`text-xs px-2 py-0.5 rounded transition-colors ${
+                        streaming
+                          ? 'bg-emerald-500/20 text-emerald-400'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                      }`}
+                    >
+                      {streaming ? 'Stop' : 'Stream'}
+                    </button>
+                    <button
                       onClick={(e) => { e.stopPropagation(); fetchLogs(logSince); }}
                       className="text-xs p-1 text-muted-foreground hover:text-foreground transition-colors"
                     >
@@ -310,7 +377,7 @@ function ServiceRow({ service, onAction }: { service: ServiceInfo; onAction: (na
                   </div>
                 </div>
 
-                <div className="bg-zinc-950 rounded-lg p-3 max-h-80 overflow-y-auto font-mono text-xs leading-relaxed">
+                <div ref={logContainerRef} onScroll={handleLogScroll} className="bg-zinc-950 rounded-lg p-3 max-h-80 overflow-y-auto font-mono text-xs leading-relaxed">
                   {logsLoading && logs.length === 0 ? (
                     <div className="text-zinc-500 text-center py-4">Loading logs...</div>
                   ) : logs.length === 0 ? (
@@ -523,7 +590,9 @@ function MultiLineChart({
   unit?: string;
 }) {
   const [hoverLabel, setHoverLabel] = useState<string | null>(null);
+  const [hiddenLabels, setHiddenLabels] = useState<Set<string>>(new Set());
   const labels = Object.keys(series);
+  const visibleLabels = labels.filter(l => !hiddenLabels.has(l));
 
   const allValues = labels.flatMap(l => series[l].map(p => p.data[dataKey] ?? 0));
   const max = yMax ?? (Math.max(...allValues) * 1.1 || 1);
@@ -582,7 +651,7 @@ function MultiLineChart({
         })}
 
         {/* Lines */}
-        {labels.map(label => {
+        {visibleLabels.map(label => {
           const pts = series[label];
           if (pts.length < 2) return null;
           const color = colors[label] || '#888';
@@ -606,18 +675,25 @@ function MultiLineChart({
         {labels.map(label => {
           const color = colors[label] || '#888';
           const lastVal = series[label][series[label].length - 1]?.data[dataKey] ?? 0;
+          const isHidden = hiddenLabels.has(label);
           return (
             <button
               key={label}
               className={`flex items-center gap-1.5 text-xs transition-opacity ${
-                hoverLabel !== null && hoverLabel !== label ? 'opacity-30' : ''
+                isHidden ? 'opacity-30' : hoverLabel !== null && hoverLabel !== label ? 'opacity-30' : ''
               }`}
-              onMouseEnter={() => setHoverLabel(label)}
+              onClick={() => setHiddenLabels(prev => {
+                const next = new Set(prev);
+                if (next.has(label)) next.delete(label);
+                else next.add(label);
+                return next;
+              })}
+              onMouseEnter={() => !isHidden && setHoverLabel(label)}
               onMouseLeave={() => setHoverLabel(null)}
             >
-              <div className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
-              <span className="text-muted-foreground">{label.replace(/@.*/, '')}</span>
-              <span className="font-mono text-foreground">{fmt(lastVal)}{unit || ''}</span>
+              <div className="h-2 w-2 rounded-full" style={{ backgroundColor: color, opacity: isHidden ? 0.3 : 1 }} />
+              <span className={`text-muted-foreground ${isHidden ? 'line-through' : ''}`}>{label.replace(/@.*/, '')}</span>
+              {!isHidden && <span className="font-mono text-foreground">{fmt(lastVal)}{unit || ''}</span>}
             </button>
           );
         })}
@@ -641,6 +717,7 @@ function RateChart({
   label2?: string;
 }) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [hiddenSeries, setHiddenSeries] = useState<Set<string>>(new Set());
   const svgRef = useRef<SVGSVGElement>(null);
 
   // Compute rates (bytes/sec) from cumulative counters
@@ -729,31 +806,51 @@ function RateChart({
           );
         })}
 
-        <path d={rxArea} fill={color1} fillOpacity={0.08} />
-        <path d={rxPath} fill="none" stroke={color1} strokeWidth={1.5} strokeLinecap="round" />
-        <path d={txArea} fill={color2} fillOpacity={0.08} />
-        <path d={txPath} fill="none" stroke={color2} strokeWidth={1.5} strokeLinecap="round" />
+        {!hiddenSeries.has('rx') && <>
+          <path d={rxArea} fill={color1} fillOpacity={0.08} />
+          <path d={rxPath} fill="none" stroke={color1} strokeWidth={1.5} strokeLinecap="round" />
+        </>}
+        {!hiddenSeries.has('tx') && <>
+          <path d={txArea} fill={color2} fillOpacity={0.08} />
+          <path d={txPath} fill="none" stroke={color2} strokeWidth={1.5} strokeLinecap="round" />
+        </>}
 
         {hoverIdx !== null && (
           <>
             <line x1={xScale(hoverIdx)} y1={padTop} x2={xScale(hoverIdx)} y2={padTop + chartH} stroke="currentColor" strokeOpacity={0.2} strokeDasharray="3,3" />
-            <circle cx={xScale(hoverIdx)} cy={yScale(rates[hoverIdx].rx)} r={3} fill={color1} stroke="var(--color-card)" strokeWidth={2} />
-            <circle cx={xScale(hoverIdx)} cy={yScale(rates[hoverIdx].tx)} r={3} fill={color2} stroke="var(--color-card)" strokeWidth={2} />
+            {!hiddenSeries.has('rx') && <circle cx={xScale(hoverIdx)} cy={yScale(rates[hoverIdx].rx)} r={3} fill={color1} stroke="var(--color-card)" strokeWidth={2} />}
+            {!hiddenSeries.has('tx') && <circle cx={xScale(hoverIdx)} cy={yScale(rates[hoverIdx].tx)} r={3} fill={color2} stroke="var(--color-card)" strokeWidth={2} />}
           </>
         )}
       </svg>
 
       <div className="flex items-center gap-4 px-1 text-xs">
-        <div className="flex items-center gap-1.5">
-          <div className="h-2 w-2 rounded-full" style={{ backgroundColor: color1 }} />
-          <span className="text-muted-foreground">{label1}</span>
-          {hoverIdx !== null && <span className="font-mono">{fmtRate(rates[hoverIdx].rx)}</span>}
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="h-2 w-2 rounded-full" style={{ backgroundColor: color2 }} />
-          <span className="text-muted-foreground">{label2}</span>
-          {hoverIdx !== null && <span className="font-mono">{fmtRate(rates[hoverIdx].tx)}</span>}
-        </div>
+        <button
+          className={`flex items-center gap-1.5 transition-opacity ${hiddenSeries.has('rx') ? 'opacity-30' : ''}`}
+          onClick={() => setHiddenSeries(prev => {
+            const next = new Set(prev);
+            if (next.has('rx')) next.delete('rx');
+            else next.add('rx');
+            return next;
+          })}
+        >
+          <div className="h-2 w-2 rounded-full" style={{ backgroundColor: color1, opacity: hiddenSeries.has('rx') ? 0.3 : 1 }} />
+          <span className={`text-muted-foreground ${hiddenSeries.has('rx') ? 'line-through' : ''}`}>{label1}</span>
+          {hoverIdx !== null && !hiddenSeries.has('rx') && <span className="font-mono">{fmtRate(rates[hoverIdx].rx)}</span>}
+        </button>
+        <button
+          className={`flex items-center gap-1.5 transition-opacity ${hiddenSeries.has('tx') ? 'opacity-30' : ''}`}
+          onClick={() => setHiddenSeries(prev => {
+            const next = new Set(prev);
+            if (next.has('tx')) next.delete('tx');
+            else next.add('tx');
+            return next;
+          })}
+        >
+          <div className="h-2 w-2 rounded-full" style={{ backgroundColor: color2, opacity: hiddenSeries.has('tx') ? 0.3 : 1 }} />
+          <span className={`text-muted-foreground ${hiddenSeries.has('tx') ? 'line-through' : ''}`}>{label2}</span>
+          {hoverIdx !== null && !hiddenSeries.has('tx') && <span className="font-mono">{fmtRate(rates[hoverIdx].tx)}</span>}
+        </button>
         {hoverIdx !== null && (
           <span className="text-muted-foreground font-mono ml-auto">
             {new Date(rates[hoverIdx].ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

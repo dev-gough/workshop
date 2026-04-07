@@ -1,5 +1,34 @@
 // Shared song name cleaning and track number utilities
-// Used by barfoo page, FloatingPlayer, and AudioProvider
+// Used by barfoo page, FloatingPlayer, AudioProvider, and Soulseek ingestion
+
+// Sanitize a string for use as a directory or filename
+export function sanitizeFilename(name: string): string {
+  return name
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '')  // remove illegal chars
+    .replace(/\s+/g, ' ')                     // collapse whitespace
+    .replace(/^[\s.]+|[\s.]+$/g, '')          // trim dots/whitespace
+    .trim();
+}
+
+// Parse a Soulseek remote path into artist/album/filename components
+// Remote paths look like: @@username\Music\Artist\Album\01 - Track.mp3
+// or: /home/user/music/Artist/Album/01 - Track.mp3
+export function cleanDownloadPath(remotePath: string): { artist: string; album: string; filename: string } {
+  // Normalize separators
+  const parts = remotePath.replace(/\\/g, '/').split('/').filter(Boolean);
+
+  // We want the last 3 meaningful parts: artist/album/filename
+  // Walk backwards to find the filename, then album, then artist
+  const filename = parts.length > 0 ? parts[parts.length - 1] : 'Unknown';
+  const album = parts.length > 1 ? parts[parts.length - 2] : 'Unknown Album';
+  const artist = parts.length > 2 ? parts[parts.length - 3] : 'Unknown Artist';
+
+  return {
+    artist: sanitizeFilename(artist),
+    album: sanitizeFilename(album),
+    filename: sanitizeFilename(filename),
+  };
+}
 
 export function cleanSongDisplay(raw: string, artist?: string, albumName?: string): string {
   let s = raw;
