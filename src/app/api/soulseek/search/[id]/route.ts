@@ -35,7 +35,15 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const result = await slskdGet<SlskdSearchResponse>(`/api/v0/searches/${id}`);
+
+    // Fetch search metadata and responses in parallel
+    // slskd stores responses at a separate endpoint
+    const [search, responses] = await Promise.all([
+      slskdGet<SlskdSearchResponse>(`/api/v0/searches/${id}`),
+      slskdGet<SlskdSearchResponse['responses']>(`/api/v0/searches/${id}/responses`).catch(() => []),
+    ]);
+
+    const result = { ...search, responses };
 
     // Update result count in DB
     if (result.fileCount > 0) {

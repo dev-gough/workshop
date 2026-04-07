@@ -78,8 +78,18 @@ async function extractMetadata(filePath: string): Promise<{ artist?: string; alb
 
 async function processCompletedDownloads() {
   try {
-    // Get all download transfers from slskd
-    const transfers = await slskdGet<Record<string, SlskdTransfer[]>>('/api/v0/transfers/downloads');
+    // Get all download transfers from slskd (nested format: [{ username, directories: [{ files }] }])
+    const raw = await slskdGet<{ username: string; directories: { files: SlskdTransfer[] }[] }[]>('/api/v0/transfers/downloads');
+    const transfers: Record<string, SlskdTransfer[]> = {};
+    if (Array.isArray(raw)) {
+      for (const group of raw) {
+        const files: SlskdTransfer[] = [];
+        for (const dir of group.directories || []) {
+          if (dir.files) files.push(...dir.files);
+        }
+        if (files.length > 0) transfers[group.username] = files;
+      }
+    }
 
     for (const [username, userTransfers] of Object.entries(transfers)) {
       for (const transfer of userTransfers) {
@@ -134,7 +144,17 @@ async function processCompletedDownloads() {
 
     // Also track active uploads (record who's downloading from us)
     try {
-      const uploads = await slskdGet<Record<string, SlskdTransfer[]>>('/api/v0/transfers/uploads');
+      const rawUl = await slskdGet<{ username: string; directories: { files: SlskdTransfer[] }[] }[]>('/api/v0/transfers/uploads');
+      const uploads: Record<string, SlskdTransfer[]> = {};
+      if (Array.isArray(rawUl)) {
+        for (const group of rawUl) {
+          const files: SlskdTransfer[] = [];
+          for (const dir of group.directories || []) {
+            if (dir.files) files.push(...dir.files);
+          }
+          if (files.length > 0) uploads[group.username] = files;
+        }
+      }
       for (const [username, userTransfers] of Object.entries(uploads)) {
         for (const transfer of userTransfers) {
           if (transfer.state !== 'Completed, Succeeded') continue;

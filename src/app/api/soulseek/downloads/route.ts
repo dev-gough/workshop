@@ -28,10 +28,19 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status'); // filter by status
     const limit = Math.min(parseInt(searchParams.get('limit') || '50'), 200);
 
-    // Get live transfers from slskd
+    // Get live transfers from slskd (returns nested format, flatten it)
     let liveTransfers: Record<string, SlskdTransfer[]> = {};
     try {
-      liveTransfers = await slskdGet<Record<string, SlskdTransfer[]>>('/api/v0/transfers/downloads');
+      const raw = await slskdGet<{ username: string; directories: { files: SlskdTransfer[] }[] }[]>('/api/v0/transfers/downloads');
+      if (Array.isArray(raw)) {
+        for (const group of raw) {
+          const files: SlskdTransfer[] = [];
+          for (const dir of group.directories || []) {
+            if (dir.files) files.push(...dir.files);
+          }
+          if (files.length > 0) liveTransfers[group.username] = files;
+        }
+      }
     } catch { /* slskd may be down */ }
 
     // Get DB records

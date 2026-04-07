@@ -164,12 +164,27 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
   }, [currentTrack, savePlaybackState]);
 
   // ── Fetch albums ──
+  const albumCountRef = useRef(0);
   useEffect(() => {
     fetch('/api/music')
       .then(r => r.json())
-      .then(setAlbums)
+      .then((data: Album[]) => { albumCountRef.current = data.length; setAlbums(data); })
       .catch(e => console.error('Error fetching albums:', e))
       .finally(() => setAlbumsLoading(false));
+
+    // Poll for new albums every 30s (lightweight count check)
+    const interval = setInterval(() => {
+      fetch('/api/music')
+        .then(r => r.json())
+        .then((data: Album[]) => {
+          if (data.length !== albumCountRef.current) {
+            albumCountRef.current = data.length;
+            setAlbums(data);
+          }
+        })
+        .catch(() => {});
+    }, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   // ── Restore playback state after albums load ──

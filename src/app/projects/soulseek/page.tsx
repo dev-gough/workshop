@@ -241,7 +241,7 @@ function SearchTab() {
         const res = await fetch(`/api/soulseek/search/${searchId}`);
         const data: SearchResult = await res.json();
         setResults(data);
-        if (data.state === 'Completed') {
+        if (data.state.includes('Completed')) {
           setSearching(false);
           if (pollRef.current) clearInterval(pollRef.current);
         }
@@ -275,13 +275,19 @@ function SearchTab() {
     }
   };
 
+  const [downloadFlash, setDownloadFlash] = useState<string | null>(null);
+
   const handleDownload = async (username: string, files: SearchFile[]) => {
     try {
-      await fetch('/api/soulseek/downloads', {
+      const res = await fetch('/api/soulseek/downloads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, files: files.map(f => ({ filename: f.filename, size: f.size })) }),
       });
+      if (res.ok) {
+        setDownloadFlash(`Queued ${files.length} file${files.length > 1 ? 's' : ''} from ${username}`);
+        setTimeout(() => setDownloadFlash(null), 3000);
+      }
     } catch {}
   };
 
@@ -368,6 +374,21 @@ function SearchTab() {
 
       {/* Click-away to close history */}
       {showHistory && <div className="fixed inset-0 z-10" onClick={() => setShowHistory(false)} />}
+
+      {/* Download flash */}
+      <AnimatePresence>
+        {downloadFlash && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-sm text-emerald-400"
+          >
+            <CheckCircle className="h-4 w-4" />
+            {downloadFlash}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Search status */}
       {searching && (
