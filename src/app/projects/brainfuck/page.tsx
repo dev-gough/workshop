@@ -191,7 +191,7 @@ export default function BrainfuckPage() {
 
   return (
     <PageTransition>
-      <div className="p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto space-y-6">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto space-y-6 relative">
         <FadeIn>
           <div className="flex items-center gap-3">
             <Code2 className="h-7 w-7 text-fuchsia-400" />
@@ -391,8 +391,120 @@ export default function BrainfuckPage() {
             )}
           </div>
         </FadeIn>
+
+        {/*
+          Reference panel lives in the right slack area beside the centered
+          main content. Absolutely positioned so main stays exactly where it
+          was, with a width that caps based on the available slack to prevent
+          horizontal scroll on any viewport size. Inner sticky div keeps it in
+          view while the user scrolls the main column.
+        */}
+        <aside
+          className="hidden absolute top-0 pointer-events-auto min-[1500px]:block"
+          style={{
+            left: 'calc(100% + 1.5rem)',
+            width: 'min(18rem, calc(50vw - 32rem - 2.5rem))',
+          }}
+        >
+          <div className="sticky top-4 max-h-[calc(100vh-2rem)] overflow-y-auto pr-1">
+            <BFReference />
+          </div>
+        </aside>
       </div>
     </PageTransition>
+  );
+}
+
+// ── BF reference sidebar ──
+
+const BF_INSTRUCTIONS: { sym: string; desc: string }[] = [
+  { sym: '>', desc: 'move pointer right' },
+  { sym: '<', desc: 'move pointer left' },
+  { sym: '+', desc: 'increment cell' },
+  { sym: '-', desc: 'decrement cell *' },
+  { sym: '.', desc: 'output cell as ASCII' },
+  { sym: ',', desc: 'read input (no-op here)' },
+  { sym: '[', desc: 'jump past ] if cell == 0' },
+  { sym: ']', desc: 'jump back to [ if cell ≠ 0' },
+];
+
+const BF_IDIOMS: { code: string; what: string }[] = [
+  { code: '[-]',     what: 'zero the current cell' },
+  { code: '[->+<]',  what: 'move cell into next cell' },
+  { code: '+++.',    what: 'print char with code 3' },
+  { code: '+[+++++.]', what: 'print incrementing chars forever' },
+];
+
+function BFReference() {
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl bg-card border border-border/60 p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Code2 className="h-4 w-4 text-fuchsia-400" />
+          <h3 className="text-sm font-semibold text-foreground">BrainFuck</h3>
+        </div>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          A minimal Turing-complete language. Programs are strings made
+          of just 8 instructions, operating on a tape of{' '}
+          <span className="text-foreground/80 tabular-nums">65,535</span> byte
+          cells, all initialized to{' '}
+          <span className="font-mono text-foreground/80">0</span>.
+        </p>
+      </div>
+
+      <div className="rounded-xl bg-card border border-border/60 p-4 space-y-2">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+          Instructions
+        </div>
+        <div className="space-y-1">
+          {BF_INSTRUCTIONS.map((i) => (
+            <div key={i.sym} className="flex items-start gap-2 text-xs">
+              <span className="font-mono text-fuchsia-400 w-5 text-center text-sm leading-5 shrink-0">
+                {i.sym}
+              </span>
+              <span className="text-muted-foreground leading-5">{i.desc}</span>
+            </div>
+          ))}
+        </div>
+        <div className="text-[10px] text-muted-foreground/70 pt-1 leading-relaxed">
+          * In this interpreter, decrementing below 0 wraps to 127 instead
+          of 255 — a quirk inherited from the upstream Java reference.
+        </div>
+      </div>
+
+      <div className="rounded-xl bg-card border border-border/60 p-4 space-y-2">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+          Common idioms
+        </div>
+        <div className="space-y-1.5">
+          {BF_IDIOMS.map((i) => (
+            <div key={i.code} className="space-y-0.5">
+              <div className="font-mono text-xs text-fuchsia-300/90">{i.code}</div>
+              <div className="text-[11px] text-muted-foreground leading-snug">{i.what}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-xl bg-card border border-border/60 p-4 space-y-1.5">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+          Animator tips
+        </div>
+        <div className="text-[11px] text-muted-foreground leading-relaxed space-y-1">
+          <div>
+            Pause, then use{' '}
+            <kbd className="font-mono text-[10px] bg-background/60 border border-border/60 rounded px-1 py-0.5 text-foreground/80">←</kbd>
+            {' / '}
+            <kbd className="font-mono text-[10px] bg-background/60 border border-border/60 rounded px-1 py-0.5 text-foreground/80">→</kbd>
+            {' '}to step backward and forward by one instruction.
+          </div>
+          <div>
+            The colored boxes in the output are the chars the GA actually
+            scores — first N output chars, where N is your target length.
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
