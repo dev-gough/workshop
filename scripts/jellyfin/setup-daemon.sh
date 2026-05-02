@@ -60,10 +60,10 @@ cat >"$USER_CONFIG_DIR/settings.json" <<EOF
   "umask": 2,
   "script-torrent-done-enabled": true,
   "script-torrent-done-filename": "$WORKSHOP_DIR/scripts/jellyfin/ingest.sh",
-  "ratio-limit-enabled": true,
-  "ratio-limit": 1.0,
+  "seedRatioLimit": 10.0,
+  "seedRatioLimited": true,
   "idle-seeding-limit-enabled": true,
-  "idle-seeding-limit": 30
+  "idle-seeding-limit": 10080
 }
 EOF
 chown "$SERVER_USER:$SERVER_USER" "$USER_CONFIG_DIR/settings.json"

@@ -68,13 +68,48 @@ export interface TransmissionTorrent {
   doneDate: number;
   addedDate: number;
   uploadRatio: number;
+  uploadedEver: number;
+  downloadedEver: number;
+  secondsSeeding: number;
 }
 
 const FIELDS = [
   'id', 'hashString', 'name', 'status', 'percentDone', 'totalSize',
   'downloadDir', 'rateDownload', 'rateUpload', 'eta', 'errorString',
   'isFinished', 'doneDate', 'addedDate', 'uploadRatio',
+  'uploadedEver', 'downloadedEver', 'secondsSeeding',
 ];
+
+export interface SessionStats {
+  activeTorrentCount: number;
+  pausedTorrentCount: number;
+  torrentCount: number;
+  downloadSpeed: number;
+  uploadSpeed: number;
+  cumulative: { uploadedBytes: number; downloadedBytes: number; secondsActive: number; sessionCount: number };
+  current: { uploadedBytes: number; downloadedBytes: number; secondsActive: number };
+}
+
+export async function getSessionStats(): Promise<SessionStats> {
+  const r = await rpc<{
+    activeTorrentCount: number;
+    pausedTorrentCount: number;
+    torrentCount: number;
+    downloadSpeed: number;
+    uploadSpeed: number;
+    'cumulative-stats': { uploadedBytes: number; downloadedBytes: number; secondsActive: number; sessionCount: number };
+    'current-stats': { uploadedBytes: number; downloadedBytes: number; secondsActive: number };
+  }>('session-stats');
+  return {
+    activeTorrentCount: r.activeTorrentCount,
+    pausedTorrentCount: r.pausedTorrentCount,
+    torrentCount: r.torrentCount,
+    downloadSpeed: r.downloadSpeed,
+    uploadSpeed: r.uploadSpeed,
+    cumulative: r['cumulative-stats'],
+    current: r['current-stats'],
+  };
+}
 
 export async function listTorrents(): Promise<TransmissionTorrent[]> {
   const result = await rpc<{ torrents: TransmissionTorrent[] }>('torrent-get', { fields: FIELDS });

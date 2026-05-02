@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Film, Tv, Download, Loader, Wifi, WifiOff, Plus, X,
   CheckCircle, AlertTriangle, ArrowRight, Clock, Trash2, Eye,
+  Upload, HeartHandshake, Share2,
 } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
@@ -38,6 +39,21 @@ interface IngestFile {
   source: string;
   dest: string;
   size: number;
+}
+
+interface SeedStats {
+  session: {
+    activeTorrentCount: number;
+    pausedTorrentCount: number;
+    torrentCount: number;
+    downloadSpeed: number;
+    uploadSpeed: number;
+    cumulative: { uploadedBytes: number; downloadedBytes: number; secondsActive: number; sessionCount: number };
+    current: { uploadedBytes: number; downloadedBytes: number; secondsActive: number };
+  };
+  seedingNow: number;
+  ratio: number;
+  topSeeded: { name: string; uploadedEver: number; ratio: number; secondsSeeding: number; isFinished: boolean; status: number }[];
 }
 
 interface HistoryRow {
@@ -83,6 +99,14 @@ function fmtEta(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+  return `${Math.floor(seconds / 86400)}d`;
+}
+
+function fmtDuration(seconds: number): string {
+  if (!seconds || seconds <= 0) return '0';
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
   return `${Math.floor(seconds / 86400)}d`;
 }
 
@@ -137,6 +161,101 @@ function ConnectionBadge({ ok }: { ok: boolean | null }) {
   return ok
     ? <span className="text-xs text-emerald-400 flex items-center gap-1"><Wifi className="h-3 w-3" /> Daemon up</span>
     : <span className="text-xs text-red-400 flex items-center gap-1"><WifiOff className="h-3 w-3" /> Daemon down</span>;
+}
+
+// ── Seeding stats ──
+
+function ratioColor(r: number): string {
+  if (r >= 5) return 'text-emerald-400';
+  if (r >= 2) return 'text-lime-400';
+  if (r >= 1) return 'text-amber-400';
+  return 'text-zinc-400';
+}
+
+function StatTile({
+  label, value, sublabel, icon: Icon, accent = 'text-cyan-400',
+}: {
+  label: string; value: string; sublabel?: string; icon: React.ElementType; accent?: string;
+}) {
+  return (
+    <div className="rounded-lg bg-card/60 border border-border/40 p-3 flex-1 min-w-[140px]">
+      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1">
+        <Icon className={`h-3 w-3 ${accent}`} />
+        {label}
+      </div>
+      <div className="text-lg font-semibold text-foreground tabular-nums">{value}</div>
+      {sublabel && <div className="text-[10px] text-muted-foreground mt-0.5">{sublabel}</div>}
+    </div>
+  );
+}
+
+function SeedingPanel({ stats }: { stats: SeedStats | null }) {
+  if (!stats) return null;
+  const { session, ratio, seedingNow, topSeeded } = stats;
+  const cum = session.cumulative;
+  return (
+    <div className="rounded-xl bg-card border border-border/60 p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <HeartHandshake className="h-4 w-4 text-emerald-400" />
+        <h3 className="text-sm font-semibold text-foreground">Seeding</h3>
+        <span className="text-[10px] text-muted-foreground ml-auto">
+          across {session.cumulative.sessionCount} session{session.cumulative.sessionCount === 1 ? '' : 's'}
+        </span>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <StatTile
+          label="Ratio"
+          value={ratio.toFixed(2)}
+          sublabel={`target 10.00`}
+          icon={Share2}
+          accent={ratioColor(ratio)}
+        />
+        <StatTile
+          label="Uploaded"
+          value={fmtBytes(cum.uploadedBytes)}
+          sublabel={`↑ ${fmtSpeed(session.uploadSpeed)} now`}
+          icon={Upload}
+          accent="text-amber-400"
+        />
+        <StatTile
+          label="Downloaded"
+          value={fmtBytes(cum.downloadedBytes)}
+          sublabel={`↓ ${fmtSpeed(session.downloadSpeed)} now`}
+          icon={Download}
+          accent="text-blue-400"
+        />
+        <StatTile
+          label="Active"
+          value={`${seedingNow} / ${session.torrentCount}`}
+          sublabel={`${session.pausedTorrentCount} paused`}
+          icon={CheckCircle}
+          accent="text-emerald-400"
+        />
+      </div>
+
+      {topSeeded.length > 0 && (
+        <div className="space-y-1 pt-1">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+            Top contributors
+          </div>
+          {topSeeded.map((t, i) => (
+            <div key={i} className="flex items-center gap-3 text-xs py-1">
+              <span className="text-muted-foreground tabular-nums w-4 text-right">{i + 1}.</span>
+              <span className="flex-1 truncate font-mono text-foreground/80">{t.name}</span>
+              <span className="text-amber-400 tabular-nums">{fmtBytes(t.uploadedEver)}</span>
+              <span className={`tabular-nums w-12 text-right ${ratioColor(t.ratio)}`}>
+                {t.ratio.toFixed(2)}x
+              </span>
+              <span className="text-muted-foreground tabular-nums w-10 text-right">
+                {fmtDuration(t.secondsSeeding)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── Submit form ──
@@ -479,6 +598,7 @@ function History({ history }: { history: HistoryRow[] }) {
 export default function JellyfinPage() {
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [history, setHistory] = useState<HistoryRow[]>([]);
+  const [stats, setStats] = useState<SeedStats | null>(null);
   const [daemonOk, setDaemonOk] = useState<boolean | null>(null);
 
   const refreshTransfers = useCallback(async () => {
@@ -500,13 +620,23 @@ export default function JellyfinPage() {
     } catch { /* ignore */ }
   }, []);
 
+  const refreshStats = useCallback(async () => {
+    try {
+      const res = await fetch('/api/jellyfin/stats');
+      const data = await res.json();
+      if (!data.error) setStats(data);
+    } catch { /* ignore */ }
+  }, []);
+
   useEffect(() => {
     refreshTransfers();
     refreshHistory();
+    refreshStats();
     const t = setInterval(refreshTransfers, 2000);
     const h = setInterval(refreshHistory, 6000);
-    return () => { clearInterval(t); clearInterval(h); };
-  }, [refreshTransfers, refreshHistory]);
+    const s = setInterval(refreshStats, 5000);
+    return () => { clearInterval(t); clearInterval(h); clearInterval(s); };
+  }, [refreshTransfers, refreshHistory, refreshStats]);
 
   const handleRemove = useCallback(async (t: Transfer, deleteData: boolean) => {
     try {
@@ -541,6 +671,12 @@ export default function JellyfinPage() {
           <FadeIn delay={0.05}>
             <SubmitForm onSubmitted={() => { refreshTransfers(); refreshHistory(); }} />
           </FadeIn>
+
+          {daemonOk && stats && (
+            <FadeIn delay={0.07}>
+              <SeedingPanel stats={stats} />
+            </FadeIn>
+          )}
 
           <FadeIn delay={0.1}>
             <div className="space-y-2">
