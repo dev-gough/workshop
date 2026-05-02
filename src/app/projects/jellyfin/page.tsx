@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Film, Tv, Download, Loader, Wifi, WifiOff, Plus, X,
   CheckCircle, AlertTriangle, ArrowRight, Clock, Trash2, Eye,
-  Upload, HeartHandshake, Share2,
+  Upload, HeartHandshake, Share2, ExternalLink,
 } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
@@ -129,6 +129,27 @@ function statusColor(status: string): string {
   if (status === 'Verifying') return 'text-amber-400';
   if (status === 'Stopped' || status === 'Paused') return 'text-zinc-500';
   return 'text-zinc-400';
+}
+
+// Pull the show/movie folder name out of a final_path like
+// "/Media/TV Shows/Severance (2022)/Season 02" → "Severance (2022)".
+// Returns null if we can't infer one.
+function titleFromPath(finalPath: string | null): string | null {
+  if (!finalPath) return null;
+  const parts = finalPath.split('/').filter(Boolean);
+  const idx = parts.findIndex((p) => p === 'TV Shows' || p === 'Movies');
+  return idx >= 0 && parts[idx + 1] ? parts[idx + 1] : null;
+}
+
+// Strip a trailing "(YYYY)" so Jellyfin's search query is more forgiving.
+function searchableTitle(name: string): string {
+  return name.replace(/\s*\(\d{4}\)\s*$/, '').trim();
+}
+
+function jellyfinSearchUrl(serverBase: string, finalPath: string | null): string | null {
+  const title = titleFromPath(finalPath);
+  if (!title) return null;
+  return `${serverBase}/web/#/search.html?query=${encodeURIComponent(searchableTitle(title))}`;
 }
 
 function modeBadge(mode: Mode) {
@@ -533,7 +554,7 @@ function ActiveTransfers({
 
 // ── History ──
 
-function History({ history }: { history: HistoryRow[] }) {
+function History({ history, jellyfinBase }: { history: HistoryRow[]; jellyfinBase: string | null }) {
   if (history.length === 0) {
     return (
       <div className="rounded-xl border border-border/60 p-5 text-center text-sm text-muted-foreground">
@@ -547,13 +568,23 @@ function History({ history }: { history: HistoryRow[] }) {
         const badge = modeBadge(row.mode);
         const Icon = badge.icon;
         const ingested = row.status === 'ingested';
+        const openUrl = ingested && jellyfinBase ? jellyfinSearchUrl(jellyfinBase, row.final_path) : null;
+        const handleOpen = openUrl
+          ? () => window.open(openUrl, '_blank', 'noopener,noreferrer')
+          : undefined;
         return (
           <motion.div
             key={row.id}
             layout
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="rounded-lg bg-card/60 border border-border/40 p-3"
+            onClick={handleOpen}
+            className={`rounded-lg bg-card/60 border border-border/40 p-3 transition-colors ${
+              handleOpen
+                ? 'cursor-pointer hover:bg-card hover:border-cyan-400/30 active:bg-card/80'
+                : ''
+            }`}
+            title={handleOpen ? 'Open in Jellyfin' : undefined}
           >
             <div className="flex items-start gap-3">
               <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${badge.color} flex items-center gap-1 mt-0.5`}>
@@ -584,7 +615,13 @@ function History({ history }: { history: HistoryRow[] }) {
                   )}
                 </div>
               </div>
-              {ingested && <CheckCircle className="h-4 w-4 text-emerald-400 mt-0.5" />}
+              {ingested && (
+                handleOpen ? (
+                  <ExternalLink className="h-4 w-4 text-cyan-400/80 mt-0.5" />
+                ) : (
+                  <CheckCircle className="h-4 w-4 text-emerald-400 mt-0.5" />
+                )
+              )}
             </div>
           </motion.div>
         );
@@ -600,6 +637,13 @@ export default function JellyfinPage() {
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [stats, setStats] = useState<SeedStats | null>(null);
   const [daemonOk, setDaemonOk] = useState<boolean | null>(null);
+  const [jellyfinBase, setJellyfinBase] = useState<string | null>(null);
+
+  // Build the Jellyfin server URL from whatever hostname the user is on.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    setJellyfinBase(`${window.location.protocol}//${window.location.hostname}:8096`);
+  }, []);
 
   const refreshTransfers = useCallback(async () => {
     try {
@@ -664,7 +708,20 @@ export default function JellyfinPage() {
                   Submit a magnet or .torrent. Files are auto-cleaned and dropped into the right Jellyfin folder.
                 </p>
               </div>
-              <ConnectionBadge ok={daemonOk} />
+              <div className="flex items-center gap-3 flex-wrap">
+                <ConnectionBadge ok={daemonOk} />
+                {jellyfinBase && (
+                  <a
+                    href={jellyfinBase}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 px-2 py-1 rounded-md hover:bg-cyan-400/10 transition-colors"
+                  >
+                    Open Jellyfin
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                )}
+              </div>
             </div>
           </FadeIn>
 
@@ -702,7 +759,7 @@ export default function JellyfinPage() {
                   <span className="text-xs text-muted-foreground">({history.length})</span>
                 )}
               </h2>
-              <History history={history} />
+              <History history={history} jellyfinBase={jellyfinBase} />
             </div>
           </FadeIn>
         </div>
