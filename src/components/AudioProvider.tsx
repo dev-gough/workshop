@@ -103,6 +103,7 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const volumeRef = useRef(volume);
   const mutedRef = useRef(muted);
+  const playRecordedRef = useRef(false);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioCtxRef = useRef<globalThis.AudioContext | null>(null);
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
@@ -233,7 +234,26 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
     const audio = audioRef.current;
     if (!audio) return;
 
-    const onTimeUpdate = () => setProgress(audio.currentTime);
+    const onTimeUpdate = () => {
+      setProgress(audio.currentTime);
+      // Record play after 10 seconds of playback
+      if (!playRecordedRef.current && audio.currentTime >= 10) {
+        playRecordedRef.current = true;
+        const user = getCookie('barfoo_user');
+        const track = currentTrackRef.current;
+        if (user && track) {
+          const album = albumsRef.current[track.albumIndex];
+          if (album) {
+            const song = album.songs[track.songIndex];
+            fetch('/api/music/play', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ artist: album.artist, album: album.name, song, username: user }),
+            }).catch(() => {});
+          }
+        }
+      }
+    };
     const onDurationChange = () => setDuration(audio.duration || 0);
     const onEnded = () => playNextRef.current();
     const onPlay = () => setIsPlaying(true);
@@ -262,6 +282,10 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
 
   // ── Playback functions ──
   // Use refs for functions called from audio event handlers to avoid stale closures
+  const albumsRef = useRef(albums);
+  const currentTrackRef = useRef(currentTrack);
+  useEffect(() => { albumsRef.current = albums; }, [albums]);
+  useEffect(() => { currentTrackRef.current = currentTrack; }, [currentTrack]);
   const queueRef = useRef(queue);
   const queueIndexRef = useRef(queueIndex);
   useEffect(() => { queueRef.current = queue; }, [queue]);
@@ -274,6 +298,7 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
     const url = `/api/music/stream?artist=${encodeURIComponent(album.artist)}&album=${encodeURIComponent(album.name)}&song=${encodeURIComponent(song)}`;
 
     setCurrentTrack({ albumIndex, songIndex });
+    playRecordedRef.current = false;
 
     ensureAnalyser();
     const audio = audioRef.current;
@@ -281,15 +306,6 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
       audio.src = url;
       audio.volume = mutedRef.current ? 0 : volumeRef.current;
       audio.play();
-    }
-
-    const user = getCookie('barfoo_user');
-    if (user) {
-      fetch('/api/music/play', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ artist: album.artist, album: album.name, song, username: user }),
-      }).catch(() => {});
     }
   }, [albums]);
 
