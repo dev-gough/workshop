@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { Play, Pause, FastForward, RotateCcw } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Play, Pause, FastForward, RotateCcw, Maximize, Minimize } from 'lucide-react';
 import { BFInterpreter, executionCounts, MEMORY_SIZE } from '@/lib/brainfuck-interpreter';
 
 interface Props {
@@ -17,6 +17,10 @@ interface Props {
   pendingLabel?: string;
   height?: number;
   compact?: boolean;
+  // When true, render a fullscreen toggle button and bind the `F` key to it.
+  // The page should set this only on its primary animator (typically the
+  // active-run one) so multiple animators don't fight for the same hotkey.
+  fullscreenable?: boolean;
   // Fires after one complete play+pause cycle, just before the interpreter
   // resets. Parent uses this to swap to a newer best gene without a jarring
   // mid-execution reset.
@@ -49,6 +53,7 @@ export default function BrainfuckAnimator({
   pendingLabel,
   height = 360,
   compact = false,
+  fullscreenable = false,
   onCycleEnd,
 }: Props) {
   const onCycleEndRef = useRef(onCycleEnd);
@@ -65,6 +70,7 @@ export default function BrainfuckAnimator({
   const lastFrameTimeRef = useRef<number | null>(null);
   const [speedIdx, setSpeedIdx] = useState(DEFAULT_SPEED_IDX);
   const [playing, setPlaying] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [, setTick] = useState(0); // force re-render on gene-swap so UI labels update
 
   // (Re)initialize interpreter when gene changes (debounced — caller passes finalized gene).
@@ -161,6 +167,50 @@ export default function BrainfuckAnimator({
     };
   }, [speedIdx, playing, fitnessTrail, targetFitness, pendingGene, pendingLabel, gene, target, compact]);
 
+  // Fullscreen plumbing — pattern borrowed from the polar-clock project.
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    if (!fullscreenable) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      containerRef.current?.requestFullscreen().catch(() => {});
+    }
+  }, [fullscreenable]);
+
+  // Primary-animator hotkeys: F (fullscreen), Space (play/pause), R (reset).
+  // Only bound when `fullscreenable` so multiple animators on the page don't
+  // fight for the same keys. Native Esc exits fullscreen for free.
+  useEffect(() => {
+    if (!fullscreenable) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault();
+        toggleFullscreen();
+      } else if (e.key === ' ') {
+        // Spacebar would otherwise scroll the page.
+        e.preventDefault();
+        setPlaying((p) => !p);
+      } else if (e.key === 'r' || e.key === 'R') {
+        e.preventDefault();
+        interpreterRef.current?.reset();
+        flashesRef.current.clear();
+        haltedAtRef.current = null;
+        setTick((t) => t + 1);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [fullscreenable, toggleFullscreen]);
+
   // Arrow keys: when paused, ←/→ steps backward/forward by one instruction.
   useEffect(() => {
     if (playing) return; // only listen while paused
@@ -188,7 +238,8 @@ export default function BrainfuckAnimator({
     return () => window.removeEventListener('keydown', handler);
   }, [playing]);
 
-  // DPR + resize handling
+  // DPR + resize handling — canvas always fills its container, so toggling
+  // fullscreen (which swaps the container's inline height) re-fits cleanly.
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -198,9 +249,9 @@ export default function BrainfuckAnimator({
       const dpr = window.devicePixelRatio || 1;
       const rect = container.getBoundingClientRect();
       canvas.width = Math.floor(rect.width * dpr);
-      canvas.height = Math.floor(height * dpr);
+      canvas.height = Math.floor(rect.height * dpr);
       canvas.style.width = `${rect.width}px`;
-      canvas.style.height = `${height}px`;
+      canvas.style.height = `${rect.height}px`;
       const ctx = canvas.getContext('2d');
       if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     };
@@ -208,7 +259,7 @@ export default function BrainfuckAnimator({
     const ro = new ResizeObserver(sync);
     ro.observe(container);
     return () => ro.disconnect();
-  }, [height]);
+  }, []);
 
   const reset = () => {
     interpreterRef.current?.reset();
@@ -217,7 +268,11 @@ export default function BrainfuckAnimator({
   };
 
   return (
-    <div ref={containerRef} className="relative w-full rounded-xl bg-background/40 border border-border/40 overflow-hidden">
+    <div
+      ref={containerRef}
+      className="relative w-full rounded-xl bg-background/40 border border-border/40 overflow-hidden"
+      style={{ height: isFullscreen ? '100vh' : `${height}px` }}
+    >
       <canvas ref={canvasRef} className="block" />
       <div className="absolute bottom-2 right-2 flex items-center gap-1 bg-background/80 backdrop-blur rounded-md px-1 py-0.5 border border-border/40">
         <button
@@ -243,6 +298,16 @@ export default function BrainfuckAnimator({
           <FastForward className="h-3 w-3" />
           {SPEEDS[speedIdx].label}
         </button>
+        {fullscreenable && (
+          <button
+            onClick={toggleFullscreen}
+            className="h-7 w-7 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+            aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            title={isFullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen (F)'}
+          >
+            {isFullscreen ? <Minimize className="h-3.5 w-3.5" /> : <Maximize className="h-3.5 w-3.5" />}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -290,39 +355,53 @@ function draw(
 
   ctx.clearRect(0, 0, w, h);
 
-  const padX = 16;
-  const padY = opts.compact ? 8 : 12;
+  // Scale BF-machine rows up as the canvas grows. In normal/inline use the
+  // existing ratio (chart fills whatever is left). In fullscreen-ish heights
+  // (≥ 600px), pin the chart to the bottom 1/3 and let the BF rows take the
+  // top 2/3 — the Turing machine is the focal point, not the chart.
+  const baseRowsTotal = 224; // sum of base row heights + gutters at scale 1
+  let scale: number;
+  if (h >= 600) {
+    scale = Math.min(4, (h * 2) / 3 / baseRowsTotal);
+  } else {
+    scale = Math.min(2.5, Math.max(1, h / 360));
+  }
+
+  const padX = Math.round(16 * scale);
+  const padY = Math.round((opts.compact ? 8 : 12) * scale);
 
   // Layout regions (top to bottom)
-  const instrRowH = opts.compact ? 26 : 34;
-  const heatRowH = 4;
-  const memRowH = opts.compact ? 38 : 56;
-  const dataPtrH = 14;
-  const outputRowH = opts.compact ? 38 : 50;
-  const statsRowH = 16;
+  const instrRowH = Math.round((opts.compact ? 26 : 34) * scale);
+  const heatRowH = Math.round(4 * scale);
+  const memRowH = Math.round((opts.compact ? 38 : 56) * scale);
+  const dataPtrH = Math.round(14 * scale);
+  const outputRowH = Math.round((opts.compact ? 38 : 50) * scale);
+  const statsRowH = Math.round(16 * scale);
 
   let y = padY;
 
   drawInstructionStream(ctx, interp, counts, padX, y, w - padX * 2, instrRowH);
-  y += instrRowH + 2;
+  y += instrRowH + Math.round(2 * scale);
   drawHeatmapBar(ctx, interp, counts, padX, y, w - padX * 2, heatRowH);
-  y += heatRowH + (opts.compact ? 8 : 14);
+  y += heatRowH + Math.round((opts.compact ? 8 : 14) * scale);
 
-  drawMemoryTape(ctx, interp, flashes, viewCenter, padX, y, w - padX * 2, memRowH);
+  drawMemoryTape(ctx, interp, flashes, viewCenter, padX, y, w - padX * 2, memRowH, scale);
   y += memRowH;
-  drawDataPointer(ctx, interp, viewCenter, padX, y, w - padX * 2, dataPtrH);
-  y += dataPtrH + (opts.compact ? 6 : 10);
+  drawDataPointer(ctx, interp, viewCenter, padX, y, w - padX * 2, dataPtrH, scale);
+  y += dataPtrH + Math.round((opts.compact ? 6 : 10) * scale);
 
-  drawOutput(ctx, interp, padX, y, w - padX * 2, outputRowH, opts.target, opts.compact);
-  y += outputRowH + 4;
+  drawOutput(ctx, interp, padX, y, w - padX * 2, outputRowH, opts.target, opts.compact, scale);
+  y += outputRowH + Math.round(4 * scale);
 
-  drawStats(ctx, interp, padX, y, w - padX * 2, statsRowH);
-  y += statsRowH + (opts.compact ? 4 : 8);
+  drawStats(ctx, interp, padX, y, w - padX * 2, statsRowH, scale);
+  y += statsRowH + Math.round((opts.compact ? 4 : 8) * scale);
 
   // Use whatever vertical space is left between stats and the absolutely-
   // positioned controls (bottom-right of the canvas, ~36px tall) for a
-  // low-opacity fitness chart. It's the focal point of the bottom band.
-  const reserveBottom = opts.compact ? 6 : 10;
+  // low-opacity fitness chart. In fullscreen-ish heights this is pinned to
+  // the bottom ~1/3 by the scale formula above; in inline mode it just
+  // fills whatever's left.
+  const reserveBottom = Math.round((opts.compact ? 6 : 10) * scale);
   const chartH = h - y - reserveBottom;
   if (
     chartH > 36 &&
@@ -330,11 +409,11 @@ function draw(
     opts.fitnessTrail.length > 1 &&
     opts.targetFitness
   ) {
-    drawSparkline(ctx, opts.fitnessTrail, opts.targetFitness, padX, y, w - padX * 2, chartH);
+    drawSparkline(ctx, opts.fitnessTrail, opts.targetFitness, padX, y, w - padX * 2, chartH, scale);
   }
 
   if (opts.pendingLabel) {
-    drawPendingPill(ctx, opts.pendingLabel, w, h);
+    drawPendingPill(ctx, opts.pendingLabel, w, h, scale);
   }
 }
 
@@ -411,10 +490,11 @@ function drawMemoryTape(
   flashes: FlashMap,
   viewCenter: number,
   x: number, y: number, w: number, h: number,
+  scale: number,
 ) {
   const cellW = w / MEM_WINDOW;
   const start = Math.floor(viewCenter - MEM_WINDOW / 2);
-  const fontSize = Math.max(9, Math.min(13, cellW * 0.5));
+  const fontSize = Math.max(9 * scale, Math.min(13 * scale, cellW * 0.5));
   ctx.font = `${fontSize}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -456,8 +536,8 @@ function drawMemoryTape(
     // Index (subtle, every 4th)
     if (idx % 4 === 0 && cellW > 18) {
       ctx.fillStyle = 'rgba(255,255,255,0.20)';
-      ctx.font = `9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
-      ctx.fillText(idx.toString(), cx, y + h - 3);
+      ctx.font = `${9 * scale}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+      ctx.fillText(idx.toString(), cx, y + h - 3 * scale);
       ctx.font = `${fontSize}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
     }
   }
@@ -468,6 +548,7 @@ function drawDataPointer(
   interp: BFInterpreter,
   viewCenter: number,
   x: number, y: number, w: number, h: number,
+  scale: number,
 ) {
   const cellW = w / MEM_WINDOW;
   const start = viewCenter - MEM_WINDOW / 2;
@@ -477,10 +558,11 @@ function drawDataPointer(
 
   // Triangle pointer
   ctx.fillStyle = COLORS.dataPtr;
+  const tw = 5 * scale;
   ctx.beginPath();
-  ctx.moveTo(cx - 5, y + h - 2);
-  ctx.lineTo(cx + 5, y + h - 2);
-  ctx.lineTo(cx, y + 2);
+  ctx.moveTo(cx - tw, y + h - 2 * scale);
+  ctx.lineTo(cx + tw, y + h - 2 * scale);
+  ctx.lineTo(cx, y + 2 * scale);
   ctx.closePath();
   ctx.fill();
 }
@@ -491,6 +573,7 @@ function drawOutput(
   x: number, y: number, w: number, h: number,
   target: string | undefined,
   compact: boolean | undefined,
+  scale: number,
 ) {
   // Background panel
   ctx.fillStyle = 'rgba(255,255,255,0.04)';
@@ -499,12 +582,14 @@ function drawOutput(
   ctx.lineWidth = 0.5;
   ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
 
+  const labelFont = `${10 * scale}px ui-sans-serif, system-ui, sans-serif`;
+
   // Header label
   ctx.fillStyle = COLORS.dim;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  ctx.font = `10px ui-sans-serif, system-ui, sans-serif`;
-  ctx.fillText('OUTPUT', x + 6, y + 4);
+  ctx.font = labelFont;
+  ctx.fillText('OUTPUT', x + 6 * scale, y + 4 * scale);
 
   // Status badge top-right (truncated/halt). The "-1" sentinel that bumpCalc
   // appends to output is purely a marker for the GA's fitness function — strip
@@ -516,18 +601,18 @@ function drawOutput(
   if (interp.truncated) {
     ctx.fillStyle = '#fb923c';
     ctx.textAlign = 'right';
-    ctx.font = `10px ui-sans-serif, system-ui, sans-serif`;
-    ctx.fillText('truncated', x + w - 6, y + 4);
+    ctx.font = labelFont;
+    ctx.fillText('truncated', x + w - 6 * scale, y + 4 * scale);
   } else if (interp.done) {
     ctx.fillStyle = '#86efac';
     ctx.textAlign = 'right';
-    ctx.font = `10px ui-sans-serif, system-ui, sans-serif`;
-    ctx.fillText('halt', x + w - 6, y + 4);
+    ctx.font = labelFont;
+    ctx.fillText('halt', x + w - 6 * scale, y + 4 * scale);
   }
 
   const N = target ? target.length : 0;
-  const labelW = 56; // leave room for the OUTPUT label + tiny gap
-  const statusW = 60;
+  const labelW = Math.round(56 * scale); // leave room for the OUTPUT label + tiny gap
+  const statusW = Math.round(60 * scale);
   const contentX = x + labelW;
   const contentW = w - labelW - statusW;
   const contentY = y + 4;
@@ -538,9 +623,9 @@ function drawOutput(
   // the chars that actually matter. Always render them as fixed boxes with
   // per-position match coloring.
   if (N > 0 && target) {
-    const gap = 2;
-    const boxW = Math.max(11, Math.min(compact ? 22 : 28, Math.floor((contentW * 0.55) / N)));
-    const boxH = Math.min(boxW, contentH - 4);
+    const gap = Math.max(2, Math.round(2 * scale));
+    const boxW = Math.max(11, Math.min((compact ? 22 : 28) * scale, Math.floor((contentW * 0.55) / N)));
+    const boxH = Math.min(boxW, contentH - 4 * scale);
     const boxesY = contentY + (contentH - boxH) / 2;
 
     const fontSize = Math.max(10, Math.floor(boxH * 0.65));
@@ -574,22 +659,22 @@ function drawOutput(
     }
 
     // Tiny "target: hi" label under/over the boxes (subtle reference)
-    if (boxH < contentH - 12) {
-      ctx.font = `9px ui-sans-serif, system-ui, sans-serif`;
+    if (boxH < contentH - 12 * scale) {
+      ctx.font = `${9 * scale}px ui-sans-serif, system-ui, sans-serif`;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
       ctx.fillStyle = 'rgba(255,255,255,0.30)';
       const tgt = target.length > 24 ? target.slice(0, 24) + '…' : target;
-      ctx.fillText(`scored: ${JSON.stringify(tgt)}`, contentX, boxesY + boxH + 2);
+      ctx.fillText(`scored: ${JSON.stringify(tgt)}`, contentX, boxesY + boxH + 2 * scale);
     }
 
     // ── Overflow: any output past position N, rendered as faint mono text ──
-    const overflowStart = contentX + N * (boxW + gap) + 6;
-    const overflowMaxW = (x + w - statusW) - overflowStart - 4;
+    const overflowStart = contentX + N * (boxW + gap) + 6 * scale;
+    const overflowMaxW = (x + w - statusW) - overflowStart - 4 * scale;
     if (overflowMaxW > 30 && displayOutput.length > N) {
       let rest = '';
       for (const ch of displayOutput.slice(N)) rest += renderableGlyph(ch.charCodeAt(0));
-      ctx.font = `${Math.max(10, boxH * 0.55)}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+      ctx.font = `${Math.max(10 * scale, boxH * 0.55)}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       ctx.fillStyle = 'rgba(255,255,255,0.35)';
@@ -604,15 +689,15 @@ function drawOutput(
   }
 
   // ── Fallback when no target is provided (e.g. detail card with raw output) ──
-  ctx.font = `${Math.max(11, h * 0.4)}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+  ctx.font = `${Math.max(11 * scale, h * 0.4)}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
   ctx.textBaseline = 'middle';
   let display = '';
   for (const ch of displayOutput) display += renderableGlyph(ch.charCodeAt(0));
   ctx.fillStyle = display.length === 0 ? COLORS.dim : COLORS.output;
-  while (ctx.measureText(display).width > w - 70 && display.length > 1) {
+  while (ctx.measureText(display).width > w - 70 * scale && display.length > 1) {
     display = display.slice(0, -1);
   }
-  ctx.fillText(display || '—', x + 6, y + h / 2 + 2);
+  ctx.fillText(display || '—', x + 6 * scale, y + h / 2 + 2);
 }
 
 const MATCH_EMPTY = {
@@ -639,8 +724,9 @@ function drawStats(
   ctx: CanvasRenderingContext2D,
   interp: BFInterpreter,
   x: number, y: number, w: number, h: number,
+  scale: number,
 ) {
-  ctx.font = `10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+  ctx.font = `${10 * scale}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = COLORS.dim;
@@ -656,6 +742,7 @@ function drawSparkline(
   trail: { gen: number; fitness: number }[],
   targetFitness: number,
   x: number, y: number, w: number, h: number,
+  scale: number,
 ) {
   ctx.save();
 
@@ -666,14 +753,14 @@ function drawSparkline(
   const maxF = Math.max(targetFitness, ...trail.map((t) => t.fitness));
   const span = maxF - minF || 1;
 
-  const padTop = 14;
-  const padBottom = 4;
+  const padTop = 14 * scale;
+  const padBottom = 4 * scale;
   const px = (g: number) => x + ((g - minGen) / (maxGen - minGen)) * w;
   const py = (f: number) => y + h - padBottom - ((f - minF) / span) * (h - padTop - padBottom);
 
   // Header label — pinned top-left, low opacity. Stays out of the chart.
   ctx.fillStyle = 'rgba(255,255,255,0.30)';
-  ctx.font = `9px ui-sans-serif, system-ui, sans-serif`;
+  ctx.font = `${9 * scale}px ui-sans-serif, system-ui, sans-serif`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.fillText('FITNESS', x, y);
@@ -704,7 +791,7 @@ function drawSparkline(
 
   // Trendline — pops against the faint bg
   ctx.strokeStyle = 'rgba(34,211,238,0.55)';
-  ctx.lineWidth = 1.4;
+  ctx.lineWidth = 1.4 * scale;
   ctx.lineJoin = 'round';
   ctx.beginPath();
   for (let i = 0; i < trail.length; i++) {
@@ -717,7 +804,7 @@ function drawSparkline(
   // Latest point — small but visible dot at the tip
   ctx.fillStyle = 'rgba(34,211,238,0.85)';
   ctx.beginPath();
-  ctx.arc(px(last.gen), py(last.fitness), 2.2, 0, Math.PI * 2);
+  ctx.arc(px(last.gen), py(last.fitness), 2.2 * scale, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.restore();
@@ -728,21 +815,29 @@ function drawPendingPill(
   label: string,
   canvasW: number,
   canvasH: number,
+  scale: number,
 ) {
+  // In normal/inline mode, render at natural size. In fullscreen the rest of
+  // the UI scales up but the pill is informational, not focal, so we halve
+  // its growth so it doesn't dominate the corner.
+  const s = canvasH >= 600 ? scale * 0.5 : 1;
   ctx.save();
-  ctx.font = `10px ui-sans-serif, system-ui, sans-serif`;
+  ctx.font = `${10 * s}px ui-sans-serif, system-ui, sans-serif`;
   const text = `↻ ${label}`;
   const tw = ctx.measureText(text).width;
-  const x = 8;
-  const y = canvasH - 28;
+  const px = 8 * s;
+  const py = canvasH - 28 * s;
+  const padX = 7 * s;
+  const padY = 10 * s;
   ctx.fillStyle = 'rgba(232,121,249,0.15)';
   ctx.strokeStyle = 'rgba(232,121,249,0.55)';
-  ctx.lineWidth = 0.8;
-  ctx.fillRect(x, y, tw + 14, 20);
-  ctx.strokeRect(x + 0.5, y + 0.5, tw + 13, 19);
+  ctx.lineWidth = 0.8 * s;
+  ctx.fillRect(px, py, tw + padX * 2, 20 * s);
+  ctx.strokeRect(px + 0.5, py + 0.5, tw + padX * 2 - 1, 20 * s - 1);
   ctx.fillStyle = '#f0abfc';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText(text, x + 7, y + 10);
+  ctx.fillText(text, px + padX, py + padY);
   ctx.restore();
+  void canvasW;
 }

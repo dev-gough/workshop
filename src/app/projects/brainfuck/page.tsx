@@ -196,7 +196,7 @@ export default function BrainfuckPage() {
           <div className="flex items-center gap-3">
             <Code2 className="h-7 w-7 text-fuchsia-400" />
             <div>
-              <h1 className="text-2xl font-semibold text-foreground">BrainFuck Genetic</h1>
+              <h1 className="text-2xl font-semibold text-foreground">BrainFuck Genetic Algorithm</h1>
               <p className="text-sm text-muted-foreground">
                 Evolve a BrainFuck program that prints a target string. Watch the best gene execute as a Turing machine — instructions, tape, output.
               </p>
@@ -351,6 +351,7 @@ export default function BrainfuckPage() {
                       : undefined
                   }
                   height={420}
+                  fullscreenable
                   onCycleEnd={onAnimatorCycleEnd}
                 />
               ) : (
@@ -435,6 +436,14 @@ const BF_IDIOMS: { code: string; what: string }[] = [
   { code: '+[+++++.]', what: 'print incrementing chars forever' },
 ];
 
+function Kbd({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="font-mono text-[10px] bg-background/60 border border-border/60 rounded px-1.5 py-0.5 text-foreground/80 min-w-[1.4rem] text-center">
+      {children}
+    </kbd>
+  );
+}
+
 function BFReference() {
   return (
     <div className="space-y-3">
@@ -486,19 +495,28 @@ function BFReference() {
         </div>
       </div>
 
-      <div className="rounded-xl bg-card border border-border/60 p-4 space-y-1.5">
+      <div className="rounded-xl bg-card border border-border/60 p-4 space-y-2">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
           Animator tips
         </div>
-        <div className="text-[11px] text-muted-foreground leading-relaxed space-y-1">
-          <div>
-            Pause, then use{' '}
-            <kbd className="font-mono text-[10px] bg-background/60 border border-border/60 rounded px-1 py-0.5 text-foreground/80">←</kbd>
-            {' / '}
-            <kbd className="font-mono text-[10px] bg-background/60 border border-border/60 rounded px-1 py-0.5 text-foreground/80">→</kbd>
-            {' '}to step backward and forward by one instruction.
+        <div className="text-[11px] text-muted-foreground leading-relaxed space-y-1.5">
+          <div className="flex items-center gap-2">
+            <Kbd>Space</Kbd>
+            <span>play / pause</span>
           </div>
-          <div>
+          <div className="flex items-center gap-2">
+            <Kbd>R</Kbd>
+            <span>restart from gen 0</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Kbd>F</Kbd>
+            <span>fullscreen <span className="text-muted-foreground/60">(Esc to exit)</span></span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Kbd>←</Kbd><Kbd>→</Kbd>
+            <span>step (when paused)</span>
+          </div>
+          <div className="pt-1">
             The colored boxes in the output are the chars the GA actually
             scores — first N output chars, where N is your target length.
           </div>

@@ -564,14 +564,14 @@ export default function ProjectsPage() {
               <ImageEvolverVisual />
             </ProjectCard>
 
-            {/* ── BrainFuck Genetic ── */}
+            {/* ── BrainFuck Genetic Algorithm ── */}
             <ProjectCard href="/projects/brainfuck" delay={0.42}
               className="bg-gradient-to-br from-fuchsia-950/70 to-purple-950/40">
               <div className="flex items-center gap-2 mb-3">
                 <Code2 className="h-4 w-4 text-fuchsia-400" />
                 <span className="text-[10px] uppercase tracking-[0.2em] text-fuchsia-400/60 font-medium">Genetic Algorithm</span>
               </div>
-              <h2 className="text-lg font-bold text-white mb-1.5">BrainFuck Genetic</h2>
+              <h2 className="text-lg font-bold text-white mb-1.5">BrainFuck Genetic Algorithm</h2>
               <p className="text-sm text-white/45 leading-relaxed mb-2">
                 Evolve a BrainFuck program that prints a target string. Naive baseline implementation — slow but honest, ready to be optimized.
               </p>
