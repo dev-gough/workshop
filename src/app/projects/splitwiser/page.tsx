@@ -4,9 +4,8 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Wallet, Users, Plus, ArrowRight, Loader, Settings, Sparkles, Copy, Check,
+  Wallet, Users, Plus, ArrowRight, Loader, Settings, Sparkles, Copy, Check, Smartphone,
 } from 'lucide-react';
-// (Users icon used by both filled-state group cards and the empty placeholder.)
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
 
@@ -82,12 +81,25 @@ function SignupLanding({ isBootstrap }: { isBootstrap: boolean }) {
 
   if (!isBootstrap) {
     return (
-      <div className="rounded-2xl border border-border/60 bg-card/60 p-6 text-center space-y-3">
-        <Sparkles className="h-8 w-8 mx-auto text-amber-400/70" />
-        <h2 className="text-lg font-semibold">You need an invite</h2>
-        <p className="text-sm text-muted-foreground max-w-md mx-auto">
-          SplitWiser is invite-only. Ask the person who shared this with you for the invite link to your group.
-        </p>
+      <div className="space-y-3">
+        <div className="rounded-2xl border border-border/60 bg-card/60 p-6 text-center space-y-3">
+          <Sparkles className="h-8 w-8 mx-auto text-amber-400/70" />
+          <h2 className="text-lg font-semibold">You need an invite</h2>
+          <p className="text-sm text-muted-foreground max-w-md mx-auto">
+            SplitWiser is invite-only. Ask the person who shared this with you for the invite link to your group.
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-amber-400/20 bg-amber-400/5 p-5 flex items-start gap-3">
+          <Smartphone className="h-5 w-5 text-amber-400 mt-0.5 shrink-0" />
+          <div className="space-y-1">
+            <p className="text-sm font-medium">Already signed up on another device?</p>
+            <p className="text-xs text-muted-foreground">
+              Open <span className="text-foreground">SplitWiser → Settings</span> on that device, tap
+              <span className="text-foreground"> Show QR &amp; login link</span>, and scan the code with this phone&#39;s camera.
+            </p>
+          </div>
+        </div>
       </div>
     );
   }

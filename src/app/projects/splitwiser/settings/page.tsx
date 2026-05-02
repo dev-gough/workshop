@@ -3,8 +3,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import QRCode from 'qrcode';
 import {
-  ArrowLeft, Loader, Wallet, Copy, Check, LogOut, AlertTriangle, Save,
+  ArrowLeft, Loader, Wallet, Copy, Check, LogOut, AlertTriangle, Save, Smartphone,
 } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
@@ -34,6 +35,7 @@ export default function SettingsPage() {
 
   const [showLink, setShowLink] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -103,6 +105,22 @@ export default function SettingsPage() {
     await navigator.clipboard.writeText(loginUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const revealLink = async () => {
+    setShowLink(true);
+    if (loginUrl && !qrDataUrl) {
+      try {
+        const dataUrl = await QRCode.toDataURL(loginUrl, {
+          margin: 1,
+          width: 220,
+          color: { dark: '#0a0a0a', light: '#fbbf24' },
+        });
+        setQrDataUrl(dataUrl);
+      } catch {
+        // If QR generation fails, the copy-link path still works.
+      }
+    }
   };
 
   return (
@@ -195,26 +213,47 @@ export default function SettingsPage() {
                 </p>
                 {!showLink ? (
                   <button
-                    onClick={() => setShowLink(true)}
-                    className="text-xs text-amber-400 hover:text-amber-300"
+                    onClick={revealLink}
+                    className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1.5"
                   >
-                    Reveal my login link
+                    <Smartphone className="h-3 w-3" />
+                    Show QR &amp; login link
                   </button>
                 ) : (
-                  <div className="space-y-2">
-                    <input
-                      value={loginUrl}
-                      readOnly
-                      onFocus={(e) => e.currentTarget.select()}
-                      className="w-full px-2 py-1.5 rounded bg-black/30 border border-border/40 text-xs font-mono"
-                    />
-                    <button
-                      onClick={copyLogin}
-                      className="w-full px-3 py-2 rounded-lg bg-amber-400/15 hover:bg-amber-400/25 text-amber-300 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors"
-                    >
-                      {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                      {copied ? 'Copied' : 'Copy link'}
-                    </button>
+                  <div className="space-y-3">
+                    {qrDataUrl && (
+                      <div className="space-y-2">
+                        <p className="text-[11px] text-muted-foreground">
+                          Scan with your phone&#39;s camera to sign in there.
+                        </p>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={qrDataUrl}
+                          alt="Login QR code"
+                          className="w-44 h-44 mx-auto rounded-lg ring-1 ring-border/40"
+                        />
+                      </div>
+                    )}
+                    <details className="text-xs">
+                      <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">
+                        Or copy the link
+                      </summary>
+                      <div className="space-y-2 mt-2">
+                        <input
+                          value={loginUrl}
+                          readOnly
+                          onFocus={(e) => e.currentTarget.select()}
+                          className="w-full px-2 py-1.5 rounded bg-black/30 border border-border/40 text-xs font-mono"
+                        />
+                        <button
+                          onClick={copyLogin}
+                          className="w-full px-3 py-2 rounded-lg bg-amber-400/15 hover:bg-amber-400/25 text-amber-300 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors"
+                        >
+                          {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                          {copied ? 'Copied' : 'Copy link'}
+                        </button>
+                      </div>
+                    </details>
                   </div>
                 )}
               </div>
