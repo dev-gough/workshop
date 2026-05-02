@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Code2, Play, Square, Trash2, Loader, ChevronDown, ChevronRight,
-  Target, Hash, Zap, CheckCircle, AlertTriangle, Clock,
+  Target, Hash, Zap, CheckCircle, AlertTriangle, Clock, Gauge, GitCommit,
 } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
@@ -26,6 +26,30 @@ interface Run {
 }
 
 interface ProgressPoint { gen: number; best_fitness: number; }
+
+interface Benchmark {
+  id: number;
+  version_hash: string | null;
+  version_subject: string | null;
+  version_label: string | null;
+  batch_id: string | null;
+  target: string;
+  pop_size: number;
+  max_generations: number;
+  generations: number;
+  evaluations: number;
+  wall_seconds: number | null;
+  evals_per_sec: number | null;
+  gens_per_sec: number | null;
+  best_fitness: number | null;
+  found: boolean | null;
+  status: string;
+  error: string | null;
+  started_at: string;
+  completed_at: string | null;
+}
+
+interface BenchmarkPresetItem { target: string; popSize: number; maxGen: number }
 
 function fmtTime(iso: string | null): string {
   if (!iso) return '';
@@ -78,6 +102,13 @@ export default function BrainfuckPage() {
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [activeProgress, setActiveProgress] = useState<ProgressPoint[]>([]);
+  const [benchmarks, setBenchmarks] = useState<Benchmark[]>([]);
+  const [activeBenchId, setActiveBenchId] = useState<number | null>(null);
+  const [benchPreset, setBenchPreset] = useState<BenchmarkPresetItem[]>([]);
+  const [benchLabel, setBenchLabel] = useState('');
+  const [benchSubmitting, setBenchSubmitting] = useState(false);
+  const [benchError, setBenchError] = useState<string | null>(null);
+  const benchPollRef = useRef<number | null>(null);
   // The gene currently being animated. Updated only at animator-cycle boundaries
   // so a newer best gene from polling doesn't yank the animation mid-execution.
   const [displayedGene, setDisplayedGene] = useState<string | null>(null);
@@ -109,6 +140,40 @@ export default function BrainfuckPage() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  const refreshBenchmarks = useCallback(async () => {
+    try {
+      const res = await fetch('/api/brainfuck/benchmarks', { cache: 'no-store' });
+      const data = await res.json();
+      setBenchmarks(data.benchmarks ?? []);
+      setActiveBenchId(data.activeId ?? null);
+      if (Array.isArray(data.preset)) setBenchPreset(data.preset);
+    } catch { /* leave previous state */ }
+  }, []);
+
+  useEffect(() => {
+    refreshBenchmarks();
+  }, [refreshBenchmarks]);
+
+  // Poll while a benchmark is running (it produces no events to listen to —
+  // the row just appears as 'completed' when the child exits).
+  useEffect(() => {
+    if (activeBenchId == null) {
+      if (benchPollRef.current) {
+        window.clearInterval(benchPollRef.current);
+        benchPollRef.current = null;
+      }
+      return;
+    }
+    if (benchPollRef.current) return;
+    benchPollRef.current = window.setInterval(refreshBenchmarks, 1000);
+    return () => {
+      if (benchPollRef.current) {
+        window.clearInterval(benchPollRef.current);
+        benchPollRef.current = null;
+      }
+    };
+  }, [activeBenchId, refreshBenchmarks]);
 
   // Reset displayed gene + progress when active run changes
   useEffect(() => {
@@ -181,6 +246,38 @@ export default function BrainfuckPage() {
   const remove = async (id: number) => {
     await fetch(`/api/brainfuck/runs/${id}`, { method: 'DELETE' });
     refresh();
+  };
+
+  const startBenchmark = async () => {
+    setBenchError(null);
+    setBenchSubmitting(true);
+    try {
+      const res = await fetch('/api/brainfuck/benchmarks', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ label: benchLabel.trim() || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setBenchError(data.error ?? 'Benchmark failed to start');
+      } else {
+        refreshBenchmarks();
+      }
+    } catch (e) {
+      setBenchError(String(e));
+    } finally {
+      setBenchSubmitting(false);
+    }
+  };
+
+  const stopBenchmarkApi = async (id: number) => {
+    await fetch(`/api/brainfuck/benchmarks/${id}`, { method: 'POST' });
+    refreshBenchmarks();
+  };
+
+  const deleteBenchmark = async (id: number) => {
+    await fetch(`/api/brainfuck/benchmarks/${id}`, { method: 'DELETE' });
+    refreshBenchmarks();
   };
 
   const active = runs.find((r) => r.id === activeId) ?? null;
@@ -393,6 +490,100 @@ export default function BrainfuckPage() {
           </div>
         </FadeIn>
 
+        <FadeIn delay={0.15}>
+          <div className="rounded-xl bg-card border border-border/60 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold flex items-center gap-2">
+                <Gauge className="h-4 w-4 text-fuchsia-400" />
+                Benchmarks
+              </h2>
+              <span className="text-xs text-muted-foreground">{benchmarks.length} row{benchmarks.length === 1 ? '' : 's'}</span>
+            </div>
+            <p className="text-[11px] text-muted-foreground leading-relaxed -mt-1">
+              Timed silent suite for measuring raw GA throughput. Each click sweeps a fixed
+              set of configs (short → longer targets, varying pop/gens) so we capture
+              throughput at multiple operating points. Auto-tagged with the current BF repo
+              commit so versions are comparable.
+            </p>
+
+            <div className="rounded-lg bg-background/40 border border-border/40 px-3 py-2 space-y-1">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+                Configs in each batch
+              </div>
+              <div className="font-mono text-[11px] text-foreground/70 space-y-0.5">
+                {benchPreset.length === 0 ? (
+                  <span className="italic text-muted-foreground">loading…</span>
+                ) : (
+                  benchPreset.map((c, i) => (
+                    <div key={i}>
+                      <span className="text-fuchsia-400">{i + 1}.</span>{' '}
+                      target <span className="text-foreground/90">&quot;{c.target}&quot;</span>
+                      {' · '}pop <span className="text-foreground/90">{c.popSize}</span>
+                      {' · '}gens <span className="text-foreground/90">{c.maxGen}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+                Label (optional)
+              </label>
+              <input
+                type="text"
+                value={benchLabel}
+                onChange={(e) => setBenchLabel(e.target.value)}
+                disabled={benchSubmitting || activeBenchId != null}
+                maxLength={64}
+                placeholder="e.g. init, trim-dead"
+                className="mt-1 w-full px-2.5 py-1.5 rounded-lg bg-background border border-border/60 text-sm focus:border-fuchsia-400/60 focus:outline-none disabled:opacity-50"
+              />
+            </div>
+
+            {benchError && (
+              <div className="text-sm text-red-400 bg-red-400/10 px-3 py-2 rounded-lg">{benchError}</div>
+            )}
+
+            {activeBenchId != null ? (
+              <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-fuchsia-400/10 border border-fuchsia-400/30">
+                <div className="flex items-center gap-2 text-sm text-fuchsia-300">
+                  <Loader className="h-4 w-4 animate-spin" />
+                  Benchmark #{activeBenchId} running…
+                </div>
+                <button
+                  onClick={() => stopBenchmarkApi(activeBenchId)}
+                  className="text-xs px-2 py-1 rounded bg-amber-400/10 text-amber-400 hover:bg-amber-400/20 flex items-center gap-1"
+                >
+                  <Square className="h-3 w-3" /> Stop
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={startBenchmark}
+                disabled={benchSubmitting || activeId != null}
+                className="w-full px-4 py-2 rounded-lg bg-fuchsia-500/90 hover:bg-fuchsia-400 text-white text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                title={activeId != null ? 'Stop the active run first' : undefined}
+              >
+                {benchSubmitting ? <Loader className="h-4 w-4 animate-spin" /> : <Gauge className="h-4 w-4" />}
+                Run benchmark
+              </button>
+            )}
+
+            {benchmarks.length > 0 && (
+              <div className="pt-2 space-y-3">
+                {groupBenchmarksByBatch(benchmarks).map((group) => (
+                  <BenchmarkBatchCard
+                    key={group.key}
+                    group={group}
+                    onDelete={(id) => deleteBenchmark(id)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </FadeIn>
+
         {/*
           Reference panel lives in the right slack area beside the centered
           main content. Absolutely positioned so main stays exactly where it
@@ -435,6 +626,133 @@ const BF_IDIOMS: { code: string; what: string }[] = [
   { code: '+++.',    what: 'print char with code 3' },
   { code: '+[+++++.]', what: 'print incrementing chars forever' },
 ];
+
+interface BenchmarkGroup {
+  key: string;          // either the batch_id, or `solo:<id>` for unbatched legacy rows
+  batchId: string | null;
+  rows: Benchmark[];    // ordered by id ASC so the suite reads in the order it was queued
+  versionHash: string | null;
+  versionSubject: string | null;
+  versionLabel: string | null;
+  startedAt: string;    // earliest started_at in the group
+}
+
+function groupBenchmarksByBatch(rows: Benchmark[]): BenchmarkGroup[] {
+  const map = new Map<string, BenchmarkGroup>();
+  for (const r of rows) {
+    const key = r.batch_id ?? `solo:${r.id}`;
+    let g = map.get(key);
+    if (!g) {
+      g = {
+        key,
+        batchId: r.batch_id,
+        rows: [],
+        versionHash: r.version_hash,
+        versionSubject: r.version_subject,
+        versionLabel: r.version_label,
+        startedAt: r.started_at,
+      };
+      map.set(key, g);
+    }
+    g.rows.push(r);
+    if (r.started_at < g.startedAt) g.startedAt = r.started_at;
+  }
+  for (const g of map.values()) g.rows.sort((a, b) => a.id - b.id);
+  return Array.from(map.values()).sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1));
+}
+
+function BenchmarkBatchCard({
+  group, onDelete,
+}: { group: BenchmarkGroup; onDelete: (id: number) => void }) {
+  // Aggregate stats for the batch where possible
+  const completed = group.rows.filter((r) => r.status === 'completed' && r.evals_per_sec != null);
+  const avgEps = completed.length
+    ? completed.reduce((sum, r) => sum + (r.evals_per_sec ?? 0), 0) / completed.length
+    : null;
+  const totalWall = group.rows.reduce((s, r) => s + (r.wall_seconds ?? 0), 0);
+  const inFlight = group.rows.some((r) => r.status === 'running' || r.status === 'queued');
+
+  return (
+    <div className="rounded-lg bg-background/30 border border-border/30 overflow-hidden">
+      <div className="flex items-center gap-3 px-3 py-2 bg-background/40 text-[11px]">
+        <div className="font-mono text-fuchsia-400 flex items-center gap-1" title={group.versionSubject ?? ''}>
+          <GitCommit className="h-3 w-3" />
+          {group.versionHash ?? '—'}
+        </div>
+        {group.versionLabel && (
+          <span className="px-1.5 py-0.5 rounded bg-fuchsia-400/10 text-fuchsia-300 text-[10px] font-medium">
+            {group.versionLabel}
+          </span>
+        )}
+        <span className="text-muted-foreground tabular-nums">
+          {group.rows.length} config{group.rows.length === 1 ? '' : 's'}
+        </span>
+        {inFlight && <Loader className="h-3 w-3 text-blue-400 animate-spin" />}
+        <div className="ml-auto flex items-center gap-3 text-muted-foreground tabular-nums">
+          {avgEps != null && (
+            <span>
+              avg <span className="text-foreground/90">{avgEps.toFixed(1)}</span> evals/s
+            </span>
+          )}
+          <span>{totalWall.toFixed(1)}s wall</span>
+          <span className="text-[10px]">{fmtTime(group.startedAt)}</span>
+        </div>
+      </div>
+      <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-3 gap-y-1 px-3 py-2 text-[11px] items-center">
+        <div className="text-[9px] uppercase tracking-wider text-muted-foreground font-medium">
+          Config
+        </div>
+        <div className="text-[9px] uppercase tracking-wider text-muted-foreground font-medium text-right">
+          Evals/s
+        </div>
+        <div className="text-[9px] uppercase tracking-wider text-muted-foreground font-medium text-right">
+          Gens/s
+        </div>
+        <div className="text-[9px] uppercase tracking-wider text-muted-foreground font-medium text-right">
+          Wall
+        </div>
+        <div></div>
+        {group.rows.map((r) => (
+          <BenchmarkConfigRow key={r.id} b={r} onDelete={() => onDelete(r.id)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BenchmarkConfigRow({ b, onDelete }: { b: Benchmark; onDelete: () => void }) {
+  const evalsPerSec = b.evals_per_sec != null ? b.evals_per_sec.toFixed(1) : '—';
+  const gensPerSec = b.gens_per_sec != null ? b.gens_per_sec.toFixed(1) : '—';
+  const wall = b.wall_seconds != null ? `${b.wall_seconds.toFixed(1)}s` : '—';
+  const statusColor =
+    b.status === 'completed' ? 'text-emerald-400/80'
+    : b.status === 'running' ? 'text-blue-400'
+    : b.status === 'queued' ? 'text-zinc-500'
+    : b.status === 'stopped' ? 'text-amber-400'
+    : 'text-red-400';
+  return (
+    <>
+      <div className="flex items-center gap-2 truncate">
+        <span className="font-mono text-foreground/90 truncate">&quot;{b.target}&quot;</span>
+        <span className="text-[10px] text-muted-foreground tabular-nums">
+          pop {b.pop_size} · gens {b.max_generations}
+        </span>
+        <span className={`text-[10px] ${statusColor}`}>{b.status}</span>
+      </div>
+      <div className="text-right tabular-nums font-mono text-foreground/90">{evalsPerSec}</div>
+      <div className="text-right tabular-nums font-mono text-muted-foreground">{gensPerSec}</div>
+      <div className="text-right tabular-nums font-mono text-muted-foreground">{wall}</div>
+      <button
+        onClick={onDelete}
+        disabled={b.status === 'running' || b.status === 'queued'}
+        className="text-muted-foreground/60 hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        aria-label="Delete benchmark"
+      >
+        <Trash2 className="h-3 w-3" />
+      </button>
+    </>
+  );
+}
 
 function Kbd({ children }: { children: React.ReactNode }) {
   return (

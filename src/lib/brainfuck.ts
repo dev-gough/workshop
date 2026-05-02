@@ -1,4 +1,4 @@
-import { spawn, ChildProcess } from 'node:child_process';
+import { spawn, ChildProcess, execFileSync } from 'node:child_process';
 import readline from 'node:readline';
 import pool from '@/lib/db';
 
@@ -11,10 +11,24 @@ type ProgressEvent = { type: 'progress'; gen: number; best_fitness: number; best
 type FoundEvent = { type: 'found'; gen: number; best_fitness: number; best_gene: string; best_output: string };
 type DoneEvent = { type: 'done'; gen: number; best_fitness: number; best_gene: string; best_output: string; found: boolean };
 type StartEvent = { type: 'start'; target: string; pop_size: number; max_generations: number };
+type BenchmarkEvent = {
+  type: 'benchmark';
+  target: string;
+  pop_size: number;
+  max_generations: number;
+  generations: number;
+  evaluations: number;
+  wall_seconds: number;
+  evals_per_sec: number;
+  gens_per_sec: number;
+  best_fitness: number;
+  found: boolean;
+};
 type ErrorEvent = { type: 'error'; message: string };
-type Event = ProgressEvent | FoundEvent | DoneEvent | StartEvent | ErrorEvent;
+type Event = ProgressEvent | FoundEvent | DoneEvent | StartEvent | BenchmarkEvent | ErrorEvent;
 
 let activeRunId: number | null = null;
+let activeBenchmarkId: number | null = null;
 let activeChild: ChildProcess | null = null;
 let bootstrapped = false;
 
@@ -25,6 +39,29 @@ async function bootstrap(): Promise<void> {
     `UPDATE brainfuck_runs SET status = 'interrupted', completed_at = NOW()
      WHERE status = 'running'`,
   );
+  await pool.query(
+    `UPDATE brainfuck_benchmarks SET status = 'failed',
+       error = COALESCE(error, 'workshop service restarted'),
+       completed_at = NOW()
+     WHERE status IN ('running', 'queued')`,
+  );
+}
+
+// Read the BF reference repo's HEAD so each benchmark row records exactly
+// which version of the algorithm was timed. Runs synchronously at benchmark
+// start — fast and safe.
+function getBFVersion(): { hash: string | null; subject: string | null } {
+  try {
+    const hash = execFileSync('git', ['-C', REPO_DIR, 'rev-parse', '--short', 'HEAD'], {
+      encoding: 'utf8',
+    }).trim();
+    const subject = execFileSync('git', ['-C', REPO_DIR, 'log', '-1', '--format=%s'], {
+      encoding: 'utf8',
+    }).trim();
+    return { hash, subject };
+  } catch {
+    return { hash: null, subject: null };
+  }
 }
 
 export async function startRun(
@@ -35,7 +72,11 @@ export async function startRun(
   await bootstrap();
 
   if (activeChild) {
-    throw new Error('A run is already in progress. Stop it before starting a new one.');
+    throw new Error(
+      activeBenchmarkId != null
+        ? 'A benchmark is in progress. Wait for it to finish before starting a new run.'
+        : 'A run is already in progress. Stop it before starting a new one.',
+    );
   }
 
   const { rows } = await pool.query(
@@ -156,4 +197,209 @@ export function stopRun(id: number): boolean {
 
 export function getActiveRunId(): number | null {
   return activeRunId;
+}
+
+// ── Benchmarks ────────────────────────────────────────────────────────────
+
+// Suite of configs every benchmark click runs. Sweeps short→long targets and
+// pop/gen scaling so a single click captures throughput at a few operating
+// points, not just one. Sequential — they share the JVM lock.
+export const BENCHMARK_PRESET: { target: string; popSize: number; maxGen: number }[] = [
+  { target: 'hi',     popSize: 50,  maxGen: 50  },
+  { target: 'devy',   popSize: 50,  maxGen: 100 },
+  { target: 'hello',  popSize: 100, maxGen: 100 },
+];
+
+interface BatchQueueItem {
+  rowId: number;
+  target: string;
+  popSize: number;
+  maxGen: number;
+}
+
+let benchmarkBatchQueue: BatchQueueItem[] = [];
+let benchmarkBatchStopped = false;
+
+export async function startBenchmarkBatch(
+  label: string | null,
+): Promise<{ batchId: string; rowIds: number[] }> {
+  await bootstrap();
+
+  if (activeChild) {
+    throw new Error(
+      activeRunId != null
+        ? 'A run is in progress. Stop it before starting a benchmark.'
+        : 'A benchmark is already in progress.',
+    );
+  }
+
+  const version = getBFVersion();
+  const batchId = String(Date.now());
+  benchmarkBatchStopped = false;
+
+  // Pre-create one row per config so the UI can show all configs in the batch
+  // immediately (queued ones too).
+  const rowIds: number[] = [];
+  for (const cfg of BENCHMARK_PRESET) {
+    const { rows } = await pool.query(
+      `INSERT INTO brainfuck_benchmarks
+         (version_hash, version_subject, version_label, batch_id,
+          target, pop_size, max_generations, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued')
+       RETURNING id`,
+      [version.hash, version.subject, label, batchId, cfg.target, cfg.popSize, cfg.maxGen],
+    );
+    rowIds.push(rows[0].id);
+  }
+
+  benchmarkBatchQueue = rowIds.map((rowId, i) => ({
+    rowId,
+    target: BENCHMARK_PRESET[i].target,
+    popSize: BENCHMARK_PRESET[i].popSize,
+    maxGen: BENCHMARK_PRESET[i].maxGen,
+  }));
+
+  spawnNextBenchmarkInBatch();
+
+  return { batchId, rowIds };
+}
+
+function spawnNextBenchmarkInBatch(): void {
+  // Drain any queue entries that were marked stopped while we were between
+  // spawns (so the user's stop click doesn't leak into the next config).
+  if (benchmarkBatchStopped) {
+    for (const item of benchmarkBatchQueue) {
+      pool.query(
+        `UPDATE brainfuck_benchmarks SET status = 'stopped', completed_at = NOW()
+         WHERE id = $1 AND status = 'queued'`,
+        [item.rowId],
+      ).catch((e) => console.error('[brainfuck] cancel queued', e));
+    }
+    benchmarkBatchQueue = [];
+    benchmarkBatchStopped = false;
+    return;
+  }
+
+  const next = benchmarkBatchQueue.shift();
+  if (!next) {
+    activeBenchmarkId = null;
+    activeChild = null;
+    return;
+  }
+
+  // Promote this row from 'queued' to 'running'
+  pool.query(
+    `UPDATE brainfuck_benchmarks SET status = 'running' WHERE id = $1`,
+    [next.rowId],
+  ).catch((e) => console.error('[brainfuck] mark running', e));
+
+  const child = spawn(
+    PYTHON,
+    [
+      RUNNER,
+      '--benchmark',
+      '--target', next.target,
+      '--max-gen', String(next.maxGen),
+      '--pop-size', String(next.popSize),
+    ],
+    { cwd: CWD, stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+
+  activeBenchmarkId = next.rowId;
+  activeChild = child;
+
+  if (child.pid) {
+    pool.query(`UPDATE brainfuck_benchmarks SET pid = $1 WHERE id = $2`, [child.pid, next.rowId])
+      .catch((e) => console.error('[brainfuck] write pid', e));
+  }
+
+  let benchmarkResult: BenchmarkEvent | null = null;
+  let benchmarkError: string | null = null;
+
+  const rl = readline.createInterface({ input: child.stdout!, crlfDelay: Infinity });
+  rl.on('line', (line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    try {
+      const evt = JSON.parse(trimmed) as Event;
+      if (evt.type === 'benchmark') benchmarkResult = evt;
+      else if (evt.type === 'error') benchmarkError = evt.message;
+    } catch {
+      /* ignore non-JSON lines */
+    }
+  });
+
+  let stderrBuf = '';
+  child.stderr!.on('data', (chunk: Buffer) => {
+    stderrBuf += chunk.toString();
+    if (stderrBuf.length > 4096) stderrBuf = stderrBuf.slice(-4096);
+  });
+
+  child.on('exit', (code, signal) => {
+    finalizeBenchmark(next.rowId, code, signal, benchmarkResult, benchmarkError, stderrBuf)
+      .catch((e) => console.error('[brainfuck] finalizeBenchmark', e))
+      .finally(() => spawnNextBenchmarkInBatch());
+  });
+}
+
+async function finalizeBenchmark(
+  id: number,
+  code: number | null,
+  signal: NodeJS.Signals | null,
+  result: BenchmarkEvent | null,
+  errMsg: string | null,
+  stderr: string,
+): Promise<void> {
+  if (signal === 'SIGTERM' || signal === 'SIGKILL') {
+    await pool.query(
+      `UPDATE brainfuck_benchmarks SET status = 'stopped', completed_at = NOW()
+       WHERE id = $1 AND status = 'running'`,
+      [id],
+    );
+    return;
+  }
+  if (result) {
+    await pool.query(
+      `UPDATE brainfuck_benchmarks
+       SET status = 'completed',
+           generations = $2,
+           evaluations = $3,
+           wall_seconds = $4,
+           evals_per_sec = $5,
+           gens_per_sec = $6,
+           best_fitness = $7,
+           found = $8,
+           completed_at = NOW()
+       WHERE id = $1`,
+      [
+        id,
+        result.generations,
+        result.evaluations,
+        result.wall_seconds,
+        result.evals_per_sec,
+        result.gens_per_sec,
+        result.best_fitness,
+        result.found,
+      ],
+    );
+    return;
+  }
+  // No result event arrived — child crashed or exited abnormally.
+  await pool.query(
+    `UPDATE brainfuck_benchmarks SET status = 'failed', error = $2, completed_at = NOW()
+     WHERE id = $1 AND status = 'running'`,
+    [id, errMsg ?? stderr ?? `exit code ${code}`],
+  );
+}
+
+export function stopBenchmark(id: number): boolean {
+  if (activeBenchmarkId !== id || !activeChild) return false;
+  // Tell the post-exit handler not to spawn the next config in the batch.
+  benchmarkBatchStopped = true;
+  activeChild.kill('SIGTERM');
+  return true;
+}
+
+export function getActiveBenchmarkId(): number | null {
+  return activeBenchmarkId;
 }
