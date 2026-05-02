@@ -579,8 +579,10 @@ export default function GroupPage() {
         fetch(`/api/splitwiser/groups/${groupId}/balances`),
         fetch(`/api/splitwiser/expenses?group_id=${groupId}`),
       ]);
-      if (!meRes.ok) { setError('not signed in'); return; }
-      if (!groupRes.ok) { setError('not a member of this group'); return; }
+      if (meRes.status === 401) { setError("You're not signed in. Click the invite link your group sent you."); return; }
+      if (groupRes.status === 403) { setError("You're not a member of this group."); return; }
+      if (groupRes.status === 404) { setError('Group not found — it may have been archived.'); return; }
+      if (!meRes.ok || !groupRes.ok) { setError('Something went wrong loading this group.'); return; }
       const meData = await meRes.json();
       const gData = await groupRes.json();
       const bData = await balRes.json();
@@ -590,6 +592,8 @@ export default function GroupPage() {
       setMembers(gData.members);
       setBalances(bData.balances || []);
       setExpenses(eData.expenses || []);
+    } catch {
+      setError('Network error — try again in a moment.');
     } finally {
       setLoading(false);
     }

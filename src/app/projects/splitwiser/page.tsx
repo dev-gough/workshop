@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Wallet, Users, Plus, ArrowRight, Loader, Settings, Sparkles, Copy, Check,
 } from 'lucide-react';
+// (Users icon used by both filled-state group cards and the empty placeholder.)
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
 
@@ -399,18 +400,30 @@ export default function SplitwiserHomePage() {
                     <h2 className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Groups</h2>
                     <span className="text-xs text-muted-foreground">{groups.length}</span>
                   </div>
-                  <AnimatePresence>
-                    {groups.map((g) => (
-                      <motion.div
-                        key={g.id}
-                        layout
-                        initial={{ opacity: 0, y: 4 }}
-                        animate={{ opacity: 1, y: 0 }}
-                      >
-                        <GroupCard group={g} balance={balances.get(g.id) ?? null} />
-                      </motion.div>
-                    ))}
-                  </AnimatePresence>
+
+                  {groups.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-border/60 bg-card/30 p-6 text-center space-y-2">
+                      <Users className="h-6 w-6 mx-auto text-amber-400/60" />
+                      <p className="text-sm text-foreground">No groups yet</p>
+                      <p className="text-xs text-muted-foreground max-w-xs mx-auto">
+                        Create one for each shared expense pool — a trip, a household, a recurring dinner club.
+                      </p>
+                    </div>
+                  ) : (
+                    <AnimatePresence>
+                      {groups.map((g) => (
+                        <motion.div
+                          key={g.id}
+                          layout
+                          initial={{ opacity: 0, y: 4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                        >
+                          <GroupCard group={g} balance={balances.get(g.id) ?? null} />
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
+                  )}
+
                   <CreateGroupForm onCreated={refresh} />
                 </div>
               </FadeIn>
