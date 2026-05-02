@@ -11,7 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import {
   Server, Cpu, MemoryStick, HardDrive, Clock, Activity,
   Music, Trophy, Home, ArrowRight, Thermometer, Circle,
-  Grid3X3, Gamepad2, TrendingUp, Disc3, Swords,
+  Grid3X3, Gamepad2, TrendingUp, Disc3, Swords, Film, Tv,
 } from 'lucide-react';
 
 // ── Types ──
@@ -54,6 +54,17 @@ interface GameData {
   tier_ups: number;
   game_mode: string;
   game_creation: number;
+}
+
+interface FetchData {
+  id: number;
+  mode: 'tv' | 'movie';
+  original_name: string | null;
+  cleaned_title: string | null;
+  final_path: string | null;
+  status: string;
+  ingested_at: string | null;
+  submitted_at: string;
 }
 
 // ── Helpers ──
@@ -111,7 +122,7 @@ const CATEGORY_COLORS = ['#818cf8', '#38bdf8', '#4ade80', '#fbbf24', '#f472b6'];
 // ── Activity Feed Item ──
 
 interface FeedItem {
-  type: 'music' | 'game';
+  type: 'music' | 'game' | 'fetch';
   timestamp: number;
   // music
   song?: string;
@@ -124,6 +135,10 @@ interface FeedItem {
   assists?: number;
   pointsGained?: number;
   tierUps?: number;
+  // fetch
+  fetchMode?: 'tv' | 'movie';
+  fetchTitle?: string;
+  fetchStatus?: string;
 }
 
 // ── Data Hook ──
@@ -134,6 +149,7 @@ function useHomepageData() {
   const [music, setMusic] = useState<MusicStats | null>(null);
   const [challenges, setChallenges] = useState<ChallengeData | null>(null);
   const [games, setGames] = useState<GameData[]>([]);
+  const [fetches, setFetches] = useState<FetchData[]>([]);
 
   const fetchServer = useCallback(async () => {
     try {
@@ -179,7 +195,30 @@ function useHomepageData() {
     })();
   }, []);
 
-  return { server, services, music, challenges, games };
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await fetch('/api/jellyfin/history?limit=10');
+        const data = await res.json();
+        if (Array.isArray(data.history)) setFetches(data.history);
+      } catch { /* graceful */ }
+    };
+    load();
+    const interval = setInterval(load, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return { server, services, music, challenges, games, fetches };
+}
+
+// Strip the library prefix and trailing extension; decode +-as-space from magnet dn=
+function fetchDisplay(row: FetchData): string {
+  if (row.final_path) {
+    const name = row.final_path.split('/').pop() || row.final_path;
+    return name.replace(/\.[a-z0-9]{2,4}$/i, '');
+  }
+  const raw = row.cleaned_title || row.original_name || '(unknown)';
+  return raw.replace(/\+/g, ' ');
 }
 
 // ── Components ──
@@ -288,7 +327,7 @@ function StatusBar({ server, services }: { server: ServerStats | null; services:
 // ── Main Page ──
 
 export default function HomePage() {
-  const { server, services, music, challenges, games } = useHomepageData();
+  const { server, services, music, challenges, games, fetches } = useHomepageData();
 
   // Merge music + games into a unified activity feed
   const feed = useMemo<FeedItem[]>(() => {
@@ -320,9 +359,20 @@ export default function HomePage() {
       });
     }
 
+    for (const f of fetches.slice(0, 10)) {
+      const tsSrc = f.ingested_at || f.submitted_at;
+      items.push({
+        type: 'fetch',
+        timestamp: new Date(tsSrc).getTime(),
+        fetchMode: f.mode,
+        fetchTitle: fetchDisplay(f),
+        fetchStatus: f.status,
+      });
+    }
+
     items.sort((a, b) => b.timestamp - a.timestamp);
     return items.slice(0, 12);
-  }, [music, games]);
+  }, [music, games, fetches]);
 
   const tp = challenges?.totalPoints;
   const tier = tp?.level || 'NONE';
@@ -341,6 +391,7 @@ export default function HomePage() {
     { href: '/projects/barfoo', icon: Music, label: 'BarFoo', color: '#38bdf8' },
     { href: '/projects/challenges', icon: Trophy, label: 'Challenges', color: '#f472b6' },
     { href: '/projects/server', icon: Server, label: 'Server', color: '#a78bfa' },
+    { href: '/projects/jellyfin', icon: Film, label: 'Jellyfin', color: '#22d3ee' },
   ];
 
   return (
@@ -514,6 +565,26 @@ export default function HomePage() {
                                 <p className="text-[11px] text-muted-foreground truncate">{item.artist}</p>
                               </div>
                             </>
+                          ) : item.type === 'fetch' ? (
+                            <>
+                              <div className="shrink-0 h-7 w-7 rounded-full flex items-center justify-center bg-cyan-500/10">
+                                {item.fetchMode === 'tv'
+                                  ? <Tv className="h-3.5 w-3.5 text-cyan-400" />
+                                  : <Film className="h-3.5 w-3.5 text-cyan-400" />}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate">{item.fetchTitle}</p>
+                                <p className="text-[11px] text-muted-foreground truncate flex items-center gap-1.5">
+                                  <span className="capitalize">{item.fetchMode === 'tv' ? 'TV' : 'Movie'}</span>
+                                  <span>·</span>
+                                  <span className={
+                                    item.fetchStatus === 'ingested' ? 'text-emerald-400' :
+                                    item.fetchStatus === 'downloading' ? 'text-blue-400' :
+                                    'text-amber-400'
+                                  }>{item.fetchStatus}</span>
+                                </p>
+                              </div>
+                            </>
                           ) : (
                             <>
                               <div className={`shrink-0 h-7 w-7 rounded-full flex items-center justify-center ${
@@ -647,7 +718,7 @@ export default function HomePage() {
 
           {/* ── Project Quick Links: 6 equal cards ── */}
           <FadeIn delay={0.15}>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
               {projects.map((p) => (
                 <Link key={p.href} href={p.href} className="block group">
                   <motion.div whileHover={{ y: -2 }} transition={{ type: 'spring', stiffness: 400, damping: 25 }}>

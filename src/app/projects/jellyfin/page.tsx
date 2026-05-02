@@ -561,7 +561,7 @@ function History({ history }: { history: HistoryRow[] }) {
               </span>
               <div className="flex-1 min-w-0 space-y-0.5">
                 <div className="text-sm text-foreground/90 truncate font-mono">
-                  {row.original_name || '(unknown)'}
+                  {(row.original_name || '(unknown)').replace(/\+/g, ' ')}
                 </div>
                 {row.final_path && (
                   <div className="text-xs text-cyan-300/70 flex items-start gap-1.5 font-mono">
