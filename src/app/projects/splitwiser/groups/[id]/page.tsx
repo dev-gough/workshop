@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   ArrowLeft, Plus, Loader, Users, Receipt, Sparkles,
   Copy, Check, X, Settings, Send, Trash2, AlertTriangle,
+  HandCoins, ArrowRightLeft,
 } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
@@ -278,6 +279,227 @@ function AddExpenseSheet({
   );
 }
 
+// ── Settle-up Sheet ──
+
+function SettleUpSheet({
+  open, onOpenChange, groupId, members, me, defaultOtherId, balanceOf, onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  groupId: number;
+  members: Member[];
+  me: Me;
+  defaultOtherId: number | null;
+  balanceOf: (id: number) => number;
+  onSaved: () => void;
+}) {
+  const activeMembers = useMemo(() => members.filter((m) => !m.removed_at && m.id !== me.id), [members, me.id]);
+  const myBalance = balanceOf(me.id);
+
+  const [otherId, setOtherId] = useState<number>(defaultOtherId ?? activeMembers[0]?.id ?? 0);
+  const [direction, setDirection] = useState<'i_pay' | 'they_pay'>('i_pay');
+  const [amount, setAmount] = useState('');
+  const [occurredOn, setOccurredOn] = useState(todayISO());
+  const [note, setNote] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Auto-pick a sensible default amount + direction when the sheet opens or
+  // the counterparty changes.
+  useEffect(() => {
+    if (!open) return;
+    const startId = defaultOtherId ?? activeMembers[0]?.id;
+    if (!startId) return;
+    setOtherId(startId);
+    setOccurredOn(todayISO());
+    setNote('');
+    setError(null);
+    // Pick direction based on signs: if I owe (negative) and they're owed (positive) → i_pay
+    const otherBalance = balanceOf(startId);
+    if (myBalance < 0 && otherBalance > 0) {
+      setDirection('i_pay');
+      setAmount((Math.min(Math.abs(myBalance), otherBalance) / 100).toFixed(2));
+    } else if (myBalance > 0 && otherBalance < 0) {
+      setDirection('they_pay');
+      setAmount((Math.min(myBalance, Math.abs(otherBalance)) / 100).toFixed(2));
+    } else {
+      setDirection(myBalance < 0 ? 'i_pay' : 'they_pay');
+      setAmount('');
+    }
+  }, [open, defaultOtherId, activeMembers, myBalance, balanceOf]);
+
+  const totalCents = (() => {
+    const f = parseFloat(amount);
+    if (!Number.isFinite(f) || f <= 0) return 0;
+    return Math.round(f * 100);
+  })();
+
+  const fromUser = direction === 'i_pay' ? me.id : otherId;
+  const toUser = direction === 'i_pay' ? otherId : me.id;
+  const otherMember = members.find((m) => m.id === otherId);
+
+  const submit = async () => {
+    if (totalCents <= 0) { setError('Enter an amount'); return; }
+    if (!otherId) { setError('Pick someone'); return; }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/splitwiser/payments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          group_id: groupId,
+          from_user: fromUser,
+          to_user: toUser,
+          amount_cents: totalCents,
+          occurred_on: occurredOn,
+          note: note.trim() || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'failed to save');
+      } else {
+        onSaved();
+        onOpenChange(false);
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="bottom"
+        className="max-h-[92vh] sm:max-h-[80vh] sm:max-w-lg sm:mx-auto sm:rounded-t-2xl rounded-t-2xl px-0 pt-0 overflow-y-auto"
+        showCloseButton={false}
+      >
+        <SheetHeader className="border-b border-border/40 sticky top-0 bg-background z-10 flex-row items-center justify-between gap-3 px-4 py-3">
+          <button
+            onClick={() => onOpenChange(false)}
+            className="p-1.5 rounded-lg hover:bg-muted/60 text-muted-foreground"
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+          <SheetTitle className="text-base flex items-center gap-1.5">
+            <HandCoins className="h-4 w-4 text-amber-400" />
+            Settle up
+          </SheetTitle>
+          <button
+            onClick={submit}
+            disabled={submitting || totalCents <= 0 || !otherId}
+            className="px-3 py-1.5 rounded-lg bg-amber-400 text-amber-950 text-sm font-medium hover:bg-amber-300 disabled:opacity-40 transition-colors"
+          >
+            {submitting ? <Loader className="h-3.5 w-3.5 animate-spin" /> : 'Record'}
+          </button>
+        </SheetHeader>
+
+        <SheetDescription className="sr-only">Record a settle-up payment between two members.</SheetDescription>
+
+        <div className="space-y-5 px-4 pb-8 pt-4">
+          {/* Direction toggle */}
+          <div className="flex items-center justify-center gap-2">
+            <div
+              className="px-3 py-2 rounded-lg flex items-center gap-2 text-sm"
+              style={{
+                backgroundColor: direction === 'i_pay' ? `${me.color}20` : 'transparent',
+                color: direction === 'i_pay' ? me.color : 'var(--muted-foreground)',
+              }}
+            >
+              {direction === 'i_pay' ? me.name : otherMember?.name || '?'}
+            </div>
+            <button
+              onClick={() => setDirection(direction === 'i_pay' ? 'they_pay' : 'i_pay')}
+              className="p-2 rounded-full hover:bg-muted/60 text-muted-foreground"
+              aria-label="Swap direction"
+            >
+              <ArrowRightLeft className="h-4 w-4" />
+            </button>
+            <div
+              className="px-3 py-2 rounded-lg flex items-center gap-2 text-sm"
+              style={{
+                backgroundColor: direction === 'i_pay' ? 'transparent' : `${me.color}20`,
+                color: direction === 'i_pay' ? 'var(--muted-foreground)' : me.color,
+              }}
+            >
+              {direction === 'i_pay' ? otherMember?.name || '?' : me.name}
+            </div>
+          </div>
+          <div className="text-center text-[10px] uppercase tracking-wider text-muted-foreground -mt-3">
+            {direction === 'i_pay' ? 'you pay them' : 'they pay you'}
+          </div>
+
+          {/* Amount */}
+          <div className="text-center">
+            <div className="flex items-baseline justify-center gap-1">
+              <span className="text-xl text-muted-foreground">$</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ''))}
+                placeholder="0.00"
+                className="w-32 bg-transparent text-4xl font-bold text-center tabular-nums focus:outline-none placeholder:text-muted-foreground/40"
+              />
+            </div>
+          </div>
+
+          {/* Counterparty */}
+          {activeMembers.length > 1 && (
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5 block">
+                With
+              </label>
+              <select
+                value={otherId}
+                onChange={(e) => setOtherId(parseInt(e.target.value, 10))}
+                className="w-full px-3 py-2.5 rounded-lg bg-muted/40 border border-border/60 text-sm focus:outline-none focus:ring-1 focus:ring-amber-400/50"
+              >
+                {activeMembers.map((m) => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Date + note */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5 block">Date</label>
+              <input
+                type="date"
+                value={occurredOn}
+                onChange={(e) => setOccurredOn(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-lg bg-muted/40 border border-border/60 text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5 block">Note (optional)</label>
+              <input
+                type="text"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="e-transfer, cash…"
+                className="w-full px-3 py-2.5 rounded-lg bg-muted/40 border border-border/60 text-sm"
+              />
+            </div>
+          </div>
+
+          {error && (
+            <div className="text-xs text-red-400 flex items-center gap-1.5">
+              <AlertTriangle className="h-3 w-3" /> {error}
+            </div>
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 // ── Promote-ghost reveal modal ──
 
 function PromoteResult({
@@ -341,6 +563,8 @@ export default function GroupPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [addOpen, setAddOpen] = useState(false);
+  const [settleOpen, setSettleOpen] = useState(false);
+  const [settleWithId, setSettleWithId] = useState<number | null>(null);
   const [showInvite, setShowInvite] = useState(false);
   const [addingGhost, setAddingGhost] = useState(false);
   const [ghostName, setGhostName] = useState('');
@@ -535,8 +759,12 @@ export default function GroupPage() {
                 {members.filter((m) => !m.removed_at).map((m) => {
                   const bal = balanceFor(m.id);
                   const canPromote = m.is_ghost && m.created_by === me.id;
+                  const canSettle = m.id !== me.id && (myBalance !== 0 || bal !== 0);
                   return (
-                    <div key={m.id} className="flex items-center gap-3 px-4 py-3">
+                    <div
+                      key={m.id}
+                      onClick={canSettle ? () => { setSettleWithId(m.id); setSettleOpen(true); } : undefined}
+                      className={`flex items-center gap-3 px-4 py-3 ${canSettle ? 'cursor-pointer hover:bg-muted/30 transition-colors' : ''}`}>
                       <span
                         className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold text-background shrink-0"
                         style={{ backgroundColor: m.color }}
@@ -558,7 +786,7 @@ export default function GroupPage() {
                       </div>
                       {canPromote && (
                         <button
-                          onClick={() => promoteGhost(m.id)}
+                          onClick={(e) => { e.stopPropagation(); promoteGhost(m.id); }}
                           className="shrink-0 px-2 py-1 rounded text-[10px] bg-amber-400/15 hover:bg-amber-400/25 text-amber-300 font-medium flex items-center gap-1"
                           title="Generate a magic link for this user"
                         >
@@ -667,14 +895,26 @@ export default function GroupPage() {
             </div>
           </FadeIn>
 
-          {/* FAB */}
-          <button
-            onClick={() => setAddOpen(true)}
-            className="fixed bottom-6 right-6 sm:right-1/2 sm:translate-x-[19rem] z-30 h-14 w-14 rounded-full bg-amber-400 text-amber-950 shadow-lg hover:bg-amber-300 transition-all flex items-center justify-center"
-            aria-label="Add expense"
-          >
-            <Plus className="h-6 w-6" />
-          </button>
+          {/* FABs */}
+          <div className="fixed bottom-6 right-6 sm:right-1/2 sm:translate-x-[19rem] z-30 flex flex-col gap-3">
+            {myBalance !== 0 && members.filter((m) => !m.removed_at).length > 1 && (
+              <button
+                onClick={() => { setSettleWithId(null); setSettleOpen(true); }}
+                className="h-12 w-12 rounded-full bg-card border border-amber-400/40 text-amber-400 shadow-lg hover:bg-amber-400/10 transition-all flex items-center justify-center"
+                aria-label="Settle up"
+                title="Settle up"
+              >
+                <HandCoins className="h-5 w-5" />
+              </button>
+            )}
+            <button
+              onClick={() => setAddOpen(true)}
+              className="h-14 w-14 rounded-full bg-amber-400 text-amber-950 shadow-lg hover:bg-amber-300 transition-all flex items-center justify-center"
+              aria-label="Add expense"
+            >
+              <Plus className="h-6 w-6" />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -684,6 +924,17 @@ export default function GroupPage() {
         groupId={group.id}
         members={members}
         me={me}
+        onSaved={refresh}
+      />
+
+      <SettleUpSheet
+        open={settleOpen}
+        onOpenChange={setSettleOpen}
+        groupId={group.id}
+        members={members}
+        me={me}
+        defaultOtherId={settleWithId}
+        balanceOf={balanceFor}
         onSaved={refresh}
       />
 
