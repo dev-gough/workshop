@@ -36,9 +36,11 @@ export function unauthorized(): NextResponse {
 }
 
 export function setAuthCookie(response: NextResponse, token: string): void {
+  // No `secure` flag: the workshop is served over HTTP on a private
+  // network, and a Secure cookie would be silently dropped by browsers.
+  // The unguessable 32-byte token is the security boundary.
   response.cookies.set(COOKIE_NAME, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     maxAge: COOKIE_MAX_AGE,
     path: '/',
