@@ -942,7 +942,12 @@ export default function GroupPage() {
         onSaved={refresh}
       />
 
-      {promoteUrl && <PromoteResult url={promoteUrl} onClose={() => setPromoteUrl(null)} />}
+      {promoteUrl && (
+        <PromoteResult
+          url={promoteUrl}
+          onClose={() => { setPromoteUrl(null); refresh(); }}
+        />
+      )}
     </PageTransition>
   );
 }
