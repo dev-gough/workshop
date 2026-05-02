@@ -103,10 +103,17 @@ export default function BrainfuckAnimator({
           haltedAtRef.current = null;
         }
 
-        // Smooth view-scroll toward data ptr
+        // Smooth view-scroll toward data ptr — but snap on huge jumps
+        // (the data pointer is a 65535-cell ring buffer, and `<` from cell 0
+        // wraps to 65534, which would otherwise make the view fly across the
+        // whole tape every frame).
         const target = interp.dataPtr;
         const cur = viewCenterRef.current;
-        viewCenterRef.current = cur + (target - cur) * 0.18;
+        if (Math.abs(target - cur) > 1000) {
+          viewCenterRef.current = target;
+        } else {
+          viewCenterRef.current = cur + (target - cur) * 0.18;
+        }
 
         draw(canvas, interp, countsRef.current, flashesRef.current, viewCenterRef.current, {
           fitnessTrail,
@@ -252,10 +259,20 @@ function draw(
   y += outputRowH + 4;
 
   drawStats(ctx, interp, padX, y, w - padX * 2, statsRowH);
+  y += statsRowH + (opts.compact ? 4 : 8);
 
-  // Overlay the sparkline LAST so it sits above the rest at low opacity.
-  if (opts.fitnessTrail && opts.fitnessTrail.length > 1 && opts.targetFitness) {
-    drawSparkline(ctx, opts.fitnessTrail, opts.targetFitness, w, h);
+  // Use whatever vertical space is left between stats and the absolutely-
+  // positioned controls (bottom-right of the canvas, ~36px tall) for a
+  // low-opacity fitness chart. It's the focal point of the bottom band.
+  const reserveBottom = opts.compact ? 6 : 10;
+  const chartH = h - y - reserveBottom;
+  if (
+    chartH > 36 &&
+    opts.fitnessTrail &&
+    opts.fitnessTrail.length > 1 &&
+    opts.targetFitness
+  ) {
+    drawSparkline(ctx, opts.fitnessTrail, opts.targetFitness, padX, y, w - padX * 2, chartH);
   }
 
   if (opts.pendingLabel) {
@@ -478,23 +495,9 @@ function drawSparkline(
   ctx: CanvasRenderingContext2D,
   trail: { gen: number; fitness: number }[],
   targetFitness: number,
-  canvasW: number,
-  canvasH: number,
+  x: number, y: number, w: number, h: number,
 ) {
-  // Position: top-right corner, ~30% of width, ~24% of height
-  const w = Math.min(220, canvasW * 0.3);
-  const h = Math.min(80, canvasH * 0.24);
-  const x = canvasW - w - 10;
-  const y = 6;
-
   ctx.save();
-
-  // Faint background card
-  ctx.fillStyle = 'rgba(255,255,255,0.04)';
-  ctx.fillRect(x, y, w, h);
-  ctx.strokeStyle = 'rgba(255,255,255,0.07)';
-  ctx.lineWidth = 0.5;
-  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
 
   // Axes range
   const minGen = trail[0].gen;
@@ -503,31 +506,46 @@ function drawSparkline(
   const maxF = Math.max(targetFitness, ...trail.map((t) => t.fitness));
   const span = maxF - minF || 1;
 
-  const px = (g: number) => x + 4 + ((g - minGen) / (maxGen - minGen)) * (w - 8);
-  const py = (f: number) => y + h - 4 - ((f - minF) / span) * (h - 18);
+  const padTop = 14;
+  const padBottom = 4;
+  const px = (g: number) => x + ((g - minGen) / (maxGen - minGen)) * w;
+  const py = (f: number) => y + h - padBottom - ((f - minF) / span) * (h - padTop - padBottom);
 
-  // Target line at 12% opacity
-  ctx.strokeStyle = 'rgba(134,239,172,0.30)';
+  // Header label — pinned top-left, low opacity. Stays out of the chart.
+  ctx.fillStyle = 'rgba(255,255,255,0.30)';
+  ctx.font = `9px ui-sans-serif, system-ui, sans-serif`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText('FITNESS', x, y);
+  const last = trail[trail.length - 1];
+  ctx.textAlign = 'right';
+  ctx.fillStyle = 'rgba(34,211,238,0.55)';
+  ctx.fillText(`${last.fitness} / ${targetFitness}`, x + w, y);
+
+  // Target line — dashed, faint green
+  ctx.strokeStyle = 'rgba(134,239,172,0.22)';
   ctx.lineWidth = 0.8;
-  ctx.setLineDash([3, 3]);
+  ctx.setLineDash([4, 4]);
   ctx.beginPath();
-  ctx.moveTo(x + 4, py(targetFitness));
-  ctx.lineTo(x + w - 4, py(targetFitness));
+  const ty = py(targetFitness);
+  ctx.moveTo(x, ty);
+  ctx.lineTo(x + w, ty);
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // Filled area under trendline (very faint)
-  ctx.fillStyle = 'rgba(34,211,238,0.10)';
+  // Filled area under trendline — very faint, integrates with bg
+  ctx.fillStyle = 'rgba(34,211,238,0.06)';
   ctx.beginPath();
-  ctx.moveTo(px(trail[0].gen), py(0));
+  ctx.moveTo(px(trail[0].gen), y + h - padBottom);
   for (const p of trail) ctx.lineTo(px(p.gen), py(p.fitness));
-  ctx.lineTo(px(trail[trail.length - 1].gen), py(0));
+  ctx.lineTo(px(trail[trail.length - 1].gen), y + h - padBottom);
   ctx.closePath();
   ctx.fill();
 
-  // The trendline itself — opacity high so it pops
-  ctx.strokeStyle = 'rgba(34,211,238,0.85)';
-  ctx.lineWidth = 1.5;
+  // Trendline — pops against the faint bg
+  ctx.strokeStyle = 'rgba(34,211,238,0.55)';
+  ctx.lineWidth = 1.4;
+  ctx.lineJoin = 'round';
   ctx.beginPath();
   for (let i = 0; i < trail.length; i++) {
     const p = trail[i];
@@ -536,21 +554,11 @@ function drawSparkline(
   }
   ctx.stroke();
 
-  // Latest point
-  const last = trail[trail.length - 1];
-  ctx.fillStyle = '#22d3ee';
+  // Latest point — small but visible dot at the tip
+  ctx.fillStyle = 'rgba(34,211,238,0.85)';
   ctx.beginPath();
   ctx.arc(px(last.gen), py(last.fitness), 2.2, 0, Math.PI * 2);
   ctx.fill();
-
-  // Labels
-  ctx.fillStyle = 'rgba(255,255,255,0.45)';
-  ctx.font = `9px ui-sans-serif, system-ui, sans-serif`;
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  ctx.fillText('FITNESS', x + 4, y + 3);
-  ctx.textAlign = 'right';
-  ctx.fillText(`${last.fitness}/${targetFitness}`, x + w - 4, y + 3);
 
   ctx.restore();
 }
