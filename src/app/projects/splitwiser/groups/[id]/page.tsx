@@ -147,7 +147,7 @@ function AddExpenseSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
-        className="max-h-[92vh] sm:max-h-[80vh] sm:max-w-lg sm:mx-auto sm:rounded-t-2xl rounded-t-2xl px-0 pt-0 overflow-y-auto"
+        className="max-h-[92vh] sm:max-h-[80vh] sm:max-w-lg sm:mx-auto sm:rounded-t-2xl rounded-t-2xl px-0 pt-0 overflow-y-auto data-[state=open]:duration-300 data-[state=closed]:duration-200 ease-[cubic-bezier(0.32,0.72,0,1)]"
         showCloseButton={false}
       >
         <SheetHeader className="border-b border-border/40 sticky top-0 bg-background z-10 flex-row items-center justify-between gap-3 px-4 py-3">
@@ -374,7 +374,7 @@ function SettleUpSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
-        className="max-h-[92vh] sm:max-h-[80vh] sm:max-w-lg sm:mx-auto sm:rounded-t-2xl rounded-t-2xl px-0 pt-0 overflow-y-auto"
+        className="max-h-[92vh] sm:max-h-[80vh] sm:max-w-lg sm:mx-auto sm:rounded-t-2xl rounded-t-2xl px-0 pt-0 overflow-y-auto data-[state=open]:duration-300 data-[state=closed]:duration-200 ease-[cubic-bezier(0.32,0.72,0,1)]"
         showCloseButton={false}
       >
         <SheetHeader className="border-b border-border/40 sticky top-0 bg-background z-10 flex-row items-center justify-between gap-3 px-4 py-3">
