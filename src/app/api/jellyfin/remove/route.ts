@@ -6,19 +6,21 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
-    const { id, hash, deleteData } = await request.json();
+    const { id, deleteData } = await request.json();
     if (typeof id !== 'number') {
       return NextResponse.json({ error: 'id (transmission id) required' }, { status: 400 });
     }
 
     await removeTorrent(id, !!deleteData);
 
-    if (typeof hash === 'string' && hash.length > 0) {
-      await pool.query(
-        `UPDATE jellyfin_torrents SET status = 'removed' WHERE hash = $1`,
-        [hash.toLowerCase()],
-      );
-    }
+    // Match by transmission_id (precise) instead of hash. Two rows can share
+    // a hash if the user cancelled and re-submitted the same magnet; the
+    // hash-based update would clobber both.
+    await pool.query(
+      `UPDATE jellyfin_torrents SET status = 'removed'
+       WHERE transmission_id = $1 AND status NOT IN ('removed', 'ingested')`,
+      [id],
+    );
 
     return NextResponse.json({ ok: true });
   } catch (error) {

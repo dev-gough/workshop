@@ -67,14 +67,16 @@ ingest_one() {
     final_path="$(build_movie_path "$MOVIE_LIBRARY" "$title" "$year" "$ext")"
   else
     IFS='|' read -r show year season episode <<<"$(parse_tv "$base")"
-    if [[ -z "$show" || -z "$episode" ]]; then
-      # Fall back to torrent name for season-pack context, then merge episode from filename
-      IFS='|' read -r show2 year2 season2 episode2 <<<"$(parse_tv "$TR_TORRENT_NAME")"
-      [[ -z "$show"    ]] && show="$show2"
-      [[ -z "$year"    ]] && year="$year2"
-      [[ -z "$season"  ]] && season="$season2"
-      [[ -z "$episode" ]] && episode="$episode2"
-    fi
+    # Always merge torrent-name fields to fill any missing piece. The torrent
+    # name is more reliable for the show's canonical year than per-episode
+    # filenames, which often omit it. Without this merge, "Severance.S02E01.mkv"
+    # gives year="" and "Severance.2022.S01E01.mkv" gives year="2022", so the
+    # two seasons land under different show folders.
+    IFS='|' read -r show2 year2 season2 episode2 <<<"$(parse_tv "$TR_TORRENT_NAME")"
+    [[ -z "$show"    ]] && show="$show2"
+    [[ -z "$year"    ]] && year="$year2"
+    [[ -z "$season"  ]] && season="$season2"
+    [[ -z "$episode" ]] && episode="$episode2"
     final_path="$(build_tv_path "$TV_LIBRARY" "$show" "$year" "$season" "$episode" "$ext")"
   fi
 
@@ -114,7 +116,9 @@ ingest_one() {
               '$(printf '%s' "$final_path" | sed "s/'/''/g")',
               $(stat -c%s "$src" 2>/dev/null || echo 0),
               'video'
-    FROM jellyfin_torrents WHERE hash = '$(printf '%s' "${TR_TORRENT_HASH:-}" | tr 'A-F' 'a-f')'
+    FROM jellyfin_torrents
+    WHERE hash = '$(printf '%s' "${TR_TORRENT_HASH:-}" | tr 'A-F' 'a-f')'
+      AND status NOT IN ('removed', 'ingested')
     ORDER BY id DESC LIMIT 1;
   "
 }
@@ -138,13 +142,17 @@ else
 fi
 
 hash_lc="$(printf '%s' "${TR_TORRENT_HASH:-}" | tr 'A-F' 'a-f')"
+# Scope to non-terminal rows: a previously-removed submission of the same
+# magnet (e.g. user cancelled a wrong-mode add and re-submitted with the
+# correct mode) must not be retroactively flipped to 'ingested'.
 psql_exec "
   UPDATE jellyfin_torrents
   SET status = 'ingested',
       completed_at = COALESCE(completed_at, NOW()),
       ingested_at = NOW(),
       final_path = '$(printf '%s' "$final_for_db" | sed "s/'/''/g")'
-  WHERE hash = '$hash_lc';
+  WHERE hash = '$hash_lc'
+    AND status NOT IN ('removed', 'ingested');
 "
 
 log "Ingest done"
