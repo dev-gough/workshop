@@ -102,6 +102,10 @@ async function handleEvent(id: number, evt: Event): Promise<void> {
        WHERE id = $1`,
       [id, evt.gen, evt.best_fitness, evt.best_gene, evt.best_output],
     );
+    await pool.query(
+      `INSERT INTO brainfuck_progress (run_id, gen, best_fitness) VALUES ($1, $2, $3)`,
+      [id, evt.gen, evt.best_fitness],
+    );
   } else if (evt.type === 'done') {
     await pool.query(
       `UPDATE brainfuck_runs

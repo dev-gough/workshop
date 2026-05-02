@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
+import BrainfuckAnimator from '@/components/BrainfuckAnimator';
 
 interface Run {
   id: number;
@@ -23,6 +24,8 @@ interface Run {
   completed_at: string | null;
   error: string | null;
 }
+
+interface ProgressPoint { gen: number; best_fitness: number; }
 
 function fmtTime(iso: string | null): string {
   if (!iso) return '';
@@ -57,22 +60,11 @@ function statusBadge(status: string) {
   return map[status] ?? { color: 'text-zinc-400 bg-zinc-400/10', label: status, Icon: Clock };
 }
 
-function fitnessPercent(run: Run): number {
-  if (run.best_fitness == null) return 0;
-  const target = 256 * run.target.length;
-  if (target <= 0) return 0;
-  return Math.max(0, Math.min(1, run.best_fitness / target));
-}
-
-function escapeChar(c: string): string {
-  const cp = c.codePointAt(0) ?? 0;
-  if (cp < 0x20 || cp === 0x7f) return `\\x${cp.toString(16).padStart(2, '0')}`;
-  return c;
-}
-
-function escapeOutput(s: string | null): string {
-  if (!s) return '';
-  return Array.from(s).map(escapeChar).join('');
+function fitnessPercent(target: string, fitness: number | null): number {
+  if (fitness == null) return 0;
+  const t = 256 * target.length;
+  if (t <= 0) return 0;
+  return Math.max(0, Math.min(1, fitness / t));
 }
 
 export default function BrainfuckPage() {
@@ -85,6 +77,11 @@ export default function BrainfuckPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [activeProgress, setActiveProgress] = useState<ProgressPoint[]>([]);
+  // The gene currently being animated. Updated only at animator-cycle boundaries
+  // so a newer best gene from polling doesn't yank the animation mid-execution.
+  const [displayedGene, setDisplayedGene] = useState<string | null>(null);
+  const latestGeneRef = useRef<string | null>(null);
   const pollRef = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
@@ -93,16 +90,38 @@ export default function BrainfuckPage() {
       const data = await res.json();
       setRuns(data.runs ?? []);
       setActiveId(data.activeId ?? null);
-    } catch {
-      // network blip — leave previous state
-    }
+    } catch { /* leave previous state */ }
+  }, []);
+
+  // Detail-fetch for the active run: includes the progress trail for the sparkline.
+  const refreshActive = useCallback(async (id: number) => {
+    try {
+      const res = await fetch(`/api/brainfuck/runs/${id}`, { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      setActiveProgress(data.progress ?? []);
+      latestGeneRef.current = data.run?.best_gene ?? null;
+      // Initial gene assignment — only set on first non-null value to seed the animator.
+      setDisplayedGene((cur) => cur ?? data.run?.best_gene ?? null);
+    } catch { /* leave previous state */ }
   }, []);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
 
-  // Poll every 1s while a run is active
+  // Reset displayed gene + progress when active run changes
+  useEffect(() => {
+    if (activeId == null) {
+      setDisplayedGene(null);
+      latestGeneRef.current = null;
+      setActiveProgress([]);
+      return;
+    }
+    setDisplayedGene(null); // force re-seed from next refreshActive
+  }, [activeId]);
+
+  // Poll while a run is active
   useEffect(() => {
     if (activeId == null) {
       if (pollRef.current) {
@@ -112,14 +131,25 @@ export default function BrainfuckPage() {
       return;
     }
     if (pollRef.current) return;
-    pollRef.current = window.setInterval(refresh, 1000);
+    refreshActive(activeId);
+    pollRef.current = window.setInterval(() => {
+      refresh();
+      refreshActive(activeId);
+    }, 1000);
     return () => {
       if (pollRef.current) {
         window.clearInterval(pollRef.current);
         pollRef.current = null;
       }
     };
-  }, [activeId, refresh]);
+  }, [activeId, refresh, refreshActive]);
+
+  const onAnimatorCycleEnd = useCallback(() => {
+    // Swap to the newest gene at the natural break in animation.
+    if (latestGeneRef.current && latestGeneRef.current !== displayedGene) {
+      setDisplayedGene(latestGeneRef.current);
+    }
+  }, [displayedGene]);
 
   const start = async () => {
     setError(null);
@@ -156,17 +186,19 @@ export default function BrainfuckPage() {
   const active = runs.find((r) => r.id === activeId) ?? null;
   const history = runs.filter((r) => r.id !== activeId);
 
+  const animatorTrail = activeProgress.map((p) => ({ gen: p.gen, fitness: p.best_fitness }));
+  const targetFitness = active ? 256 * active.target.length : 0;
+
   return (
     <PageTransition>
-      <div className="p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto space-y-6">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto space-y-6">
         <FadeIn>
           <div className="flex items-center gap-3">
             <Code2 className="h-7 w-7 text-fuchsia-400" />
             <div>
               <h1 className="text-2xl font-semibold text-foreground">BrainFuck Genetic</h1>
               <p className="text-sm text-muted-foreground">
-                Evolve a BrainFuck program that prints a target string. Initial naive implementation —
-                expect slow runs on anything past a few characters.
+                Evolve a BrainFuck program that prints a target string. Watch the best gene execute as a Turing machine — instructions, tape, output.
               </p>
             </div>
           </div>
@@ -285,58 +317,46 @@ export default function BrainfuckPage() {
               </div>
 
               <div className="grid grid-cols-3 gap-2 text-center">
-                <div className="rounded-lg bg-background/40 px-2 py-1.5">
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center justify-center gap-1">
-                    <Hash className="h-3 w-3" /> Gen
-                  </div>
-                  <div className="text-lg font-semibold tabular-nums">
-                    {active.generations.toLocaleString()}
-                  </div>
-                </div>
-                <div className="rounded-lg bg-background/40 px-2 py-1.5">
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center justify-center gap-1">
-                    <Zap className="h-3 w-3" /> Fitness
-                  </div>
-                  <div className="text-lg font-semibold tabular-nums">
-                    {active.best_fitness ?? 0}
-                    <span className="text-xs text-muted-foreground"> / {256 * active.target.length}</span>
-                  </div>
-                </div>
-                <div className="rounded-lg bg-background/40 px-2 py-1.5">
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center justify-center gap-1">
-                    <Clock className="h-3 w-3" /> Elapsed
-                  </div>
-                  <div className="text-lg font-semibold tabular-nums">
-                    {fmtDuration(active.started_at, null)}
-                  </div>
-                </div>
+                <Stat label="Gen" value={active.generations.toLocaleString()} icon={<Hash className="h-3 w-3" />} />
+                <Stat
+                  label="Fitness"
+                  value={`${active.best_fitness ?? 0}/${targetFitness}`}
+                  icon={<Zap className="h-3 w-3" />}
+                />
+                <Stat
+                  label="Elapsed"
+                  value={fmtDuration(active.started_at, null)}
+                  icon={<Clock className="h-3 w-3" />}
+                />
               </div>
 
               <div className="h-1.5 bg-muted/60 rounded-full overflow-hidden">
                 <motion.div
                   className="h-full bg-fuchsia-400 rounded-full"
-                  animate={{ width: `${fitnessPercent(active) * 100}%` }}
+                  animate={{ width: `${fitnessPercent(active.target, active.best_fitness) * 100}%` }}
                   transition={{ duration: 0.4 }}
                 />
               </div>
 
-              <div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                  Best output
+              {displayedGene ? (
+                <BrainfuckAnimator
+                  gene={displayedGene}
+                  fitnessTrail={animatorTrail}
+                  targetFitness={targetFitness}
+                  pendingGene={latestGeneRef.current}
+                  pendingLabel={
+                    latestGeneRef.current && latestGeneRef.current !== displayedGene
+                      ? `gen ${active.generations}`
+                      : undefined
+                  }
+                  height={420}
+                  onCycleEnd={onAnimatorCycleEnd}
+                />
+              ) : (
+                <div className="rounded-xl bg-background/40 border border-border/40 h-[420px] flex items-center justify-center text-muted-foreground text-sm">
+                  Waiting for first program…
                 </div>
-                <div className="font-mono text-sm bg-background/40 rounded px-2 py-1.5 break-all min-h-[1.75rem]">
-                  {escapeOutput(active.best_output) || <span className="text-muted-foreground italic">—</span>}
-                </div>
-              </div>
-
-              <div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                  Best program ({(active.best_gene ?? '').length} chars)
-                </div>
-                <div className="font-mono text-xs bg-background/40 rounded px-2 py-1.5 break-all max-h-32 overflow-y-auto">
-                  {active.best_gene || <span className="text-muted-foreground italic">—</span>}
-                </div>
-              </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>
@@ -357,82 +377,15 @@ export default function BrainfuckPage() {
               </div>
             ) : (
               <div className="space-y-1">
-                {history.map((r) => {
-                  const badge = statusBadge(r.status);
-                  const open = expanded === r.id;
-                  const pct = fitnessPercent(r);
-                  return (
-                    <div key={r.id} className="rounded-lg bg-background/30 border border-border/30">
-                      <button
-                        onClick={() => setExpanded(open ? null : r.id)}
-                        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-background/50 transition-colors text-left"
-                      >
-                        {open ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
-                        <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${badge.color} flex items-center gap-1`}>
-                          <badge.Icon className={`h-3 w-3 ${r.status === 'running' ? 'animate-spin' : ''}`} />
-                          {badge.label}
-                        </span>
-                        <span className="font-mono text-sm flex-1 truncate">&quot;{r.target}&quot;</span>
-                        <span className="text-xs text-muted-foreground tabular-nums">
-                          {r.generations.toLocaleString()} gen
-                        </span>
-                        <span className="text-xs text-muted-foreground tabular-nums">
-                          {Math.round(pct * 100)}%
-                        </span>
-                        <span className="text-xs text-muted-foreground tabular-nums hidden sm:inline">
-                          {fmtTime(r.started_at)}
-                        </span>
-                      </button>
-                      <AnimatePresence initial={false}>
-                        {open && (
-                          <motion.div
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: 'auto', opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
-                            transition={{ duration: 0.18 }}
-                            className="overflow-hidden"
-                          >
-                            <div className="px-3 pb-3 pt-1 space-y-2 text-xs">
-                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
-                                <Stat label="Fitness" value={`${r.best_fitness ?? 0}/${256 * r.target.length}`} />
-                                <Stat label="Pop" value={r.pop_size.toString()} />
-                                <Stat label="Max gen" value={r.max_generations.toLocaleString()} />
-                                <Stat label="Elapsed" value={fmtDuration(r.started_at, r.completed_at)} />
-                              </div>
-                              <div>
-                                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Output</div>
-                                <div className="font-mono bg-background/40 rounded px-2 py-1.5 break-all min-h-[1.5rem]">
-                                  {escapeOutput(r.best_output) || <span className="text-muted-foreground italic">—</span>}
-                                </div>
-                              </div>
-                              <div>
-                                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                                  Program ({(r.best_gene ?? '').length} chars)
-                                </div>
-                                <div className="font-mono bg-background/40 rounded px-2 py-1.5 break-all max-h-40 overflow-y-auto">
-                                  {r.best_gene || <span className="text-muted-foreground italic">—</span>}
-                                </div>
-                              </div>
-                              {r.error && (
-                                <div className="text-red-400 bg-red-400/10 rounded px-2 py-1.5 break-all">
-                                  {r.error}
-                                </div>
-                              )}
-                              <div className="flex justify-end pt-1">
-                                <button
-                                  onClick={() => remove(r.id)}
-                                  className="text-xs px-2 py-1 rounded bg-red-400/10 text-red-400 hover:bg-red-400/20 flex items-center gap-1"
-                                >
-                                  <Trash2 className="h-3 w-3" /> Delete
-                                </button>
-                              </div>
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                  );
-                })}
+                {history.map((r) => (
+                  <HistoryRow
+                    key={r.id}
+                    run={r}
+                    open={expanded === r.id}
+                    onToggle={() => setExpanded((cur) => (cur === r.id ? null : r.id))}
+                    onDelete={() => remove(r.id)}
+                  />
+                ))}
               </div>
             )}
           </div>
@@ -442,11 +395,100 @@ export default function BrainfuckPage() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) {
   return (
-    <div className="rounded bg-background/40 px-2 py-1.5">
-      <div className="text-[9px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="text-sm font-semibold tabular-nums">{value}</div>
+    <div className="rounded-lg bg-background/40 px-2 py-1.5">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center justify-center gap-1">
+        {icon}{label}
+      </div>
+      <div className="text-lg font-semibold tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+function HistoryRow({
+  run, open, onToggle, onDelete,
+}: {
+  run: Run; open: boolean; onToggle: () => void; onDelete: () => void;
+}) {
+  const badge = statusBadge(run.status);
+  const pct = fitnessPercent(run.target, run.best_fitness);
+  const [trail, setTrail] = useState<ProgressPoint[] | null>(null);
+
+  useEffect(() => {
+    if (!open || trail !== null) return;
+    let alive = true;
+    fetch(`/api/brainfuck/runs/${run.id}`, { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((d) => { if (alive) setTrail(d.progress ?? []); })
+      .catch(() => { if (alive) setTrail([]); });
+    return () => { alive = false; };
+  }, [open, run.id, trail]);
+
+  return (
+    <div className="rounded-lg bg-background/30 border border-border/30">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-background/50 transition-colors text-left"
+      >
+        {open ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
+        <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${badge.color} flex items-center gap-1`}>
+          <badge.Icon className={`h-3 w-3 ${run.status === 'running' ? 'animate-spin' : ''}`} />
+          {badge.label}
+        </span>
+        <span className="font-mono text-sm flex-1 truncate">&quot;{run.target}&quot;</span>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {run.generations.toLocaleString()} gen
+        </span>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {Math.round(pct * 100)}%
+        </span>
+        <span className="text-xs text-muted-foreground tabular-nums hidden sm:inline">
+          {fmtTime(run.started_at)}
+        </span>
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="overflow-hidden"
+          >
+            <div className="px-3 pb-3 pt-1 space-y-2 text-xs">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                <Stat label="Fitness" value={`${run.best_fitness ?? 0}/${256 * run.target.length}`} />
+                <Stat label="Pop" value={run.pop_size.toString()} />
+                <Stat label="Max gen" value={run.max_generations.toLocaleString()} />
+                <Stat label="Elapsed" value={fmtDuration(run.started_at, run.completed_at)} />
+              </div>
+              {run.best_gene && (
+                <BrainfuckAnimator
+                  gene={run.best_gene}
+                  fitnessTrail={trail ? trail.map((p) => ({ gen: p.gen, fitness: p.best_fitness })) : undefined}
+                  targetFitness={256 * run.target.length}
+                  height={220}
+                  compact
+                />
+              )}
+              {run.error && (
+                <div className="text-red-400 bg-red-400/10 rounded px-2 py-1.5 break-all">
+                  {run.error}
+                </div>
+              )}
+              <div className="flex justify-end pt-1">
+                <button
+                  onClick={onDelete}
+                  className="text-xs px-2 py-1 rounded bg-red-400/10 text-red-400 hover:bg-red-400/20 flex items-center gap-1"
+                >
+                  <Trash2 className="h-3 w-3" /> Delete
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

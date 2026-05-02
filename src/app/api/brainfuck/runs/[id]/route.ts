@@ -20,7 +20,12 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     if (!rows.length) {
       return NextResponse.json({ error: 'not found' }, { status: 404 });
     }
-    return NextResponse.json({ run: rows[0], activeId: getActiveRunId() });
+    const { rows: trail } = await pool.query(
+      `SELECT gen, best_fitness FROM brainfuck_progress
+       WHERE run_id = $1 ORDER BY gen ASC`,
+      [runId],
+    );
+    return NextResponse.json({ run: rows[0], progress: trail, activeId: getActiveRunId() });
   } catch (error) {
     return NextResponse.json({ error: 'fetch failed', detail: String(error) }, { status: 500 });
   }
