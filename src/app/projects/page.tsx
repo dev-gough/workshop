@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
-import { Clock, Grid3X3, Home, Music, Trophy, Server, ArrowRight, Palette, Bug, Brain, Atom, Share2, Film, Wallet } from 'lucide-react';
+import { Clock, Grid3X3, Home, Music, Trophy, Server, ArrowRight, Palette, Bug, Brain, Atom, Share2, Film, Wallet, Code2 } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
 import { motion } from 'motion/react';
@@ -294,6 +294,46 @@ function EcosystemVisual() {
   );
 }
 
+function BrainfuckVisual() {
+  // Stylized BF tape: instruction stream above, memory cells below, with a
+  // moving "data pointer" indicator.
+  const instrs = ['+', '+', '[', '>', '+', '+', '<', '-', ']', '>', '.', '<', '+', '.'];
+  return (
+    <svg viewBox="0 0 200 60" className="w-full h-14 mt-1">
+      {instrs.map((c, i) => (
+        <g key={i} transform={`translate(${i * 13 + 4}, 0)`}>
+          <rect width={11} height={14} rx={1.5} fill="hsl(290,80%,60%)" fillOpacity={0.08} stroke="hsl(290,80%,65%)" strokeOpacity={0.25} strokeWidth={0.5} />
+          <text x={5.5} y={11} textAnchor="middle" fontSize={9} fontFamily="monospace" fontWeight={700} fill="hsl(290,80%,80%)" fillOpacity={0.85}>{c}</text>
+        </g>
+      ))}
+      {/* Memory cells */}
+      {Array.from({ length: 8 }).map((_, i) => {
+        const val = [3, 6, 0, 1, 4, 0, 0, 0][i];
+        const active = i === 1;
+        return (
+          <g key={i} transform={`translate(${i * 22 + 8}, 28)`}>
+            <rect width={18} height={20} rx={2}
+              fill={active ? 'hsl(290,80%,55%)' : 'white'}
+              fillOpacity={active ? 0.25 : 0.05}
+              stroke={active ? 'hsl(290,80%,70%)' : 'white'}
+              strokeOpacity={active ? 0.7 : 0.15}
+              strokeWidth={active ? 1 : 0.5} />
+            <text x={9} y={14} textAnchor="middle" fontSize={9} fontFamily="monospace" fontWeight={700}
+              fill={active ? 'hsl(290,90%,90%)' : 'white'}
+              fillOpacity={active ? 0.95 : 0.4}>{val}</text>
+          </g>
+        );
+      })}
+      {/* pointer triangle */}
+      <polygon points="22,52 30,52 26,57" fill="hsl(290,90%,70%)" fillOpacity={0.9}>
+        <animate attributeName="points"
+          values="22,52 30,52 26,57; 44,52 52,52 48,57; 88,52 96,52 92,57; 22,52 30,52 26,57"
+          dur="6s" repeatCount="indefinite" />
+      </polygon>
+    </svg>
+  );
+}
+
 function NeuroevolutionVisual() {
   return (
     <svg viewBox="0 0 160 80" className="w-48 h-20 shrink-0">
@@ -522,6 +562,20 @@ export default function ProjectsPage() {
                 Evolve semi-transparent polygons to approximate a target image. Watch abstract shapes converge into recognizable art.
               </p>
               <ImageEvolverVisual />
+            </ProjectCard>
+
+            {/* ── BrainFuck Genetic ── */}
+            <ProjectCard href="/projects/brainfuck" delay={0.42}
+              className="bg-gradient-to-br from-fuchsia-950/70 to-purple-950/40">
+              <div className="flex items-center gap-2 mb-3">
+                <Code2 className="h-4 w-4 text-fuchsia-400" />
+                <span className="text-[10px] uppercase tracking-[0.2em] text-fuchsia-400/60 font-medium">Genetic Algorithm</span>
+              </div>
+              <h2 className="text-lg font-bold text-white mb-1.5">BrainFuck Genetic</h2>
+              <p className="text-sm text-white/45 leading-relaxed mb-2">
+                Evolve a BrainFuck program that prints a target string. Naive baseline implementation — slow but honest, ready to be optimized.
+              </p>
+              <BrainfuckVisual />
             </ProjectCard>
 
             {/* ── Ecosystem Sim ── */}

@@ -12,7 +12,7 @@ import {
   Server, Cpu, MemoryStick, HardDrive, Clock, Activity,
   Music, Trophy, Home, ArrowRight, Thermometer, Circle,
   Grid3X3, Gamepad2, TrendingUp, Disc3, Swords, Film, Tv,
-  Wallet, HandCoins, Receipt,
+  Wallet, HandCoins, Receipt, Code2,
 } from 'lucide-react';
 
 // ── Types ──
@@ -66,6 +66,16 @@ interface FetchData {
   status: string;
   ingested_at: string | null;
   submitted_at: string;
+}
+
+interface BrainfuckActivity {
+  id: number;
+  target: string;
+  status: string;
+  generations: number;
+  best_fitness: number | null;
+  started_at: string;
+  completed_at: string;
 }
 
 interface SplitWiserActivity {
@@ -144,7 +154,7 @@ const CATEGORY_COLORS = ['#818cf8', '#38bdf8', '#4ade80', '#fbbf24', '#f472b6'];
 // ── Activity Feed Item ──
 
 interface FeedItem {
-  type: 'music' | 'game' | 'fetch' | 'expense' | 'payment';
+  type: 'music' | 'game' | 'fetch' | 'expense' | 'payment' | 'brainfuck';
   timestamp: number;
   // music
   song?: string;
@@ -173,6 +183,12 @@ interface FeedItem {
   swAmountCents?: number;
   swDirection?: 'paid' | 'received' | 'between';
   swGroupId?: number;
+  // brainfuck
+  bfTarget?: string;
+  bfStatus?: string;
+  bfGenerations?: number;
+  bfFitness?: number | null;
+  bfTargetFitness?: number;
 }
 
 // ── Data Hook ──
@@ -187,6 +203,7 @@ function useHomepageData() {
   const [splitwiser, setSplitwiser] = useState<{ activity: SplitWiserActivity[]; meId: number | null }>({
     activity: [], meId: null,
   });
+  const [brainfuck, setBrainfuck] = useState<BrainfuckActivity[]>([]);
 
   const fetchServer = useCallback(async () => {
     try {
@@ -262,7 +279,20 @@ function useHomepageData() {
     return () => clearInterval(interval);
   }, []);
 
-  return { server, services, music, challenges, games, fetches, splitwiser };
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await fetch('/api/brainfuck/activity?limit=10');
+        const data = await res.json();
+        if (Array.isArray(data.activity)) setBrainfuck(data.activity);
+      } catch { /* graceful */ }
+    };
+    load();
+    const interval = setInterval(load, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return { server, services, music, challenges, games, fetches, splitwiser, brainfuck };
 }
 
 // Strip the library prefix and trailing extension; decode +-as-space from magnet dn=
@@ -387,7 +417,7 @@ function fmtMoneyCents(cents: number): string {
 }
 
 export default function HomePage() {
-  const { server, services, music, challenges, games, fetches, splitwiser } = useHomepageData();
+  const { server, services, music, challenges, games, fetches, splitwiser, brainfuck } = useHomepageData();
 
   // Merge music + games into a unified activity feed
   const feed = useMemo<FeedItem[]>(() => {
@@ -465,9 +495,21 @@ export default function HomePage() {
       }
     }
 
+    for (const bf of brainfuck.slice(0, 10)) {
+      items.push({
+        type: 'brainfuck',
+        timestamp: new Date(bf.completed_at).getTime(),
+        bfTarget: bf.target,
+        bfStatus: bf.status,
+        bfGenerations: bf.generations,
+        bfFitness: bf.best_fitness,
+        bfTargetFitness: 256 * bf.target.length,
+      });
+    }
+
     items.sort((a, b) => b.timestamp - a.timestamp);
     return items.slice(0, 12);
-  }, [music, games, fetches, splitwiser]);
+  }, [music, games, fetches, splitwiser, brainfuck]);
 
   const tp = challenges?.totalPoints;
   const tier = tp?.level || 'NONE';
@@ -488,6 +530,7 @@ export default function HomePage() {
     { href: '/projects/server', icon: Server, label: 'Server', color: '#a78bfa' },
     { href: '/projects/jellyfin', icon: Film, label: 'Jellyfin', color: '#22d3ee' },
     { href: '/projects/splitwiser', icon: Wallet, label: 'SplitWiser', color: '#fbbf24' },
+    { href: '/projects/brainfuck', icon: Code2, label: 'BrainFuck', color: '#e879f9' },
   ];
 
   return (
@@ -719,6 +762,27 @@ export default function HomePage() {
                                 </p>
                                 <p className="text-[11px] text-muted-foreground truncate">
                                   settle-up · {item.swGroupName}
+                                </p>
+                              </div>
+                            </>
+                          ) : item.type === 'brainfuck' ? (
+                            <>
+                              <div className="shrink-0 h-7 w-7 rounded-full flex items-center justify-center bg-fuchsia-500/10">
+                                <Code2 className="h-3.5 w-3.5 text-fuchsia-400" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate">
+                                  {item.bfStatus === 'found'
+                                    ? <span className="text-fuchsia-400">Solved</span>
+                                    : item.bfStatus === 'stopped'
+                                      ? <span className="text-amber-400">Stopped</span>
+                                      : item.bfStatus === 'failed'
+                                        ? <span className="text-red-400">Failed</span>
+                                        : <span className="text-zinc-400">Capped</span>}
+                                  <span className="font-mono text-xs ml-1.5">&quot;{item.bfTarget}&quot;</span>
+                                </p>
+                                <p className="text-[11px] text-muted-foreground truncate">
+                                  {(item.bfGenerations ?? 0).toLocaleString()} gen · fitness {item.bfFitness ?? 0}/{item.bfTargetFitness ?? 0}
                                 </p>
                               </div>
                             </>
