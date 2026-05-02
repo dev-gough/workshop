@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
-import { Clock, Grid3X3, Home, Music, Trophy, Server, ArrowRight, Palette, Bug, Brain, Atom, Share2 } from 'lucide-react';
+import { Clock, Grid3X3, Home, Music, Trophy, Server, ArrowRight, Palette, Bug, Brain, Atom, Share2, Film } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
 import { motion } from 'motion/react';
@@ -189,6 +189,29 @@ function SoulseekVisual() {
       {/* Transfer arrows */}
       <line x1={42} y1={20} x2={55} y2={24} stroke="hsl(150,80%,50%)" strokeWidth={1} opacity={0.4} strokeLinecap="round" />
       <line x1={65} y1={24} x2={80} y2={20} stroke="hsl(210,80%,55%)" strokeWidth={1} opacity={0.4} strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function JellyfinVisual() {
+  // Stylized clapperboard + progress ticks hinting at active downloads
+  return (
+    <svg viewBox="0 0 120 60" className="w-full h-14">
+      {/* Clapperboard body */}
+      <rect x={10} y={20} width={48} height={30} rx={2} fill="hsl(195,80%,55%)" fillOpacity={0.18} stroke="hsl(195,80%,55%)" strokeOpacity={0.4} strokeWidth={0.6} />
+      {/* Clapperboard top diagonal stripes */}
+      <polygon points="10,20 18,12 26,20" fill="hsl(195,80%,65%)" fillOpacity={0.3} />
+      <polygon points="26,20 34,12 42,20" fill="hsl(195,80%,65%)" fillOpacity={0.45} />
+      <polygon points="42,20 50,12 58,20" fill="hsl(195,80%,65%)" fillOpacity={0.3} />
+      {/* Mini active-transfer bars */}
+      <rect x={68} y={18} width={42} height={2} rx={1} fill="white" fillOpacity={0.08} />
+      <rect x={68} y={18} width={32} height={2} rx={1} fill="hsl(195,90%,60%)" fillOpacity={0.7} />
+      <rect x={68} y={26} width={42} height={2} rx={1} fill="white" fillOpacity={0.08} />
+      <rect x={68} y={26} width={18} height={2} rx={1} fill="hsl(195,90%,60%)" fillOpacity={0.5} />
+      <rect x={68} y={34} width={42} height={2} rx={1} fill="white" fillOpacity={0.08} />
+      <rect x={68} y={34} width={42} height={2} rx={1} fill="hsl(150,80%,55%)" fillOpacity={0.6} />
+      {/* TV/movie glyphs inside clapper */}
+      <text x={34} y={42} textAnchor="middle" fontSize={11} fill="white" fillOpacity={0.55} fontFamily="monospace" fontWeight={700}>JF</text>
     </svg>
   );
 }
@@ -403,6 +426,20 @@ export default function ProjectsPage() {
                 Monitor CPU, memory, disk, and network metrics. Manage services and view real-time logs.
               </p>
               <ServerVisual />
+            </ProjectCard>
+
+            {/* ── Jellyfin Fetcher ── */}
+            <ProjectCard href="/projects/jellyfin" delay={0.33}
+              className="bg-gradient-to-br from-sky-950/70 to-cyan-950/40">
+              <div className="flex items-center gap-2 mb-3">
+                <Film className="h-4 w-4 text-sky-400" />
+                <span className="text-[10px] uppercase tracking-[0.2em] text-sky-400/60 font-medium">Media</span>
+              </div>
+              <h2 className="text-lg font-bold text-white mb-1.5">Jellyfin Fetcher</h2>
+              <p className="text-sm text-white/45 leading-relaxed mb-2">
+                Drop in a magnet or .torrent and it&#39;s downloaded, cleaned, and filed into Jellyfin&#39;s movie/TV layout automatically.
+              </p>
+              <JellyfinVisual />
             </ProjectCard>
 
             {/* ── Soulseek ── */}
