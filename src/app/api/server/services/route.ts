@@ -19,6 +19,7 @@ const TRACKED_SERVICES = [
   'minecraft-meatballcraft',
   'minecraft-atm9sky',
   'minecraft-above-beyond',
+  'minecraft-star-technology',
 ];
 
 interface ServiceEndpoint {
@@ -38,6 +39,7 @@ const SERVICE_ENDPOINTS: Record<string, ServiceEndpoint[]> = {
   'minecraft-meatballcraft': [{ port: 25568, label: 'Minecraft' }],
   'minecraft-atm9sky':      [{ port: 25569, label: 'Minecraft' }],
   'minecraft-above-beyond': [{ port: 25565, label: 'Minecraft (shared port)' }],
+  'minecraft-star-technology': [{ port: 25566, label: 'Minecraft' }],
 };
 
 interface ServiceInfo {
@@ -58,7 +60,7 @@ interface ServiceInfo {
 function getServiceInfo(name: string): ServiceInfo {
   try {
     const output = execSync(
-      `systemctl show ${name}.service --no-pager --property=ActiveState,SubState,Description,MainPID,MemoryCurrent,ActiveEnterTimestamp,UnitFileState 2>/dev/null`,
+      `systemctl show ${name}.service --no-pager --property=ActiveState,SubState,Description,MainPID,MemoryCurrent,ActiveEnterTimestamp,UnitFileState,ExecMainStatus 2>/dev/null`,
       { timeout: 5000 }
     ).toString();
 
@@ -75,9 +77,12 @@ function getServiceInfo(name: string): ServiceInfo {
     const memBytes = parseInt(props['MemoryCurrent'] || '0');
     const startedAt = props['ActiveEnterTimestamp'] || null;
 
+    const exitCode = parseInt(props['ExecMainStatus'] || '0');
+
     let status: ServiceInfo['status'] = 'unknown';
     if (activeState === 'active') status = 'running';
     else if (activeState === 'inactive' || activeState === 'deactivating') status = 'stopped';
+    else if (activeState === 'failed' && exitCode === 143) status = 'stopped';
     else if (activeState === 'failed') status = 'failed';
 
     return {

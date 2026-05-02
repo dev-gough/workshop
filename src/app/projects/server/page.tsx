@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, type FormEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Server, Cpu, MemoryStick, HardDrive, Clock, Activity,
   Play, Square, RotateCcw, ChevronDown, ChevronRight,
   Circle, AlertCircle, Terminal, RefreshCw, Thermometer,
-  Network, BarChart3,
+  Network, BarChart3, Send,
 } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
@@ -136,7 +136,7 @@ function StatCard({ icon: Icon, label, value, sub }: { icon: React.ElementType; 
   );
 }
 
-function ServiceRow({ service, onAction }: { service: ServiceInfo; onAction: (name: string, action: string) => void }) {
+function ServiceRow({ service, onAction }: { service: ServiceInfo; onAction: (name: string, action: string) => Promise<void> }) {
   const [expanded, setExpanded] = useState(false);
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -168,6 +168,7 @@ function ServiceRow({ service, onAction }: { service: ServiceInfo; onAction: (na
   // Connect/disconnect SSE stream
   useEffect(() => {
     if (streaming && expanded) {
+      fetchLogs(logSince);
       const es = new EventSource(`/api/server/logs/stream?service=${service.name}`);
       eventSourceRef.current = es;
 
@@ -197,7 +198,7 @@ function ServiceRow({ service, onAction }: { service: ServiceInfo; onAction: (na
         eventSourceRef.current = null;
       }
     }
-  }, [streaming, expanded, service.name]);
+  }, [streaming, expanded, service.name, fetchLogs, logSince]);
 
   // Auto-scroll to bottom when new logs arrive (if user hasn't scrolled up)
   useEffect(() => {
@@ -268,7 +269,13 @@ function ServiceRow({ service, onAction }: { service: ServiceInfo; onAction: (na
                 <span className="text-xs text-muted-foreground mr-1">Actions:</span>
                 {service.status !== 'running' && (
                   <button
-                    onClick={(e) => { e.stopPropagation(); onAction(service.name, 'start'); }}
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      const wasStreaming = streaming;
+                      if (wasStreaming) setStreaming(false);
+                      await onAction(service.name, 'start');
+                      if (wasStreaming) setStreaming(true);
+                    }}
                     className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors"
                   >
                     <Play className="h-3 w-3" /> Start
@@ -276,14 +283,26 @@ function ServiceRow({ service, onAction }: { service: ServiceInfo; onAction: (na
                 )}
                 {service.status === 'running' && !isWorkshop && (
                   <button
-                    onClick={(e) => { e.stopPropagation(); onAction(service.name, 'stop'); }}
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      const wasStreaming = streaming;
+                      if (wasStreaming) setStreaming(false);
+                      await onAction(service.name, 'stop');
+                      if (wasStreaming) setStreaming(true);
+                    }}
                     className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
                   >
                     <Square className="h-3 w-3" /> Stop
                   </button>
                 )}
                 <button
-                  onClick={(e) => { e.stopPropagation(); onAction(service.name, 'restart'); }}
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    const wasStreaming = streaming;
+                    if (wasStreaming) setStreaming(false);
+                    await onAction(service.name, 'restart');
+                    if (wasStreaming) setStreaming(true);
+                  }}
                   className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors"
                 >
                   <RotateCcw className="h-3 w-3" /> Restart
@@ -398,11 +417,114 @@ function ServiceRow({ service, onAction }: { service: ServiceInfo; onAction: (na
                   )}
                   <div ref={logEndRef} />
                 </div>
+
+                {/* RCON command input for Minecraft services */}
+                {service.name.startsWith('minecraft-') && service.status === 'running' && (
+                  <RconInput serviceName={service.name} />
+                )}
               </div>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+function RconInput({ serviceName }: { serviceName: string }) {
+  const [command, setCommand] = useState('');
+  const [history, setHistory] = useState<{ cmd: string; response: string; error?: boolean }[]>([]);
+  const [sending, setSending] = useState(false);
+  const [cmdHistory, setCmdHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const send = async (e: FormEvent) => {
+    e.preventDefault();
+    const cmd = command.trim();
+    if (!cmd || sending) return;
+
+    setSending(true);
+    setCmdHistory(prev => [cmd, ...prev]);
+    setHistoryIndex(-1);
+    setCommand('');
+
+    try {
+      const res = await fetch('/api/server/rcon', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ service: serviceName, command: cmd }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setHistory(prev => [...prev, { cmd, response: data.response || '(no output)' }]);
+      } else {
+        setHistory(prev => [...prev, { cmd, response: data.error || 'Unknown error', error: true }]);
+      }
+    } catch {
+      setHistory(prev => [...prev, { cmd, response: 'Failed to connect', error: true }]);
+    }
+    setSending(false);
+    inputRef.current?.focus();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (cmdHistory.length > 0) {
+        const next = Math.min(historyIndex + 1, cmdHistory.length - 1);
+        setHistoryIndex(next);
+        setCommand(cmdHistory[next]);
+      }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (historyIndex > 0) {
+        const next = historyIndex - 1;
+        setHistoryIndex(next);
+        setCommand(cmdHistory[next]);
+      } else {
+        setHistoryIndex(-1);
+        setCommand('');
+      }
+    }
+  };
+
+  return (
+    <div className="space-y-1.5">
+      {history.length > 0 && (
+        <div className="bg-zinc-950 rounded-lg p-2 max-h-32 overflow-y-auto font-mono text-xs space-y-1">
+          {history.map((h, i) => (
+            <div key={i}>
+              <span className="text-blue-400">&gt; {h.cmd}</span>
+              <div className={h.error ? 'text-red-400' : 'text-zinc-400'}>{h.response}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      <form onSubmit={send} className="flex items-center gap-2">
+        <div className="flex-1 flex items-center bg-zinc-950 rounded-lg border border-zinc-800 focus-within:border-zinc-600 transition-colors">
+          <span className="pl-3 text-zinc-600 font-mono text-xs select-none">&gt;</span>
+          <input
+            ref={inputRef}
+            type="text"
+            value={command}
+            onChange={(e) => setCommand(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="RCON command..."
+            disabled={sending}
+            className="flex-1 bg-transparent text-xs font-mono text-zinc-200 placeholder:text-zinc-700 px-2 py-2 outline-none"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={sending || !command.trim()}
+          onClick={(e) => e.stopPropagation()}
+          className="p-2 rounded-lg bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 disabled:opacity-30 disabled:hover:bg-zinc-800 transition-colors"
+        >
+          <Send className="h-3.5 w-3.5" />
+        </button>
+      </form>
     </div>
   );
 }

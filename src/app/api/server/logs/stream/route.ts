@@ -18,6 +18,7 @@ const ALLOWED_SERVICES = [
   'minecraft-meatballcraft',
   'minecraft-atm9sky',
   'minecraft-above-beyond',
+  'minecraft-star-technology',
 ];
 
 function parseLine(line: string) {

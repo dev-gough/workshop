@@ -18,6 +18,7 @@ const ALLOWED_SERVICES = [
   'minecraft-meatballcraft',
   'minecraft-atm9sky',
   'minecraft-above-beyond',
+  'minecraft-star-technology',
 ];
 
 export async function GET(request: NextRequest) {
