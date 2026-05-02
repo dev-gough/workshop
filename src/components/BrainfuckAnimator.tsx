@@ -6,6 +6,9 @@ import { BFInterpreter, executionCounts, MEMORY_SIZE } from '@/lib/brainfuck-int
 
 interface Props {
   gene: string;
+  // The target string the GA is evolving toward. Used to render the "scored
+  // window" boxes in the output row, color-coded by per-position match.
+  target?: string;
   // Optional sparkline data: progress trail of (gen, fitness) pairs.
   fitnessTrail?: { gen: number; fitness: number }[];
   targetFitness?: number;
@@ -20,15 +23,26 @@ interface Props {
   onCycleEnd?: () => void;
 }
 
-const SPEEDS = [1, 4, 16, 64, 256];
+// Step-rate per speed level. 1× is intentionally slow enough to follow with
+// the eye (4 steps/sec ≈ 250ms per instruction).
+const SPEEDS = [
+  { label: '1×',   stepsPerSec: 4 },
+  { label: '4×',   stepsPerSec: 16 },
+  { label: '16×',  stepsPerSec: 64 },
+  { label: '64×',  stepsPerSec: 256 },
+  { label: '256×', stepsPerSec: 1024 },
+];
+const DEFAULT_SPEED_IDX = 2; // 16× = 64 steps/sec — comfortable default
 const MEM_WINDOW = 32; // visible memory cells
 const FLASH_MS = 350;
 const POST_RUN_PAUSE_MS = 1200;
+const FRAME_BUDGET_MS = 100; // cap elapsed time used for stepping (background-tab guard)
 
 type FlashMap = Map<number, number>; // cell idx → timestamp of write
 
 export default function BrainfuckAnimator({
   gene,
+  target,
   fitnessTrail,
   targetFitness,
   pendingGene,
@@ -47,7 +61,9 @@ export default function BrainfuckAnimator({
   const viewCenterRef = useRef<number>(0); // smooth-tracked data ptr for scrolling
   const haltedAtRef = useRef<number | null>(null);
   const rafRef = useRef<number>(0);
-  const [speedIdx, setSpeedIdx] = useState(2); // default 16×
+  const stepAccumRef = useRef<number>(0);
+  const lastFrameTimeRef = useRef<number | null>(null);
+  const [speedIdx, setSpeedIdx] = useState(DEFAULT_SPEED_IDX);
   const [playing, setPlaying] = useState(true);
   const [, setTick] = useState(0); // force re-render on gene-swap so UI labels update
 
@@ -66,7 +82,14 @@ export default function BrainfuckAnimator({
     setTick((t) => t + 1);
   }, [gene]);
 
-  // rAF loop
+  // Reset frame timing whenever play state changes so resuming from pause
+  // doesn't blast through accumulated step debt.
+  useEffect(() => {
+    lastFrameTimeRef.current = null;
+    stepAccumRef.current = 0;
+  }, [playing, speedIdx]);
+
+  // rAF loop — time-based stepping so 1× actually means 4 steps/sec.
   useEffect(() => {
     let alive = true;
 
@@ -75,17 +98,22 @@ export default function BrainfuckAnimator({
       const canvas = canvasRef.current;
       const interp = interpreterRef.current;
       if (canvas && interp) {
-        const speed = SPEEDS[speedIdx];
+        const now = performance.now();
+        const last = lastFrameTimeRef.current ?? now;
+        const elapsed = Math.min(FRAME_BUDGET_MS, now - last);
+        lastFrameTimeRef.current = now;
 
-        // Advance N steps per frame. Skip stepping if paused or halted.
         if (playing && !interp.done && !interp.truncated) {
-          for (let i = 0; i < speed; i++) {
+          stepAccumRef.current += (SPEEDS[speedIdx].stepsPerSec * elapsed) / 1000;
+          let stepsToTake = Math.floor(stepAccumRef.current);
+          if (stepsToTake > 0) stepAccumRef.current -= stepsToTake;
+          while (stepsToTake-- > 0) {
             const moreToGo = interp.step();
             if (interp.lastWritten >= 0) {
-              flashesRef.current.set(interp.lastWritten, performance.now());
+              flashesRef.current.set(interp.lastWritten, now);
             }
             if (!moreToGo) {
-              haltedAtRef.current = performance.now();
+              haltedAtRef.current = now;
               break;
             }
           }
@@ -107,15 +135,16 @@ export default function BrainfuckAnimator({
         // (the data pointer is a 65535-cell ring buffer, and `<` from cell 0
         // wraps to 65534, which would otherwise make the view fly across the
         // whole tape every frame).
-        const target = interp.dataPtr;
+        const targetPtr = interp.dataPtr;
         const cur = viewCenterRef.current;
-        if (Math.abs(target - cur) > 1000) {
-          viewCenterRef.current = target;
+        if (Math.abs(targetPtr - cur) > 1000) {
+          viewCenterRef.current = targetPtr;
         } else {
-          viewCenterRef.current = cur + (target - cur) * 0.18;
+          viewCenterRef.current = cur + (targetPtr - cur) * 0.18;
         }
 
         draw(canvas, interp, countsRef.current, flashesRef.current, viewCenterRef.current, {
+          target,
           fitnessTrail,
           targetFitness,
           pendingLabel: pendingGene && pendingGene !== gene ? pendingLabel ?? 'next' : null,
@@ -130,7 +159,34 @@ export default function BrainfuckAnimator({
       alive = false;
       cancelAnimationFrame(rafRef.current);
     };
-  }, [speedIdx, playing, fitnessTrail, targetFitness, pendingGene, pendingLabel, gene, compact]);
+  }, [speedIdx, playing, fitnessTrail, targetFitness, pendingGene, pendingLabel, gene, target, compact]);
+
+  // Arrow keys: when paused, ←/→ steps backward/forward by one instruction.
+  useEffect(() => {
+    if (playing) return; // only listen while paused
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      // Don't hijack typing in inputs/textareas.
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      const interp = interpreterRef.current;
+      if (!interp) return;
+      e.preventDefault();
+      if (e.key === 'ArrowRight') {
+        const moreToGo = interp.step();
+        if (interp.lastWritten >= 0) flashesRef.current.set(interp.lastWritten, performance.now());
+        if (!moreToGo) haltedAtRef.current = performance.now();
+      } else {
+        // Stepping back un-halts and clears the post-run pause timer.
+        if (interp.stepBack()) {
+          haltedAtRef.current = null;
+        }
+      }
+      setTick((t) => t + 1);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [playing]);
 
   // DPR + resize handling
   useEffect(() => {
@@ -182,9 +238,10 @@ export default function BrainfuckAnimator({
           onClick={() => setSpeedIdx((i) => (i + 1) % SPEEDS.length)}
           className="h-7 px-2 text-[11px] font-mono tabular-nums text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
           aria-label="Speed"
+          title={`${SPEEDS[speedIdx].stepsPerSec} steps/s`}
         >
           <FastForward className="h-3 w-3" />
-          {SPEEDS[speedIdx]}×
+          {SPEEDS[speedIdx].label}
         </button>
       </div>
     </div>
@@ -194,6 +251,7 @@ export default function BrainfuckAnimator({
 // ── Drawing ──────────────────────────────────────────────────────────────────
 
 interface DrawOpts {
+  target?: string;
   fitnessTrail?: { gen: number; fitness: number }[];
   targetFitness?: number;
   pendingLabel?: string | null;
@@ -240,7 +298,7 @@ function draw(
   const heatRowH = 4;
   const memRowH = opts.compact ? 38 : 56;
   const dataPtrH = 14;
-  const outputRowH = opts.compact ? 28 : 36;
+  const outputRowH = opts.compact ? 38 : 50;
   const statsRowH = 16;
 
   let y = padY;
@@ -255,7 +313,7 @@ function draw(
   drawDataPointer(ctx, interp, viewCenter, padX, y, w - padX * 2, dataPtrH);
   y += dataPtrH + (opts.compact ? 6 : 10);
 
-  drawOutput(ctx, interp, padX, y, w - padX * 2, outputRowH, opts.targetFitness);
+  drawOutput(ctx, interp, padX, y, w - padX * 2, outputRowH, opts.target, opts.compact);
   y += outputRowH + 4;
 
   drawStats(ctx, interp, padX, y, w - padX * 2, statsRowH);
@@ -431,36 +489,30 @@ function drawOutput(
   ctx: CanvasRenderingContext2D,
   interp: BFInterpreter,
   x: number, y: number, w: number, h: number,
-  targetFitness: number | undefined,
+  target: string | undefined,
+  compact: boolean | undefined,
 ) {
+  // Background panel
   ctx.fillStyle = 'rgba(255,255,255,0.04)';
   ctx.fillRect(x, y, w, h);
   ctx.strokeStyle = COLORS.border;
   ctx.lineWidth = 0.5;
   ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
 
+  // Header label
   ctx.fillStyle = COLORS.dim;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.font = `10px ui-sans-serif, system-ui, sans-serif`;
   ctx.fillText('OUTPUT', x + 6, y + 4);
 
-  ctx.font = `${Math.max(11, h * 0.4)}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
-  ctx.textBaseline = 'middle';
-  let display = '';
-  for (const ch of interp.output) {
-    const cp = ch.codePointAt(0) ?? 0;
-    if (cp < 0x20 || cp === 0x7f) display += '·';
-    else if (cp > 0xff) display += '◌';
-    else display += ch;
+  // Status badge top-right (truncated/halt). The "-1" sentinel that bumpCalc
+  // appends to output is purely a marker for the GA's fitness function — strip
+  // it from display so the badge can carry that info instead.
+  let displayOutput = interp.output;
+  if (interp.truncated && displayOutput.endsWith('-1')) {
+    displayOutput = displayOutput.slice(0, -2);
   }
-  ctx.fillStyle = display.length === 0 ? COLORS.dim : COLORS.output;
-  // Truncate from the left if too long
-  while (ctx.measureText(display).width > w - 70 && display.length > 1) {
-    display = '…' + display.slice(2);
-  }
-  ctx.fillText(display || '—', x + 6, y + h / 2 + 2);
-
   if (interp.truncated) {
     ctx.fillStyle = '#fb923c';
     ctx.textAlign = 'right';
@@ -472,7 +524,115 @@ function drawOutput(
     ctx.font = `10px ui-sans-serif, system-ui, sans-serif`;
     ctx.fillText('halt', x + w - 6, y + 4);
   }
-  void targetFitness;
+
+  const N = target ? target.length : 0;
+  const labelW = 56; // leave room for the OUTPUT label + tiny gap
+  const statusW = 60;
+  const contentX = x + labelW;
+  const contentW = w - labelW - statusW;
+  const contentY = y + 4;
+  const contentH = h - 8;
+
+  // ── First-N "scored window" boxes ──
+  // The GA's fitness function only rewards interp.output[0..N), so those are
+  // the chars that actually matter. Always render them as fixed boxes with
+  // per-position match coloring.
+  if (N > 0 && target) {
+    const gap = 2;
+    const boxW = Math.max(11, Math.min(compact ? 22 : 28, Math.floor((contentW * 0.55) / N)));
+    const boxH = Math.min(boxW, contentH - 4);
+    const boxesY = contentY + (contentH - boxH) / 2;
+
+    const fontSize = Math.max(10, Math.floor(boxH * 0.65));
+    ctx.font = `${fontSize}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    for (let i = 0; i < N; i++) {
+      const bx = contentX + i * (boxW + gap);
+      if (bx + boxW > x + w - statusW) break; // ran out of space
+      const targetCp = target.charCodeAt(i);
+      const haveOutput = i < displayOutput.length;
+      const producedCp = haveOutput ? displayOutput.charCodeAt(i) : -1;
+      const dist = haveOutput ? Math.min(255, Math.abs(producedCp - targetCp)) : -1;
+      const accent = haveOutput ? matchAccent(dist) : MATCH_EMPTY;
+
+      // Box bg + border
+      ctx.fillStyle = accent.bg;
+      ctx.fillRect(bx, boxesY, boxW, boxH);
+      ctx.strokeStyle = accent.border;
+      ctx.lineWidth = haveOutput ? 1 : 0.6;
+      if (!haveOutput) ctx.setLineDash([2, 2]);
+      ctx.strokeRect(bx + 0.5, boxesY + 0.5, boxW - 1, boxH - 1);
+      ctx.setLineDash([]);
+
+      // Glyph: produced char if output reaches here, else target char as ghost
+      const cp = haveOutput ? producedCp : targetCp;
+      const glyph = renderableGlyph(cp);
+      ctx.fillStyle = haveOutput ? accent.text : 'rgba(255,255,255,0.20)';
+      ctx.fillText(glyph, bx + boxW / 2, boxesY + boxH / 2 + 1);
+    }
+
+    // Tiny "target: hi" label under/over the boxes (subtle reference)
+    if (boxH < contentH - 12) {
+      ctx.font = `9px ui-sans-serif, system-ui, sans-serif`;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = 'rgba(255,255,255,0.30)';
+      const tgt = target.length > 24 ? target.slice(0, 24) + '…' : target;
+      ctx.fillText(`scored: ${JSON.stringify(tgt)}`, contentX, boxesY + boxH + 2);
+    }
+
+    // ── Overflow: any output past position N, rendered as faint mono text ──
+    const overflowStart = contentX + N * (boxW + gap) + 6;
+    const overflowMaxW = (x + w - statusW) - overflowStart - 4;
+    if (overflowMaxW > 30 && displayOutput.length > N) {
+      let rest = '';
+      for (const ch of displayOutput.slice(N)) rest += renderableGlyph(ch.charCodeAt(0));
+      ctx.font = `${Math.max(10, boxH * 0.55)}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      // Truncate overflow from the END (keep the start visible after the boxes).
+      while (ctx.measureText(rest).width > overflowMaxW && rest.length > 1) {
+        rest = rest.slice(0, -1);
+      }
+      if (rest.length < displayOutput.length - N) rest = rest.slice(0, -1) + '…';
+      ctx.fillText(rest, overflowStart, boxesY + boxH / 2);
+    }
+    return;
+  }
+
+  // ── Fallback when no target is provided (e.g. detail card with raw output) ──
+  ctx.font = `${Math.max(11, h * 0.4)}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+  ctx.textBaseline = 'middle';
+  let display = '';
+  for (const ch of displayOutput) display += renderableGlyph(ch.charCodeAt(0));
+  ctx.fillStyle = display.length === 0 ? COLORS.dim : COLORS.output;
+  while (ctx.measureText(display).width > w - 70 && display.length > 1) {
+    display = display.slice(0, -1);
+  }
+  ctx.fillText(display || '—', x + 6, y + h / 2 + 2);
+}
+
+const MATCH_EMPTY = {
+  bg: 'rgba(255,255,255,0.03)',
+  border: 'rgba(255,255,255,0.18)',
+  text: 'rgba(255,255,255,0.20)',
+};
+
+function matchAccent(dist: number): { bg: string; border: string; text: string } {
+  if (dist === 0)  return { bg: 'rgba(134,239,172,0.22)', border: 'rgba(134,239,172,0.85)', text: '#bbf7d0' }; // green
+  if (dist < 4)    return { bg: 'rgba(190,242,100,0.18)', border: 'rgba(190,242,100,0.70)', text: '#d9f99d' }; // lime
+  if (dist < 16)   return { bg: 'rgba(250,204,21,0.16)',  border: 'rgba(250,204,21,0.65)',  text: '#fde68a' }; // amber
+  if (dist < 64)   return { bg: 'rgba(251,146,60,0.16)',  border: 'rgba(251,146,60,0.65)',  text: '#fed7aa' }; // orange
+  return             { bg: 'rgba(248,113,113,0.16)',     border: 'rgba(248,113,113,0.65)', text: '#fecaca' }; // red
+}
+
+function renderableGlyph(cp: number): string {
+  if (cp < 0x20 || cp === 0x7f) return '·';
+  if (cp > 0xff) return '◌';
+  return String.fromCharCode(cp);
 }
 
 function drawStats(

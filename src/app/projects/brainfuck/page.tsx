@@ -341,6 +341,7 @@ export default function BrainfuckPage() {
               {displayedGene ? (
                 <BrainfuckAnimator
                   gene={displayedGene}
+                  target={active.target}
                   fitnessTrail={animatorTrail}
                   targetFitness={targetFitness}
                   pendingGene={latestGeneRef.current}
@@ -466,9 +467,10 @@ function HistoryRow({
               {run.best_gene && (
                 <BrainfuckAnimator
                   gene={run.best_gene}
+                  target={run.target}
                   fitnessTrail={trail ? trail.map((p) => ({ gen: p.gen, fitness: p.best_fitness })) : undefined}
                   targetFitness={256 * run.target.length}
-                  height={220}
+                  height={240}
                   compact
                 />
               )}

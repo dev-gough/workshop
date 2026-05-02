@@ -21,6 +21,18 @@ export interface BFSnapshot {
   lastWritten: number;
 }
 
+// Per-step undo record. We keep one of these for every step() call so the
+// animator can support manual stepBack() while paused.
+interface UndoEntry {
+  ip: number;
+  dataPtr: number;
+  calcs: number;
+  outputLen: number;
+  // The single cell modified by this step, if any. -1 means no cell write.
+  cellIdx: number;
+  cellOld: number;
+}
+
 export class BFInterpreter {
   readonly source: string;
   readonly memory: Int8Array;
@@ -32,6 +44,8 @@ export class BFInterpreter {
   done = false;
   truncated = false;
   lastWritten = -1;
+  private history: UndoEntry[] = [];
+  private readonly historyCap = 200_000;
 
   constructor(source: string, calcCap: number = DEFAULT_CALC_CAP) {
     this.source = source;
@@ -48,6 +62,7 @@ export class BFInterpreter {
     this.done = false;
     this.truncated = false;
     this.lastWritten = -1;
+    this.history.length = 0;
   }
 
   // Execute one BF instruction. Returns false when the program halts (done or truncated).
@@ -57,36 +72,52 @@ export class BFInterpreter {
       this.done = true;
       return false;
     }
+
+    // Snapshot pre-mutation state so stepBack() can undo this instruction.
+    const undo: UndoEntry = {
+      ip: this.ip,
+      dataPtr: this.dataPtr,
+      calcs: this.calcs,
+      outputLen: this.output.length,
+      cellIdx: -1,
+      cellOld: 0,
+    };
+
     const ch = this.source[this.ip];
     this.lastWritten = -1;
+    let truncatedHere = false;
 
     switch (ch) {
       case '>': {
         this.calcs++;
-        if (this.bumpCalc()) return false;
+        if (this.bumpCalc()) { truncatedHere = true; break; }
         this.dataPtr = this.dataPtr === MEMORY_SIZE - 1 ? 0 : this.dataPtr + 1;
         break;
       }
       case '<': {
         this.calcs++;
-        if (this.bumpCalc()) return false;
+        if (this.bumpCalc()) { truncatedHere = true; break; }
         this.dataPtr = this.dataPtr === 0 ? MEMORY_SIZE - 1 : this.dataPtr - 1;
         break;
       }
       case '+': {
+        undo.cellIdx = this.dataPtr;
+        undo.cellOld = this.memory[this.dataPtr];
         this.memory[this.dataPtr]++;
         this.lastWritten = this.dataPtr;
         this.calcs++;
-        if (this.bumpCalc()) return false;
+        if (this.bumpCalc()) { truncatedHere = true; break; }
         break;
       }
       case '-': {
+        undo.cellIdx = this.dataPtr;
+        undo.cellOld = this.memory[this.dataPtr];
         let v = this.memory[this.dataPtr] - 1;
         if (v < 0) v = 127;
         this.memory[this.dataPtr] = v;
         this.lastWritten = this.dataPtr;
         this.calcs++;
-        if (this.bumpCalc()) return false;
+        if (this.bumpCalc()) { truncatedHere = true; break; }
         break;
       }
       case '.': {
@@ -95,31 +126,33 @@ export class BFInterpreter {
         const cp = this.memory[this.dataPtr] & 0xff;
         this.output += String.fromCharCode(cp);
         this.calcs++;
-        if (this.bumpCalc()) return false;
+        if (this.bumpCalc()) { truncatedHere = true; break; }
         break;
       }
       case ',': {
         this.calcs++;
-        if (this.bumpCalc()) return false;
+        if (this.bumpCalc()) { truncatedHere = true; break; }
         break;
       }
       case '[': {
         this.calcs++;
-        if (this.bumpCalc()) return false;
+        if (this.bumpCalc()) { truncatedHere = true; break; }
         if (this.memory[this.dataPtr] === 0) {
           // Scan forward to the matching ']', counting calcs per char (Java parity).
           let i = this.ip + 1;
           let depth = 0;
           while (i < this.source.length && (depth > 0 || this.source[i] !== ']')) {
             this.calcs++;
-            if (this.bumpCalc()) return false;
+            if (this.bumpCalc()) { truncatedHere = true; break; }
             const c = this.source[i];
             if (c === '[') depth++;
             else if (c === ']') depth--;
             i++;
           }
+          if (truncatedHere) break;
           if (i >= this.source.length) {
             this.truncated = true;
+            this.pushHistory(undo);
             return false;
           }
           this.ip = i;
@@ -128,20 +161,22 @@ export class BFInterpreter {
       }
       case ']': {
         this.calcs++;
-        if (this.bumpCalc()) return false;
+        if (this.bumpCalc()) { truncatedHere = true; break; }
         if (this.memory[this.dataPtr] !== 0) {
           let i = this.ip - 1;
           let depth = 0;
           while (i >= 0 && (depth > 0 || this.source[i] !== '[')) {
             this.calcs++;
-            if (this.bumpCalc()) return false;
+            if (this.bumpCalc()) { truncatedHere = true; break; }
             const c = this.source[i];
             if (c === ']') depth++;
             else if (c === '[') depth--;
             i--;
           }
+          if (truncatedHere) break;
           if (i < 0) {
             this.truncated = true;
+            this.pushHistory(undo);
             return false;
           }
           this.ip = i;
@@ -153,9 +188,36 @@ export class BFInterpreter {
         break;
     }
 
+    this.pushHistory(undo);
+
+    if (truncatedHere) return false;
+
     this.ip++;
     if (this.ip >= this.source.length) this.done = true;
     return !this.done;
+  }
+
+  // Undo the most recent step. Returns false if there's nothing to undo.
+  stepBack(): boolean {
+    const e = this.history.pop();
+    if (!e) return false;
+    this.ip = e.ip;
+    this.dataPtr = e.dataPtr;
+    this.calcs = e.calcs;
+    if (this.output.length > e.outputLen) this.output = this.output.slice(0, e.outputLen);
+    if (e.cellIdx >= 0) this.memory[e.cellIdx] = e.cellOld;
+    this.done = false;
+    this.truncated = false;
+    this.lastWritten = -1;
+    return true;
+  }
+
+  private pushHistory(entry: UndoEntry): void {
+    this.history.push(entry);
+    if (this.history.length > this.historyCap) {
+      // Drop the oldest 25% to amortize the shift cost.
+      this.history.splice(0, Math.floor(this.historyCap / 4));
+    }
   }
 
   private bumpCalc(): boolean {
