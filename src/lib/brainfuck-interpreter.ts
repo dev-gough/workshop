@@ -1,10 +1,10 @@
 // Mirror of the Java reference interpreter at brainfuck-genetic/Java/BrainFuck.java
 // so what the animator shows matches what the GA's fitness function actually saw.
 //
-// Quirky semantics worth flagging:
-//   • Cells are signed bytes (Int8Array). `+` overflows 127 → -128 normally.
-//   • `-` clamps to 127 instead of wrapping (the Java does this too — it's a bug
-//     in the upstream interpreter, but we have to match it for fidelity).
+// Semantics worth flagging:
+//   • Cells are conceptually 7-bit (0..127). Both `+` and `-` clamp on the
+//     overflow boundary: `+` wraps 127 → 0, `-` wraps 0 → 127. This keeps
+//     output values in printable-ASCII territory.
 //   • `,` is a no-op — the GA can't supply input.
 //   • Loop scan in `[` / `]` costs one calc per character scanned, matching Java.
 
@@ -104,6 +104,7 @@ export class BFInterpreter {
         undo.cellIdx = this.dataPtr;
         undo.cellOld = this.memory[this.dataPtr];
         this.memory[this.dataPtr]++;
+        if (this.memory[this.dataPtr] < 0) this.memory[this.dataPtr] = 0;
         this.lastWritten = this.dataPtr;
         this.calcs++;
         if (this.bumpCalc()) { truncatedHere = true; break; }

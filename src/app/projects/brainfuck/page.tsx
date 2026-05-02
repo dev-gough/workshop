@@ -422,7 +422,7 @@ const BF_INSTRUCTIONS: { sym: string; desc: string }[] = [
   { sym: '>', desc: 'move pointer right' },
   { sym: '<', desc: 'move pointer left' },
   { sym: '+', desc: 'increment cell' },
-  { sym: '-', desc: 'decrement cell *' },
+  { sym: '-', desc: 'decrement cell' },
   { sym: '.', desc: 'output cell as ASCII' },
   { sym: ',', desc: 'read input (no-op here)' },
   { sym: '[', desc: 'jump past ] if cell == 0' },
@@ -457,7 +457,8 @@ function BFReference() {
           of just 8 instructions, operating on a tape of{' '}
           <span className="text-foreground/80 tabular-nums">65,535</span> byte
           cells, all initialized to{' '}
-          <span className="font-mono text-foreground/80">0</span>.
+          <span className="font-mono text-foreground/80">0</span>. Cells wrap
+          symmetrically in the 7-bit ASCII range (0..127).
         </p>
       </div>
 
@@ -474,10 +475,6 @@ function BFReference() {
               <span className="text-muted-foreground leading-5">{i.desc}</span>
             </div>
           ))}
-        </div>
-        <div className="text-[10px] text-muted-foreground/70 pt-1 leading-relaxed">
-          * In this interpreter, decrementing below 0 wraps to 127 instead
-          of 255 — a quirk inherited from the upstream Java reference.
         </div>
       </div>
 
