@@ -12,6 +12,7 @@ import {
   Server, Cpu, MemoryStick, HardDrive, Clock, Activity,
   Music, Trophy, Home, ArrowRight, Thermometer, Circle,
   Grid3X3, Gamepad2, TrendingUp, Disc3, Swords, Film, Tv,
+  Wallet, HandCoins, Receipt,
 } from 'lucide-react';
 
 // ── Types ──
@@ -65,6 +66,27 @@ interface FetchData {
   status: string;
   ingested_at: string | null;
   submitted_at: string;
+}
+
+interface SplitWiserActivity {
+  kind: 'expense' | 'payment';
+  id: number;
+  created_at: string;
+  occurred_on: string;
+  group_id: number;
+  group_name: string;
+  // expense
+  description?: string;
+  total_cents?: string;
+  paid_by?: number;
+  payer_name?: string;
+  my_share_cents?: string | null;
+  // payment
+  amount_cents?: string;
+  from_user?: number;
+  to_user?: number;
+  from_name?: string;
+  to_name?: string;
 }
 
 // ── Helpers ──
@@ -122,7 +144,7 @@ const CATEGORY_COLORS = ['#818cf8', '#38bdf8', '#4ade80', '#fbbf24', '#f472b6'];
 // ── Activity Feed Item ──
 
 interface FeedItem {
-  type: 'music' | 'game' | 'fetch';
+  type: 'music' | 'game' | 'fetch' | 'expense' | 'payment';
   timestamp: number;
   // music
   song?: string;
@@ -139,6 +161,18 @@ interface FeedItem {
   fetchMode?: 'tv' | 'movie';
   fetchTitle?: string;
   fetchStatus?: string;
+  // splitwiser
+  swGroupName?: string;
+  swDescription?: string;
+  swPayerName?: string;
+  swPaidByMe?: boolean;
+  swMyShareCents?: number;
+  swTotalCents?: number;
+  swFromName?: string;
+  swToName?: string;
+  swAmountCents?: number;
+  swDirection?: 'paid' | 'received' | 'between';
+  swGroupId?: number;
 }
 
 // ── Data Hook ──
@@ -150,6 +184,9 @@ function useHomepageData() {
   const [challenges, setChallenges] = useState<ChallengeData | null>(null);
   const [games, setGames] = useState<GameData[]>([]);
   const [fetches, setFetches] = useState<FetchData[]>([]);
+  const [splitwiser, setSplitwiser] = useState<{ activity: SplitWiserActivity[]; meId: number | null }>({
+    activity: [], meId: null,
+  });
 
   const fetchServer = useCallback(async () => {
     try {
@@ -208,7 +245,24 @@ function useHomepageData() {
     return () => clearInterval(interval);
   }, []);
 
-  return { server, services, music, challenges, games, fetches };
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const [meRes, actRes] = await Promise.all([
+          fetch('/api/splitwiser/me'),
+          fetch('/api/splitwiser/activity?limit=10'),
+        ]);
+        const meId = meRes.ok ? (await meRes.json()).user?.id ?? null : null;
+        const actData = actRes.ok ? await actRes.json() : { activity: [] };
+        setSplitwiser({ activity: actData.activity || [], meId });
+      } catch { /* graceful */ }
+    };
+    load();
+    const interval = setInterval(load, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return { server, services, music, challenges, games, fetches, splitwiser };
 }
 
 // Strip the library prefix and trailing extension; decode +-as-space from magnet dn=
@@ -326,8 +380,14 @@ function StatusBar({ server, services }: { server: ServerStats | null; services:
 
 // ── Main Page ──
 
+function fmtMoneyCents(cents: number): string {
+  const n = cents;
+  const sign = n < 0 ? '-' : '';
+  return `${sign}$${(Math.abs(n) / 100).toFixed(2)}`;
+}
+
 export default function HomePage() {
-  const { server, services, music, challenges, games, fetches } = useHomepageData();
+  const { server, services, music, challenges, games, fetches, splitwiser } = useHomepageData();
 
   // Merge music + games into a unified activity feed
   const feed = useMemo<FeedItem[]>(() => {
@@ -370,9 +430,44 @@ export default function HomePage() {
       });
     }
 
+    for (const sw of splitwiser.activity.slice(0, 10)) {
+      const ts = new Date(sw.created_at).getTime();
+      if (sw.kind === 'expense') {
+        const total = parseInt(sw.total_cents || '0', 10);
+        const myShare = parseInt(sw.my_share_cents || '0', 10);
+        const paidByMe = sw.paid_by === splitwiser.meId;
+        items.push({
+          type: 'expense',
+          timestamp: ts,
+          swGroupName: sw.group_name,
+          swGroupId: sw.group_id,
+          swDescription: sw.description,
+          swPayerName: sw.payer_name,
+          swPaidByMe: paidByMe,
+          swMyShareCents: myShare,
+          swTotalCents: total,
+        });
+      } else {
+        const amount = parseInt(sw.amount_cents || '0', 10);
+        const direction =
+          sw.from_user === splitwiser.meId ? 'paid' :
+          sw.to_user === splitwiser.meId ? 'received' : 'between';
+        items.push({
+          type: 'payment',
+          timestamp: ts,
+          swGroupName: sw.group_name,
+          swGroupId: sw.group_id,
+          swFromName: sw.from_name,
+          swToName: sw.to_name,
+          swAmountCents: amount,
+          swDirection: direction,
+        });
+      }
+    }
+
     items.sort((a, b) => b.timestamp - a.timestamp);
     return items.slice(0, 12);
-  }, [music, games, fetches]);
+  }, [music, games, fetches, splitwiser]);
 
   const tp = challenges?.totalPoints;
   const tier = tp?.level || 'NONE';
@@ -392,6 +487,7 @@ export default function HomePage() {
     { href: '/projects/challenges', icon: Trophy, label: 'Challenges', color: '#f472b6' },
     { href: '/projects/server', icon: Server, label: 'Server', color: '#a78bfa' },
     { href: '/projects/jellyfin', icon: Film, label: 'Jellyfin', color: '#22d3ee' },
+    { href: '/projects/splitwiser', icon: Wallet, label: 'SplitWiser', color: '#fbbf24' },
   ];
 
   return (
@@ -585,6 +681,47 @@ export default function HomePage() {
                                 </p>
                               </div>
                             </>
+                          ) : item.type === 'expense' ? (
+                            <>
+                              <div className="shrink-0 h-7 w-7 rounded-full flex items-center justify-center bg-amber-500/10">
+                                <Receipt className="h-3.5 w-3.5 text-amber-400" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate">
+                                  {item.swDescription}
+                                  <span className="text-muted-foreground font-normal text-xs ml-1.5">
+                                    {fmtMoneyCents(item.swTotalCents ?? 0)}
+                                  </span>
+                                </p>
+                                <p className="text-[11px] text-muted-foreground truncate">
+                                  {item.swPaidByMe ? 'you' : item.swPayerName} paid · {item.swGroupName}
+                                  {(item.swMyShareCents ?? 0) > 0 && !item.swPaidByMe && (
+                                    <span className="text-red-400/80"> · -{fmtMoneyCents(item.swMyShareCents ?? 0)}</span>
+                                  )}
+                                </p>
+                              </div>
+                            </>
+                          ) : item.type === 'payment' ? (
+                            <>
+                              <div className="shrink-0 h-7 w-7 rounded-full flex items-center justify-center bg-emerald-500/10">
+                                <HandCoins className="h-3.5 w-3.5 text-emerald-400" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate">
+                                  {item.swDirection === 'paid'
+                                    ? <>You paid {item.swToName}</>
+                                    : item.swDirection === 'received'
+                                      ? <>{item.swFromName} paid you</>
+                                      : <>{item.swFromName} → {item.swToName}</>}
+                                  <span className="text-emerald-400/80 font-normal text-xs ml-1.5">
+                                    {fmtMoneyCents(item.swAmountCents ?? 0)}
+                                  </span>
+                                </p>
+                                <p className="text-[11px] text-muted-foreground truncate">
+                                  settle-up · {item.swGroupName}
+                                </p>
+                              </div>
+                            </>
                           ) : (
                             <>
                               <div className={`shrink-0 h-7 w-7 rounded-full flex items-center justify-center ${
@@ -718,7 +855,7 @@ export default function HomePage() {
 
           {/* ── Project Quick Links: 6 equal cards ── */}
           <FadeIn delay={0.15}>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8 gap-3">
               {projects.map((p) => (
                 <Link key={p.href} href={p.href} className="block group">
                   <motion.div whileHover={{ y: -2 }} transition={{ type: 'spring', stiffness: 400, damping: 25 }}>

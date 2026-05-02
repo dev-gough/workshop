@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
-import { Clock, Grid3X3, Home, Music, Trophy, Server, ArrowRight, Palette, Bug, Brain, Atom, Share2, Film } from 'lucide-react';
+import { Clock, Grid3X3, Home, Music, Trophy, Server, ArrowRight, Palette, Bug, Brain, Atom, Share2, Film, Wallet } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
 import { motion } from 'motion/react';
@@ -189,6 +189,29 @@ function SoulseekVisual() {
       {/* Transfer arrows */}
       <line x1={42} y1={20} x2={55} y2={24} stroke="hsl(150,80%,50%)" strokeWidth={1} opacity={0.4} strokeLinecap="round" />
       <line x1={65} y1={24} x2={80} y2={20} stroke="hsl(210,80%,55%)" strokeWidth={1} opacity={0.4} strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SplitWiserVisual() {
+  // Two stacked tile-style "balance" rows + a coin to evoke money/splits
+  return (
+    <svg viewBox="0 0 120 60" className="w-full h-14">
+      {/* Top row: Alice +$42 */}
+      <rect x={6} y={8} width={108} height={16} rx={4} fill="hsl(45,93%,55%)" fillOpacity={0.08} stroke="hsl(45,93%,55%)" strokeOpacity={0.25} strokeWidth={0.6} />
+      <circle cx={16} cy={16} r={4} fill="hsl(280,60%,65%)" fillOpacity={0.7} />
+      <rect x={26} y={13.5} width={28} height={2} rx={1} fill="white" fillOpacity={0.3} />
+      <text x={108} y={19} textAnchor="end" fontSize={7} fill="hsl(140,70%,55%)" fillOpacity={0.85} fontFamily="monospace" fontWeight={700}>+$42</text>
+
+      {/* Bottom row: Bob -$28 */}
+      <rect x={6} y={28} width={108} height={16} rx={4} fill="hsl(45,93%,55%)" fillOpacity={0.08} stroke="hsl(45,93%,55%)" strokeOpacity={0.25} strokeWidth={0.6} />
+      <circle cx={16} cy={36} r={4} fill="hsl(150,60%,55%)" fillOpacity={0.7} />
+      <rect x={26} y={33.5} width={20} height={2} rx={1} fill="white" fillOpacity={0.3} />
+      <text x={108} y={39} textAnchor="end" fontSize={7} fill="hsl(0,70%,60%)" fillOpacity={0.85} fontFamily="monospace" fontWeight={700}>-$28</text>
+
+      {/* Coin floating bottom-right */}
+      <circle cx={102} cy={52} r={5} fill="hsl(45,93%,55%)" fillOpacity={0.85} />
+      <text x={102} y={54.5} textAnchor="middle" fontSize={6} fill="hsl(45,90%,15%)" fontFamily="monospace" fontWeight={900}>$</text>
     </svg>
   );
 }
@@ -426,6 +449,20 @@ export default function ProjectsPage() {
                 Monitor CPU, memory, disk, and network metrics. Manage services and view real-time logs.
               </p>
               <ServerVisual />
+            </ProjectCard>
+
+            {/* ── SplitWiser ── */}
+            <ProjectCard href="/projects/splitwiser" delay={0.31}
+              className="bg-gradient-to-br from-amber-950/70 to-yellow-950/40">
+              <div className="flex items-center gap-2 mb-3">
+                <Wallet className="h-4 w-4 text-amber-400" />
+                <span className="text-[10px] uppercase tracking-[0.2em] text-amber-400/60 font-medium">Money</span>
+              </div>
+              <h2 className="text-lg font-bold text-white mb-1.5">SplitWiser</h2>
+              <p className="text-sm text-white/45 leading-relaxed mb-2">
+                Self-hosted Splitwise. Track who paid for what across groups, with magic-link auth and ghost users for friends who don&#39;t want to log in.
+              </p>
+              <SplitWiserVisual />
             </ProjectCard>
 
             {/* ── Jellyfin Fetcher ── */}
