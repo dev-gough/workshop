@@ -123,6 +123,19 @@ function summarizeDiff(cfg: GAConfig): string {
   return diffs.length === 0 ? 'matches defaults' : diffs.join(', ');
 }
 
+// Accepts plain numbers, decimal numbers, or shorthand with k/m/b suffix
+// (case-insensitive). Trailing non-digits get tolerated so paste-with-commas
+// works ("1,000,000" → 1000000). Returns null if the input doesn't parse.
+function parseShorthandNumber(raw: string): number | null {
+  const cleaned = raw.replace(/[\s,_]/g, '').toLowerCase();
+  const m = cleaned.match(/^(-?\d+(?:\.\d+)?)([kmb])?$/);
+  if (!m) return null;
+  const n = parseFloat(m[1]);
+  if (!Number.isFinite(n)) return null;
+  const mult = m[2] === 'k' ? 1e3 : m[2] === 'm' ? 1e6 : m[2] === 'b' ? 1e9 : 1;
+  return n * mult;
+}
+
 interface KnobSpec {
   key: keyof GAConfig;
   label: string;
@@ -1304,6 +1317,19 @@ function KnobRow({
     if (!Number.isFinite(v)) return;
     onChange(clamp(v));
   };
+
+  // Draft state for the text readout — lets the user type "250k" without the
+  // controlled-input fight (we'd otherwise have to parse mid-keystroke). Null
+  // means "show the formatted current value"; a string means the user is
+  // editing. Committed on blur or Enter.
+  const [textDraft, setTextDraft] = useState<string | null>(null);
+  const commitText = (raw: string) => {
+    const parsed = parseShorthandNumber(raw);
+    if (parsed != null) {
+      onChange(clamp(spec.integer ? Math.round(parsed) : parsed));
+    }
+    setTextDraft(null);
+  };
   // Position of the default-value tick along the slider track, in %.
   // Slider thumb is 6px wide; the track has ~3px of padding on each side
   // because of the thumb's native overhang — for the tick to land on the same
@@ -1345,14 +1371,21 @@ function KnobRow({
         >
           <span className="text-fuchsia-400/40 text-[9px] leading-none select-none">[</span>
           <input
-            type="number"
-            value={value}
-            onChange={(e) => onText(e.target.value)}
+            type="text"
+            inputMode={spec.integer ? 'numeric' : 'decimal'}
+            value={textDraft ?? fmtValue(value)}
+            onChange={(e) => setTextDraft(e.target.value)}
+            onFocus={(e) => { setTextDraft(String(value)); e.target.select(); }}
+            onBlur={(e) => commitText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+              else if (e.key === 'Escape') { setTextDraft(null); (e.target as HTMLInputElement).blur(); }
+            }}
             disabled={disabled}
-            min={spec.min}
-            max={spec.max}
-            step={spec.step}
-            className="w-[58px] bg-transparent text-[10.5px] focus:outline-none disabled:opacity-50 text-right tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+            spellCheck={false}
+            autoComplete="off"
+            className="w-[58px] bg-transparent text-[10.5px] focus:outline-none disabled:opacity-50 text-right tabular-nums"
+            title={spec.integer ? 'Accepts shorthand: 250k = 250,000, 1m = 1,000,000, 2b = 2,000,000,000' : undefined}
           />
           <span className="text-fuchsia-400/40 text-[9px] leading-none select-none">]</span>
         </div>
