@@ -9,7 +9,10 @@
     "lint": "eslint",
     "scan-music": "npx tsx scripts/scan-music.ts",
     "sync-challenges": "npx tsx scripts/sync-challenges.ts",
-    "poll-challenges": "npx tsx scripts/poll-challenges.ts"
+    "poll-challenges": "npx tsx scripts/poll-challenges.ts",
+    "setup": "npx tsx scripts/setup.ts",
+    "setup:python": "bash scripts/setup-python.sh",
+    "db:migrate": "npx tsx scripts/migrations/_apply.ts"
   },
   "dependencies": {
     "@radix-ui/react-label": "^2.1.7",
