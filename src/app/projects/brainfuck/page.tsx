@@ -112,6 +112,9 @@ function savePresets(presets: (GAConfig | null)[]): void {
 function summarizeDiff(cfg: GAConfig): string {
   const diffs: string[] = [];
   (Object.keys(DEFAULT_CONFIG) as (keyof GAConfig)[]).forEach((k) => {
+    // Old runs predate newer config fields — their config_json has no value
+    // there. Skip rather than crash; missing == "matches default" is correct.
+    if (cfg[k] == null) return;
     if (cfg[k] !== DEFAULT_CONFIG[k]) {
       const v = Number.isInteger(cfg[k]) ? cfg[k] : (cfg[k] as number).toFixed(2);
       diffs.push(`${k}=${v}`);
@@ -477,7 +480,13 @@ export default function BrainfuckPage() {
   };
 
   const active = runs.find((r) => r.id === activeId) ?? null;
-  const history = runs.filter((r) => r.id !== activeId);
+  // History is *finished* runs only. A row with status='running' that isn't
+  // activeId is a stale DB record (service died before bootstrap could mark
+  // it interrupted) — surfacing it in the history dropdown crashes on
+  // partial config_json and is misleading regardless. Hide until cleanup.
+  const history = runs.filter(
+    (r) => r.id !== activeId && r.status !== 'running' && r.status !== 'queued',
+  );
 
   const animatorTrail = activeProgress.map((p) => ({ gen: p.gen, fitness: p.best_fitness }));
   const targetFitness = active ? 256 * active.target.length : 0;
@@ -1261,6 +1270,7 @@ function ConfigSummary({ cfg }: { cfg: GAConfig }) {
   const diffs: string[] = [];
   (Object.keys(DEFAULT_CONFIG) as (keyof GAConfig)[]).forEach((k) => {
     if (k === 'pop_size' || k === 'max_generations') return;
+    if (cfg[k] == null) return;
     if (cfg[k] !== DEFAULT_CONFIG[k]) {
       const v = Number.isInteger(cfg[k]) ? cfg[k] : (cfg[k] as number).toFixed(2);
       diffs.push(`${k}=${v}`);
