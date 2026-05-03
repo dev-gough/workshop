@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Code2, Play, Square, Trash2, Loader, ChevronDown, ChevronRight,
   Target, Hash, Zap, CheckCircle, AlertTriangle, Clock, Gauge, GitCommit,
-  RotateCcw, Sliders,
+  RotateCcw,
 } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
@@ -49,37 +49,49 @@ interface KnobSpec {
   integer?: boolean;
 }
 
-const KNOB_GROUPS: { title: string; knobs: KnobSpec[] }[] = [
+interface KnobGroup {
+  title: string;
+  // Mnemonic in the BF instruction alphabet — drawn beside the title to anchor
+  // each section in the language's vocabulary. Crossover gets [] (loop
+  // brackets, the swap shape), mutation gets +/-, runtime gets >.
+  glyph: string;
+  knobs: KnobSpec[];
+}
+
+const KNOB_GROUPS: KnobGroup[] = [
   {
-    title: 'Population & runtime',
+    title: 'population & runtime',
+    glyph: '>',
     knobs: [
-      { key: 'pop_size',        label: 'Population', hint: 'Programs alive each generation',
+      { key: 'pop_size',        label: 'population', hint: 'Programs alive each generation',
         min: 10,  max: 500,        step: 1,  integer: true },
-      { key: 'max_generations', label: 'Max gens',   hint: 'Hard ceiling on the run',
+      { key: 'max_generations', label: 'max gens',   hint: 'Hard ceiling on the run',
         min: 100, max: 10_000_000, step: 100, integer: true },
-      { key: 'min_prog_len',    label: 'Min length', hint: 'Lower bound on gene size',
+      { key: 'min_prog_len',    label: 'min length', hint: 'Lower bound on gene size',
         min: 1,   max: 200,        step: 1,  integer: true },
-      { key: 'max_prog_len',    label: 'Max length', hint: 'Upper bound on gene size',
+      { key: 'max_prog_len',    label: 'max length', hint: 'Upper bound on gene size',
         min: 20,  max: 2000,       step: 1,  integer: true },
     ],
   },
   {
-    title: 'Mutation',
+    title: 'mutation',
+    glyph: '+/-',
     knobs: [
-      { key: 'mutation_rate', label: 'Skip-mutation rate', hint: 'Chance to leave a child untouched',
+      { key: 'mutation_rate',  label: 'skip rate',     hint: 'Chance to leave a child untouched',
         min: 0, max: 1, step: 0.01 },
-      { key: 'mut_prob',      label: 'Per-char mutation',   hint: 'Per-character mutation probability — try ≈ 1/L',
+      { key: 'mut_prob',       label: 'per-char prob', hint: 'Per-character mutation probability — try ≈ 1/L',
         min: 0, max: 1, step: 0.01 },
-      { key: 'macro_mut_rate', label: 'Macro mutation',     hint: 'Chance of bulk insert/delete pass',
+      { key: 'macro_mut_rate', label: 'macro rate',    hint: 'Chance of bulk insert/delete pass',
         min: 0, max: 1, step: 0.01 },
     ],
   },
   {
-    title: 'Crossover',
+    title: 'crossover',
+    glyph: '[ ]',
     knobs: [
-      { key: 'crossover_rate',     label: 'Skip-crossover rate', hint: 'Chance to skip recombination (gate is inverted!)',
+      { key: 'crossover_rate',     label: 'skip rate', hint: 'Chance to skip recombination (gate is inverted!)',
         min: 0, max: 1, step: 0.01 },
-      { key: 'max_crossover_dist', label: 'Crossover span',      hint: 'Number of adjacent positions swapped',
+      { key: 'max_crossover_dist', label: 'span',      hint: 'Number of adjacent positions swapped',
         min: 1, max: 100, step: 1, integer: true },
     ],
   },
@@ -400,21 +412,22 @@ export default function BrainfuckPage() {
               <button
                 type="button"
                 onClick={() => setAdvanced((v) => !v)}
-                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+                className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1.5 font-mono uppercase tracking-[0.15em]"
               >
                 {advanced ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                <Sliders className="h-3 w-3" />
-                Hyperparameters
+                <span className="text-fuchsia-400/70">{'{'}</span>
+                hyperparameters
+                <span className="text-fuchsia-400/70">{'}'}</span>
               </button>
               {advanced && !configEqualsDefault(config) && (
                 <button
                   type="button"
                   onClick={() => setConfig(DEFAULT_CONFIG)}
                   disabled={submitting || activeId != null}
-                  className="text-[11px] text-muted-foreground hover:text-fuchsia-400 flex items-center gap-1 disabled:opacity-40"
+                  className="text-[10px] text-muted-foreground hover:text-fuchsia-400 flex items-center gap-1 disabled:opacity-40 font-mono uppercase tracking-[0.15em]"
                   title="Reset all knobs to repo defaults"
                 >
-                  <RotateCcw className="h-3 w-3" /> Reset defaults
+                  <RotateCcw className="h-3 w-3" /> reset all
                 </button>
               )}
             </div>
@@ -428,16 +441,19 @@ export default function BrainfuckPage() {
                   transition={{ duration: 0.2 }}
                   className="overflow-hidden"
                 >
-                  <div className="space-y-3 pt-1">
-                    {KNOB_GROUPS.map((group, gi) => (
+                  <div className="space-y-3.5 pt-1 font-mono">
+                    {KNOB_GROUPS.map((group) => (
                       <div key={group.title} className="space-y-2">
                         <div className="flex items-center gap-2">
-                          <div className="text-[9px] uppercase tracking-wider text-muted-foreground/80 font-medium shrink-0">
+                          <span className="text-fuchsia-400/70 text-[10px] tabular-nums shrink-0">
+                            {group.glyph}
+                          </span>
+                          <span className="text-[10px] uppercase tracking-[0.15em] text-foreground/60 shrink-0">
                             {group.title}
-                          </div>
-                          <div className="h-px flex-1 bg-border/40" />
+                          </span>
+                          <div className="h-px flex-1 bg-foreground/10" />
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-2.5">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-3">
                           {group.knobs.map((spec) => (
                             <KnobRow
                               key={spec.key}
@@ -449,7 +465,6 @@ export default function BrainfuckPage() {
                             />
                           ))}
                         </div>
-                        {gi < KNOB_GROUPS.length - 1 && <div className="h-1" />}
                       </div>
                     ))}
                   </div>
@@ -951,29 +966,28 @@ function KnobRow({
     onChange(clamp(v));
   };
   // Position of the default-value tick along the slider track, in %.
-  // Native range thumb has ~10px of internal padding on each side; the tick
-  // sits behind the track, so we let it bleed slightly past the ends rather
-  // than try to math out the thumb radius perfectly.
+  // Slider thumb is 6px wide; the track has ~3px of padding on each side
+  // because of the thumb's native overhang — for the tick to land on the same
+  // pixel column as the thumb when value === default, we inset it by that
+  // amount. Calc keeps it sane on responsive widths.
   const defaultPct = ((defaultValue - spec.min) / (spec.max - spec.min)) * 100;
 
   return (
     <div className="min-w-0">
-      <div className="flex items-center gap-1.5 mb-0.5">
+      <div className="flex items-baseline gap-1.5 mb-1">
         <label
-          className="text-[11px] text-foreground/85 font-medium cursor-help truncate flex-1"
+          className="text-[10.5px] text-foreground/75 cursor-help truncate flex-1 lowercase tracking-wide"
           title={`${spec.hint} · range ${fmtValue(spec.min)}–${fmtValue(spec.max)}`}
         >
           {spec.label}
         </label>
-        {/* Fixed-width slot keeps the number input from shifting when the reset
-            icon appears/disappears as the user drags off/onto default. */}
-        <div className="w-3 h-3 flex items-center justify-center">
+        <div className="w-3 h-3 flex items-center justify-center shrink-0">
           {!isDefault && (
             <button
               type="button"
               onClick={() => onChange(defaultValue)}
               disabled={disabled}
-              className="text-muted-foreground/60 hover:text-fuchsia-400 disabled:opacity-30 transition-colors"
+              className="text-muted-foreground/50 hover:text-fuchsia-400 disabled:opacity-30 transition-colors"
               title={`Reset to default (${fmtValue(defaultValue)})`}
               tabIndex={-1}
             >
@@ -981,26 +995,30 @@ function KnobRow({
             </button>
           )}
         </div>
-        <input
-          type="number"
-          value={value}
-          onChange={(e) => onText(e.target.value)}
-          disabled={disabled}
-          min={spec.min}
-          max={spec.max}
-          step={spec.step}
-          className={`w-[68px] px-1.5 py-0.5 rounded bg-background/60 border border-border/50 font-mono text-[10.5px] tabular-nums focus:border-fuchsia-400/60 focus:outline-none disabled:opacity-50 text-right [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${
-            isDefault ? 'text-foreground/65' : 'text-fuchsia-300'
-          }`}
-        />
-      </div>
-      <div className="relative h-3.5 flex items-center">
-        {/* Default-value tick — sits on the track, behind the thumb. */}
+        {/* Memory-cell-style value readout: thin border, monospace, fuchsia
+            when off-default. Mirrors the tape cells in the animator. */}
         <div
-          className="absolute top-1/2 -translate-y-1/2 w-px h-2 bg-foreground/40 pointer-events-none"
-          style={{ left: `calc(${defaultPct}% )` }}
-          aria-hidden
-        />
+          className={`flex items-center gap-0.5 px-1 py-0 rounded-sm border tabular-nums shrink-0 ${
+            isDefault
+              ? 'border-foreground/10 bg-foreground/[0.02] text-foreground/60'
+              : 'border-fuchsia-400/40 bg-fuchsia-400/[0.06] text-fuchsia-300'
+          }`}
+        >
+          <span className="text-fuchsia-400/40 text-[9px] leading-none select-none">[</span>
+          <input
+            type="number"
+            value={value}
+            onChange={(e) => onText(e.target.value)}
+            disabled={disabled}
+            min={spec.min}
+            max={spec.max}
+            step={spec.step}
+            className="w-[58px] bg-transparent text-[10.5px] focus:outline-none disabled:opacity-50 text-right tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          />
+          <span className="text-fuchsia-400/40 text-[9px] leading-none select-none">]</span>
+        </div>
+      </div>
+      <div className="relative pt-0.5">
         <input
           type="range"
           value={value}
@@ -1009,8 +1027,21 @@ function KnobRow({
           min={spec.min}
           max={spec.max}
           step={spec.step}
-          className="w-full accent-fuchsia-400 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+          className="bf-knob-slider"
+          aria-label={spec.label}
         />
+        {/* Default-value mark: a small fuchsia chevron sitting just below the
+            tape track, pointing up at the default position. Reads as a
+            "bookmark" the way the animator marks the target output column. */}
+        <div
+          className="absolute left-0 right-0 top-full -mt-px h-1.5 pointer-events-none"
+          aria-hidden
+        >
+          <div
+            className="absolute w-0 h-0 border-l-[3px] border-l-transparent border-r-[3px] border-r-transparent border-b-[3px] border-b-fuchsia-400/45 -translate-x-1/2"
+            style={{ left: `calc(3px + (100% - 6px) * ${defaultPct / 100})` }}
+          />
+        </div>
       </div>
     </div>
   );

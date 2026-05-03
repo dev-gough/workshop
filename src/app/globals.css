@@ -178,4 +178,101 @@
   .text-balance {
     text-wrap: balance;
   }
+
+  /* BrainFuck "tape" slider — used by the GA hyperparameter knobs.
+     Track is rendered as a row of discrete cells (mirroring the BF memory
+     tape in the animator) and the thumb is a fuchsia rectangle that reads
+     as an instruction pointer rather than a generic UI handle. */
+  .bf-knob-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    width: 100%;
+    height: 16px;
+    cursor: pointer;
+    margin: 0;
+  }
+  .bf-knob-slider:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+  }
+  .bf-knob-slider:focus-visible {
+    outline: none;
+  }
+
+  .bf-knob-slider::-webkit-slider-runnable-track {
+    height: 14px;
+    background:
+      repeating-linear-gradient(
+        to right,
+        transparent 0,
+        transparent calc(100% / 24 - 1px),
+        rgba(255, 255, 255, 0.07) calc(100% / 24 - 1px),
+        rgba(255, 255, 255, 0.07) calc(100% / 24)
+      ),
+      rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 1px;
+  }
+  .bf-knob-slider::-moz-range-track {
+    height: 14px;
+    background:
+      repeating-linear-gradient(
+        to right,
+        transparent 0,
+        transparent calc(100% / 24 - 1px),
+        rgba(255, 255, 255, 0.07) calc(100% / 24 - 1px),
+        rgba(255, 255, 255, 0.07) calc(100% / 24)
+      ),
+      rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 1px;
+  }
+
+  .bf-knob-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 6px;
+    height: 20px;
+    background: #e879f9;
+    border: none;
+    border-radius: 1px;
+    margin-top: -4px;
+    box-shadow:
+      0 0 0 1px rgba(9, 9, 11, 1),
+      0 0 0 2px rgba(232, 121, 249, 0.45);
+    cursor: pointer;
+    transition: box-shadow 120ms ease;
+  }
+  .bf-knob-slider:hover::-webkit-slider-thumb {
+    box-shadow:
+      0 0 0 1px rgba(9, 9, 11, 1),
+      0 0 0 2px rgba(232, 121, 249, 0.85),
+      0 0 8px rgba(232, 121, 249, 0.35);
+  }
+  .bf-knob-slider:focus-visible::-webkit-slider-thumb {
+    box-shadow:
+      0 0 0 1px rgba(9, 9, 11, 1),
+      0 0 0 2px #e879f9,
+      0 0 10px rgba(232, 121, 249, 0.55);
+  }
+
+  .bf-knob-slider::-moz-range-thumb {
+    width: 6px;
+    height: 20px;
+    background: #e879f9;
+    border: none;
+    border-radius: 1px;
+    box-shadow:
+      0 0 0 1px rgba(9, 9, 11, 1),
+      0 0 0 2px rgba(232, 121, 249, 0.45);
+    cursor: pointer;
+    transition: box-shadow 120ms ease;
+  }
+  .bf-knob-slider:hover::-moz-range-thumb {
+    box-shadow:
+      0 0 0 1px rgba(9, 9, 11, 1),
+      0 0 0 2px rgba(232, 121, 249, 0.85),
+      0 0 8px rgba(232, 121, 249, 0.35);
+  }
 }
