@@ -119,7 +119,26 @@ type BenchmarkEvent = {
   found: boolean;
 };
 type ErrorEvent = { type: 'error'; message: string };
-type Event = ProgressEvent | FoundEvent | DoneEvent | StartEvent | BenchmarkEvent | ErrorEvent;
+export interface SolutionStats {
+  gene_length: number;
+  loop_count: number;
+  max_loop_depth: number;
+  unique_instructions: number;
+  ops_executed: number;
+  halted: boolean;
+  output_length: number;
+  cells_used: number;
+  output_exact_match: boolean;
+}
+type SolutionEvent = {
+  type: 'solution';
+  gen: number;
+  best_fitness: number;
+  best_gene: string;
+  best_output: string;
+  stats: SolutionStats;
+};
+type Event = ProgressEvent | FoundEvent | DoneEvent | StartEvent | BenchmarkEvent | ErrorEvent | SolutionEvent;
 
 let activeRunId: number | null = null;
 let activeBenchmarkId: number | null = null;
@@ -179,6 +198,12 @@ export async function startRun(
   );
   const id: number = rows[0].id;
 
+  // Captured here so the 'solution' event handler (which is keyed by run id
+  // only) can write the discovery context — target, config, BF repo HEAD —
+  // without re-querying the runs row.
+  const bfVersion = getBFVersion();
+  const runContext = { target, config, versionHash: bfVersion.hash };
+
   const child = spawn(
     PYTHON,
     [
@@ -217,7 +242,7 @@ export async function startRun(
       return;
     }
     chain = chain
-      .then(() => handleEvent(id, evt))
+      .then(() => handleEvent(id, evt, runContext))
       .catch((e) => console.error('[brainfuck] event handler', e));
   });
 
@@ -238,7 +263,13 @@ export async function startRun(
   return { id };
 }
 
-async function handleEvent(id: number, evt: Event): Promise<void> {
+interface RunContext {
+  target: string;
+  config: GAConfig;
+  versionHash: string | null;
+}
+
+async function handleEvent(id: number, evt: Event, ctx: RunContext): Promise<void> {
   if (evt.type === 'progress' || evt.type === 'found') {
     // Monotonic guard: best_fitness can only ever go up. The progress trail
     // (brainfuck_progress) still records every event for the sparkline, but
@@ -257,6 +288,35 @@ async function handleEvent(id: number, evt: Event): Promise<void> {
     await pool.query(
       `INSERT INTO brainfuck_progress (run_id, gen, best_fitness) VALUES ($1, $2, $3)`,
       [id, evt.gen, evt.best_fitness],
+    );
+  } else if (evt.type === 'solution') {
+    // Dedup-by-(target,gene) upsert into the solutions catalog. Same gene
+    // discovered in a later run just bumps times_found + last_seen_at;
+    // structural/runtime stats are immutable for a given gene so we don't
+    // overwrite them. Discovery context (run_id, generations_to_solve)
+    // stays as the *first* discovery, which is the more interesting fact.
+    const s = evt.stats;
+    await pool.query(
+      `INSERT INTO brainfuck_solutions (
+         target, gene, output,
+         gene_length, loop_count, max_loop_depth, unique_instructions,
+         ops_executed, halted, output_length, cells_used, output_exact_match,
+         run_id, generations_to_solve, config_json, bf_version_hash
+       ) VALUES (
+         $1, $2, $3,
+         $4, $5, $6, $7,
+         $8, $9, $10, $11, $12,
+         $13, $14, $15, $16
+       )
+       ON CONFLICT (target, gene) DO UPDATE SET
+         times_found = brainfuck_solutions.times_found + 1,
+         last_seen_at = NOW()`,
+      [
+        ctx.target, evt.best_gene, evt.best_output,
+        s.gene_length, s.loop_count, s.max_loop_depth, s.unique_instructions,
+        s.ops_executed, s.halted, s.output_length, s.cells_used, s.output_exact_match,
+        id, evt.gen, JSON.stringify(ctx.config), ctx.versionHash,
+      ],
     );
   } else if (evt.type === 'done') {
     await pool.query(

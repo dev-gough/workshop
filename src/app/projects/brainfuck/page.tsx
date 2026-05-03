@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Code2, Play, Square, Trash2, Loader, ChevronDown, ChevronRight,
   Target, Hash, Zap, CheckCircle, AlertTriangle, Clock, Gauge, GitCommit,
-  RotateCcw,
+  RotateCcw, Sparkles, Infinity as InfinityIcon,
 } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
@@ -282,6 +282,7 @@ export default function BrainfuckPage() {
     Array.from({ length: PRESET_SLOTS }, () => null),
   );
   const [advanced, setAdvanced] = useState(false);
+  const [tab, setTab] = useState<'run' | 'solutions'>('run');
 
   // Hydrate from localStorage after mount so SSR markup matches and the
   // presets survive page reloads. Seeds slots 1+2 if storage is empty.
@@ -505,6 +506,35 @@ export default function BrainfuckPage() {
             </div>
           </div>
         </FadeIn>
+
+        <FadeIn delay={0.03}>
+          <div className="flex items-center gap-1 border-b border-border/60">
+            {(
+              [
+                { id: 'run',       label: 'Run',       icon: Play },
+                { id: 'solutions', label: 'Solutions', icon: Sparkles },
+              ] as const
+            ).map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                onClick={() => setTab(id)}
+                className={`px-3 py-2 text-sm font-medium flex items-center gap-1.5 border-b-2 -mb-px transition-colors ${
+                  tab === id
+                    ? 'border-fuchsia-400 text-fuchsia-300'
+                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {label}
+              </button>
+            ))}
+          </div>
+        </FadeIn>
+
+        {tab === 'solutions' ? (
+          <SolutionsTab />
+        ) : (
+        <>
 
         <FadeIn delay={0.05}>
           <div className="rounded-xl bg-card border border-border/60 p-4 space-y-4">
@@ -807,6 +837,9 @@ export default function BrainfuckPage() {
             )}
           </div>
         </FadeIn>
+
+        </>
+        )}
 
         {/*
           Reference panel lives in the right slack area beside the centered
@@ -1388,4 +1421,252 @@ function HistoryRow({
       </AnimatePresence>
     </div>
   );
+}
+
+// ── Solutions tab ──────────────────────────────────────────────────────────
+
+interface TargetRollup {
+  target: string;
+  solution_count: number;
+  shortest_gene: number;
+  fastest_ops: number;
+  halting_count: number;
+  exact_match_count: number;
+  last_seen_at: string;
+  total_discoveries: number;
+}
+
+interface Solution {
+  id: number;
+  target: string;
+  gene: string;
+  output: string;
+  gene_length: number;
+  loop_count: number;
+  max_loop_depth: number;
+  unique_instructions: number;
+  ops_executed: number;
+  halted: boolean;
+  output_length: number;
+  cells_used: number;
+  output_exact_match: boolean;
+  run_id: number | null;
+  generations_to_solve: number | null;
+  config_json: GAConfig | null;
+  bf_version_hash: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  times_found: number;
+}
+
+function SolutionsTab() {
+  const [targets, setTargets] = useState<TargetRollup[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [solutions, setSolutions] = useState<Solution[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const refreshTargets = useCallback(async () => {
+    try {
+      const res = await fetch('/api/brainfuck/solutions', { cache: 'no-store' });
+      const data = await res.json();
+      setTargets(data.targets ?? []);
+    } catch { /* network blip — leave previous state */ }
+  }, []);
+
+  useEffect(() => {
+    refreshTargets();
+  }, [refreshTargets]);
+
+  const loadTarget = useCallback(async (t: string) => {
+    setSelected(t);
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/brainfuck/solutions?target=${encodeURIComponent(t)}`, {
+        cache: 'no-store',
+      });
+      const data = await res.json();
+      setSolutions(data.solutions ?? []);
+    } catch {
+      setSolutions([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  return (
+    <FadeIn delay={0.05}>
+      <div className="rounded-xl bg-card border border-border/60 p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-fuchsia-400" />
+            Solved targets
+          </h2>
+          <span className="text-xs text-muted-foreground">
+            {targets.length} target{targets.length === 1 ? '' : 's'}
+          </span>
+        </div>
+        <p className="text-[11px] text-muted-foreground leading-relaxed">
+          Every program that has ever printed its target gets archived here, deduped
+          by (target, gene). Click a target to compare the different shapes of
+          solution found across runs.
+        </p>
+
+        {targets.length === 0 ? (
+          <div className="text-sm text-muted-foreground text-center py-8">
+            No solved targets yet. Start a run that finds one and it will appear here.
+          </div>
+        ) : (
+          <div className="space-y-1">
+            {targets.map((t) => (
+              <TargetRow
+                key={t.target}
+                row={t}
+                open={selected === t.target}
+                solutions={selected === t.target ? solutions : []}
+                loading={selected === t.target && loading}
+                onToggle={() => {
+                  if (selected === t.target) {
+                    setSelected(null);
+                    setSolutions([]);
+                  } else {
+                    loadTarget(t.target);
+                  }
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </FadeIn>
+  );
+}
+
+function TargetRow({
+  row, open, solutions, loading, onToggle,
+}: {
+  row: TargetRollup;
+  open: boolean;
+  solutions: Solution[];
+  loading: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="rounded-lg border border-border/40 overflow-hidden">
+      <button
+        onClick={onToggle}
+        className="w-full px-3 py-2 flex items-center gap-3 hover:bg-foreground/5 transition-colors text-left"
+      >
+        {open ? <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
+              : <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />}
+        <span className="font-mono text-sm text-foreground/90 truncate">
+          &quot;{row.target}&quot;
+        </span>
+        <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground tabular-nums shrink-0">
+          <span title="Distinct (target,gene) solutions">
+            <span className="text-foreground/80">{row.solution_count}</span>
+            {' '}shape{row.solution_count === 1 ? '' : 's'}
+          </span>
+          <span title="Shortest gene length">
+            min <span className="text-foreground/80">{row.shortest_gene}</span> ch
+          </span>
+          <span title="Fastest ops_executed (lower = tighter program)">
+            min <span className="text-foreground/80">{row.fastest_ops.toLocaleString()}</span> ops
+          </span>
+          <span title="Solutions that halt naturally before MAX_OPS">
+            <span className="text-foreground/80">{row.halting_count}</span>/{row.solution_count} halt
+          </span>
+        </div>
+      </button>
+      {open && (
+        <div className="border-t border-border/40 px-3 py-3 bg-background/30">
+          {loading ? (
+            <div className="text-xs text-muted-foreground py-4 text-center">Loading…</div>
+          ) : solutions.length === 0 ? (
+            <div className="text-xs text-muted-foreground py-4 text-center">No solutions.</div>
+          ) : (
+            <div className="space-y-2">
+              {solutions.map((s) => <SolutionCard key={s.id} sol={s} />)}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SolutionCard({ sol }: { sol: Solution }) {
+  return (
+    <div className="rounded-lg border border-border/40 bg-card/60 p-3 space-y-2">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] tabular-nums">
+        <SolStat label="length"   value={`${sol.gene_length} ch`} />
+        <SolStat label="ops"      value={sol.ops_executed.toLocaleString()} />
+        <SolStat
+          label="halts"
+          value={sol.halted ? 'yes' : 'no'}
+          accent={sol.halted ? 'good' : 'warn'}
+          icon={sol.halted ? CheckCircle : InfinityIcon}
+        />
+        <SolStat
+          label="exact"
+          value={sol.output_exact_match ? 'yes' : 'trail'}
+          accent={sol.output_exact_match ? 'good' : 'neutral'}
+          title={sol.output_exact_match
+            ? 'output == target'
+            : 'output starts with target then prints more'}
+        />
+        <SolStat label="loops"      value={String(sol.loop_count)} />
+        <SolStat label="depth"      value={String(sol.max_loop_depth)} />
+        <SolStat label="cells"      value={String(sol.cells_used)} />
+        <SolStat label="alphabet"   value={`${sol.unique_instructions}/7`} title="distinct BF instructions used" />
+        <SolStat label="found×"     value={String(sol.times_found)} title="rediscovery count across runs" />
+        {sol.generations_to_solve != null && (
+          <SolStat label="gen"      value={sol.generations_to_solve.toLocaleString()} />
+        )}
+      </div>
+      <div className="font-mono text-[11px] break-all bg-background/60 rounded px-2 py-1.5 text-foreground/85">
+        {sol.gene}
+      </div>
+      {!sol.output_exact_match && (
+        <div className="font-mono text-[10px] text-muted-foreground">
+          out: <span className="text-foreground/70">{truncateWithEllipsis(sol.output, 96)}</span>
+        </div>
+      )}
+      <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+        {sol.run_id != null && <span>run #{sol.run_id}</span>}
+        {sol.bf_version_hash && (
+          <span className="flex items-center gap-1">
+            <GitCommit className="h-2.5 w-2.5" />
+            {sol.bf_version_hash}
+          </span>
+        )}
+        <span className="ml-auto">first seen {fmtTime(sol.first_seen_at)}</span>
+      </div>
+    </div>
+  );
+}
+
+function SolStat({
+  label, value, accent, icon: Icon, title,
+}: {
+  label: string;
+  value: string;
+  accent?: 'good' | 'warn' | 'neutral';
+  icon?: React.ComponentType<{ className?: string }>;
+  title?: string;
+}) {
+  const colour =
+    accent === 'good' ? 'text-emerald-400'
+    : accent === 'warn' ? 'text-amber-400'
+    : 'text-foreground/80';
+  return (
+    <span className="inline-flex items-center gap-1" title={title}>
+      <span className="text-muted-foreground uppercase tracking-wider text-[9px]">{label}</span>
+      {Icon && <Icon className={`h-2.5 w-2.5 ${colour}`} />}
+      <span className={colour}>{value}</span>
+    </span>
+  );
+}
+
+function truncateWithEllipsis(s: string, n: number): string {
+  return s.length > n ? s.slice(0, n) + '…' : s;
 }
