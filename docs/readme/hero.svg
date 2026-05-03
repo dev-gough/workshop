@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 360" width="1280" height="360" role="img" aria-label="Devy's Workshop">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#08080b"/>
+      <stop offset="0.5" stop-color="#0d0d14"/>
+      <stop offset="1" stop-color="#08080b"/>
+    </linearGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#e879f9"/>
+      <stop offset="0.5" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#34d399"/>
+    </linearGradient>
+    <linearGradient id="scanline" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#e879f9" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#e879f9" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#e879f9" stop-opacity="0"/>
+    </linearGradient>
+    <pattern id="grid" x="0" y="0" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#22d3ee" stroke-opacity="0.06" stroke-width="0.5"/>
+    </pattern>
+    <pattern id="grid-bold" x="0" y="0" width="160" height="160" patternUnits="userSpaceOnUse">
+      <path d="M 160 0 L 0 0 0 160" fill="none" stroke="#22d3ee" stroke-opacity="0.10" stroke-width="0.7"/>
+    </pattern>
+    <filter id="blur-glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6"/>
+    </filter>
+  </defs>
+
+  <!-- backdrop -->
+  <rect width="1280" height="360" fill="url(#bg)"/>
+  <rect width="1280" height="360" fill="url(#grid)"/>
+  <rect width="1280" height="360" fill="url(#grid-bold)"/>
+
+  <!-- corner crosshairs (workshop blueprint marks) -->
+  <g stroke="#22d3ee" stroke-opacity="0.35" stroke-width="1" fill="none">
+    <path d="M 30 30 h 16 M 30 30 v 16"/>
+    <path d="M 1250 30 h -16 M 1250 30 v 16"/>
+    <path d="M 30 330 h 16 M 30 330 v -16"/>
+    <path d="M 1250 330 h -16 M 1250 330 v -16"/>
+  </g>
+
+  <!-- side meta labels -->
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" fill="#e879f9" fill-opacity="0.55" font-size="10" letter-spacing="2">
+    <text x="50" y="50">// devydev.ca</text>
+    <text x="50" y="320">▸ thirteen experiments in code, evolution, and aesthetics</text>
+    <text x="1230" y="50" text-anchor="end" fill="#22d3ee" fill-opacity="0.55">v.025/05</text>
+    <text x="1230" y="320" text-anchor="end" fill="#34d399" fill-opacity="0.55">~/workshop ▌</text>
+  </g>
+
+  <!-- title -->
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-weight="700" letter-spacing="-2">
+    <!-- soft halo behind title -->
+    <text x="640" y="180" text-anchor="middle" font-size="120" fill="#e879f9" fill-opacity="0.18" filter="url(#blur-glow)">DEVY'S</text>
+    <text x="640" y="170" text-anchor="middle" font-size="120" fill="url(#title)">DEVY'S</text>
+  </g>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-weight="800" letter-spacing="14">
+    <text x="640" y="246" text-anchor="middle" font-size="56" fill="#fafafa" fill-opacity="0.92">WORKSHOP</text>
+  </g>
+
+  <!-- decorative bracket pair around the title -->
+  <g stroke="#e879f9" stroke-opacity="0.55" stroke-width="2" fill="none">
+    <path d="M 360 110 v 130 h 18"/>
+    <path d="M 920 110 v 130 h -18"/>
+  </g>
+
+  <!-- animated scanning line -->
+  <g>
+    <rect x="0" y="0" width="240" height="360" fill="url(#scanline)" opacity="0.55">
+      <animateTransform attributeName="transform" type="translate"
+        from="-260 0" to="1300 0" dur="6s" repeatCount="indefinite"/>
+    </rect>
+  </g>
+
+  <!-- bottom underline that draws in/out -->
+  <g>
+    <line x1="500" y1="280" x2="780" y2="280" stroke="#22d3ee" stroke-width="2" stroke-linecap="round" stroke-dasharray="280" stroke-dashoffset="280">
+      <animate attributeName="stroke-dashoffset" values="280;0;0;280" dur="6s" repeatCount="indefinite"/>
+    </line>
+  </g>
+
+  <!-- pulsing dot trio under the underline -->
+  <g fill="#e879f9">
+    <circle cx="610" cy="298" r="3">
+      <animate attributeName="opacity" values="0.2;1;0.2" dur="1.8s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="640" cy="298" r="3" fill="#22d3ee">
+      <animate attributeName="opacity" values="0.2;1;0.2" dur="1.8s" begin="0.6s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="670" cy="298" r="3" fill="#34d399">
+      <animate attributeName="opacity" values="0.2;1;0.2" dur="1.8s" begin="1.2s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+</svg>
