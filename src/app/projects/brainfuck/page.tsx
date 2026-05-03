@@ -124,11 +124,12 @@ function summarizeDiff(cfg: GAConfig): string {
 }
 
 // Accepts plain numbers, decimal numbers, or shorthand with k/m/b suffix
-// (case-insensitive). Trailing non-digits get tolerated so paste-with-commas
-// works ("1,000,000" → 1000000). Returns null if the input doesn't parse.
+// (case-insensitive). Leading-dot decimals like '.1' parse as 0.1 — handy
+// for the 0..1 fraction knobs. Commas/underscores/spaces are stripped so
+// '1,000,000' pastes cleanly. Returns null if the input doesn't parse.
 function parseShorthandNumber(raw: string): number | null {
   const cleaned = raw.replace(/[\s,_]/g, '').toLowerCase();
-  const m = cleaned.match(/^(-?\d+(?:\.\d+)?)([kmb])?$/);
+  const m = cleaned.match(/^(-?(?:\d+(?:\.\d*)?|\.\d+))([kmb])?$/);
   if (!m) return null;
   const n = parseFloat(m[1]);
   if (!Number.isFinite(n)) return null;
