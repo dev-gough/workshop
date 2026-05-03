@@ -189,6 +189,11 @@ export async function startRun(
   }
 
   const rl = readline.createInterface({ input: child.stdout!, crlfDelay: Infinity });
+  // Serialize handlers per-run so events are applied to the DB in the same
+  // order they arrived on stdout. Without this, async handlers race and a
+  // late progress UPDATE can clobber the values written by an earlier 'done'
+  // (we hit exactly that: status='found' with sub-target best_fitness).
+  let chain: Promise<void> = Promise.resolve();
   rl.on('line', (line) => {
     const trimmed = line.trim();
     if (!trimmed) return;
@@ -198,7 +203,9 @@ export async function startRun(
     } catch {
       return;
     }
-    handleEvent(id, evt).catch((e) => console.error('[brainfuck] event handler', e));
+    chain = chain
+      .then(() => handleEvent(id, evt))
+      .catch((e) => console.error('[brainfuck] event handler', e));
   });
 
   let stderrBuf = '';
@@ -220,10 +227,18 @@ export async function startRun(
 
 async function handleEvent(id: number, evt: Event): Promise<void> {
   if (evt.type === 'progress' || evt.type === 'found') {
+    // Monotonic guard: best_fitness can only ever go up. The progress trail
+    // (brainfuck_progress) still records every event for the sparkline, but
+    // the row's "best" snapshot never regresses even if a stale handler runs
+    // after a higher-fitness one wrote first.
     await pool.query(
       `UPDATE brainfuck_runs
-       SET generations = $2, best_fitness = $3, best_gene = $4, best_output = $5
-       WHERE id = $1`,
+       SET generations = GREATEST(generations, $2),
+           best_fitness = $3,
+           best_gene = $4,
+           best_output = $5
+       WHERE id = $1
+         AND ($3 >= COALESCE(best_fitness, $3))`,
       [id, evt.gen, evt.best_fitness, evt.best_gene, evt.best_output],
     );
     await pool.query(
