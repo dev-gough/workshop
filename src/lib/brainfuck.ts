@@ -24,6 +24,8 @@ export interface GAConfig {
   restart_every: number;
   restart_keep_frac: number;
   bracket_mut_rate: number;
+  islands: number;
+  migration_every: number;
 }
 
 export const DEFAULT_CONFIG: GAConfig = {
@@ -39,6 +41,8 @@ export const DEFAULT_CONFIG: GAConfig = {
   restart_every: 250_000,
   restart_keep_frac: 0.2,
   bracket_mut_rate: 0.30,
+  islands: 1,
+  migration_every: 10_000,
 };
 
 interface NumericRange {
@@ -62,6 +66,8 @@ export const CONFIG_BOUNDS: Record<keyof GAConfig, NumericRange> = {
   restart_every:      { min: 0,     max: 10_000_000, integer: true },
   restart_keep_frac:  { min: 0,     max: 1 },
   bracket_mut_rate:   { min: 0,     max: 1 },
+  islands:            { min: 1,     max: 10,         integer: true },
+  migration_every:    { min: 0,     max: 1_000_000,  integer: true },
 };
 
 export function parseRunConfig(body: Record<string, unknown>): GAConfig {
@@ -102,6 +108,8 @@ function configToCliArgs(cfg: GAConfig): string[] {
     '--restart-every',      String(cfg.restart_every),
     '--restart-keep-frac',  String(cfg.restart_keep_frac),
     '--bracket-mut-rate',   String(cfg.bracket_mut_rate),
+    '--islands',            String(cfg.islands),
+    '--migration-every',    String(cfg.migration_every),
   ];
 }
 

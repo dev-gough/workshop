@@ -28,6 +28,8 @@ interface GAConfig {
   restart_every: number;
   restart_keep_frac: number;
   bracket_mut_rate: number;
+  islands: number;
+  migration_every: number;
 }
 
 const DEFAULT_CONFIG: GAConfig = {
@@ -43,6 +45,8 @@ const DEFAULT_CONFIG: GAConfig = {
   restart_every: 250_000,
   restart_keep_frac: 0.2,
   bracket_mut_rate: 0.30,
+  islands: 1,
+  migration_every: 10_000,
 };
 
 // ── Preset slots ────────────────────────────────────────────────────────────
@@ -211,6 +215,16 @@ const KNOB_GROUPS: KnobGroup[] = [
         min: 0, max: 10_000_000, step: 10_000, integer: true },
       { key: 'restart_keep_frac', label: 'elites kept',   hint: 'Top fraction of pop preserved across restarts',
         min: 0, max: 1, step: 0.01 },
+    ],
+  },
+  {
+    title: 'islands',
+    glyph: '∷',
+    knobs: [
+      { key: 'islands',         label: 'K',               hint: 'Independent sub-populations evolved in parallel. Total pop_size splits across K. K=1 = single pop',
+        min: 1, max: 10, step: 1, integer: true },
+      { key: 'migration_every', label: 'migration every', hint: 'Migrate champion → next island every N gens (ring topology). 0 disables',
+        min: 0, max: 1_000_000, step: 1000, integer: true },
     ],
   },
 ];
