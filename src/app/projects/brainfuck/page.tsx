@@ -313,6 +313,13 @@ export default function BrainfuckPage() {
   // so a newer best gene from polling doesn't yank the animation mid-execution.
   const [displayedGene, setDisplayedGene] = useState<string | null>(null);
   const latestGeneRef = useRef<string | null>(null);
+  // When the server's activeId clears (run finished), we pin the run id
+  // locally so the active panel keeps showing while the animator plays
+  // through the winning gene at least once. Released on animator cycle-end
+  // (or immediately if the run terminated without solving — no point
+  // lingering on a stopped/failed program).
+  const [pinnedRunId, setPinnedRunId] = useState<number | null>(null);
+  const prevActiveIdRef = useRef<number | null>(null);
   // Tracks the highest best_fitness we've observed for the active run. When
   // a poll surfaces a higher one, we force-swap displayedGene immediately
   // (debounced to 1/s) instead of waiting for the animator's cycle to end —
@@ -397,22 +404,64 @@ export default function BrainfuckPage() {
     };
   }, [activeBenchId, refreshBenchmarks]);
 
-  // Reset displayed gene + progress when active run changes
+  // Server activeId clears the moment the python child exits, but the run's
+  // *status* lags behind by however long the chain takes to drain the final
+  // 'done' event. So when activeId goes non-null → null we pin locally and
+  // keep polling — the next refresh picks up the terminal status and we
+  // either hold (for 'found') or release immediately (for stopped/failed).
+  useEffect(() => {
+    const prev = prevActiveIdRef.current;
+    prevActiveIdRef.current = activeId;
+
+    if (prev != null && activeId == null) {
+      setPinnedRunId(prev);
+      // Promote the latest known gene to the animator now so it has the
+      // winner queued — refreshActive's force-swap path won't fire again
+      // post-pin (no more best_fitness deltas), and we don't want the user
+      // looking at a stale gene while waiting for cycle-end.
+      if (latestGeneRef.current) {
+        setDisplayedGene(latestGeneRef.current);
+      }
+    }
+    // Starting a fresh run while still pinned on a previous one: release.
+    if (prev == null && activeId != null) {
+      setPinnedRunId(null);
+    }
+  }, [activeId]);
+
+  // The id the UI is *actually* showing in the active panel — server's
+  // active wins when set; pinned takes over after the run finishes.
+  const effectiveActiveId = activeId ?? pinnedRunId;
+
+  // Once the pinned run's status row reflects something terminal that isn't
+  // 'found', release the pin immediately — no point staring at a stopped or
+  // failed program waiting for a cycle that has nothing to celebrate.
+  useEffect(() => {
+    if (pinnedRunId == null) return;
+    const r = runs.find((x) => x.id === pinnedRunId);
+    if (!r) return;
+    if (r.status === 'running' || r.status === 'queued' || r.status === 'found') return;
+    setPinnedRunId(null);
+  }, [pinnedRunId, runs]);
+
+  // Reset displayed gene + progress when the *displayed* run changes.
+  // Tied to effectiveActiveId so the pin transition (server clears, local
+  // pin takes over with the same id) doesn't nuke the gene we just pinned.
   useEffect(() => {
     lastBestFitnessRef.current = null;
     lastForcedSwapAtRef.current = 0;
-    if (activeId == null) {
+    if (effectiveActiveId == null) {
       setDisplayedGene(null);
       latestGeneRef.current = null;
       setActiveProgress([]);
       return;
     }
     setDisplayedGene(null); // force re-seed from next refreshActive
-  }, [activeId]);
+  }, [effectiveActiveId]);
 
-  // Poll while a run is active
+  // Poll while *something* is on display — server-active or local pin.
   useEffect(() => {
-    if (activeId == null) {
+    if (effectiveActiveId == null) {
       if (pollRef.current) {
         window.clearInterval(pollRef.current);
         pollRef.current = null;
@@ -420,10 +469,10 @@ export default function BrainfuckPage() {
       return;
     }
     if (pollRef.current) return;
-    refreshActive(activeId);
+    refreshActive(effectiveActiveId);
     pollRef.current = window.setInterval(() => {
       refresh();
-      refreshActive(activeId);
+      refreshActive(effectiveActiveId);
     }, 1000);
     return () => {
       if (pollRef.current) {
@@ -431,14 +480,20 @@ export default function BrainfuckPage() {
         pollRef.current = null;
       }
     };
-  }, [activeId, refresh, refreshActive]);
+  }, [effectiveActiveId, refresh, refreshActive]);
 
   const onAnimatorCycleEnd = useCallback(() => {
-    // Swap to the newest gene at the natural break in animation.
+    // Pin release goes first: a finished run has had its winning gene play
+    // through; let it slide to history now.
+    if (pinnedRunId != null) {
+      setPinnedRunId(null);
+      return;
+    }
+    // Mid-run: swap to the newest gene at the natural break in animation.
     if (latestGeneRef.current && latestGeneRef.current !== displayedGene) {
       setDisplayedGene(latestGeneRef.current);
     }
-  }, [displayedGene]);
+  }, [pinnedRunId, displayedGene]);
 
   const start = async () => {
     setError(null);
@@ -504,13 +559,15 @@ export default function BrainfuckPage() {
     refreshBenchmarks();
   };
 
-  const active = runs.find((r) => r.id === activeId) ?? null;
-  // History is *finished* runs only. A row with status='running' that isn't
-  // activeId is a stale DB record (service died before bootstrap could mark
-  // it interrupted) — surfacing it in the history dropdown crashes on
-  // partial config_json and is misleading regardless. Hide until cleanup.
+  const active = runs.find((r) => r.id === effectiveActiveId) ?? null;
+  // History is *finished* runs only, and excludes whatever the active panel
+  // is currently displaying (server-active OR pinned-finished). A row with
+  // status='running' that isn't activeId is a stale DB record (service died
+  // before bootstrap could mark it interrupted) — surfacing it in the
+  // history dropdown crashes on partial config_json and is misleading
+  // regardless. Hide until cleanup.
   const history = runs.filter(
-    (r) => r.id !== activeId && r.status !== 'running' && r.status !== 'queued',
+    (r) => r.id !== effectiveActiveId && r.status !== 'running' && r.status !== 'queued',
   );
 
   const animatorTrail = activeProgress.map((p) => ({ gen: p.gen, fitness: p.best_fitness }));
@@ -677,18 +734,26 @@ export default function BrainfuckPage() {
             >
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <Loader className="h-4 w-4 text-blue-400 animate-spin" />
-                  <span className="text-sm font-semibold">Active run #{active.id}</span>
+                  {active.status === 'found' ? (
+                    <CheckCircle className="h-4 w-4 text-emerald-400" />
+                  ) : (
+                    <Loader className="h-4 w-4 text-blue-400 animate-spin" />
+                  )}
+                  <span className="text-sm font-semibold">
+                    {active.status === 'found' ? 'Solved' : 'Active'} run #{active.id}
+                  </span>
                   <span className="text-xs text-muted-foreground">
                     target <span className="font-mono text-foreground/80">&quot;{active.target}&quot;</span>
                   </span>
                 </div>
-                <button
-                  onClick={() => stop(active.id)}
-                  className="text-xs px-2 py-1 rounded bg-amber-400/10 text-amber-400 hover:bg-amber-400/20 flex items-center gap-1"
-                >
-                  <Square className="h-3 w-3" /> Stop
-                </button>
+                {active.status !== 'found' && (
+                  <button
+                    onClick={() => stop(active.id)}
+                    className="text-xs px-2 py-1 rounded bg-amber-400/10 text-amber-400 hover:bg-amber-400/20 flex items-center gap-1"
+                  >
+                    <Square className="h-3 w-3" /> Stop
+                  </button>
+                )}
               </div>
 
               <div className="grid grid-cols-3 gap-2 text-center">
