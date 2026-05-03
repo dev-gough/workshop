@@ -428,13 +428,16 @@ export default function BrainfuckPage() {
                   transition={{ duration: 0.2 }}
                   className="overflow-hidden"
                 >
-                  <div className="space-y-4 pt-1">
-                    {KNOB_GROUPS.map((group) => (
+                  <div className="space-y-3 pt-1">
+                    {KNOB_GROUPS.map((group, gi) => (
                       <div key={group.title} className="space-y-2">
-                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                          {group.title}
+                        <div className="flex items-center gap-2">
+                          <div className="text-[9px] uppercase tracking-wider text-muted-foreground/80 font-medium shrink-0">
+                            {group.title}
+                          </div>
+                          <div className="h-px flex-1 bg-border/40" />
                         </div>
-                        <div className="space-y-2.5 pl-1">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-2.5">
                           {group.knobs.map((spec) => (
                             <KnobRow
                               key={spec.key}
@@ -446,6 +449,7 @@ export default function BrainfuckPage() {
                             />
                           ))}
                         </div>
+                        {gi < KNOB_GROUPS.length - 1 && <div className="h-1" />}
                       </div>
                     ))}
                   </div>
@@ -939,51 +943,74 @@ function KnobRow({
   const isDefault = value === defaultValue;
   const fmtValue = (v: number) =>
     spec.integer ? v.toLocaleString() : v.toFixed(2);
+  const clamp = (v: number) => Math.max(spec.min, Math.min(spec.max, v));
   const onText = (raw: string) => {
+    if (raw === '') return;
     const v = spec.integer ? parseInt(raw, 10) : parseFloat(raw);
     if (!Number.isFinite(v)) return;
-    onChange(Math.max(spec.min, Math.min(spec.max, v)));
+    onChange(clamp(v));
   };
+  // Position of the default-value tick along the slider track, in %.
+  // Native range thumb has ~10px of internal padding on each side; the tick
+  // sits behind the track, so we let it bleed slightly past the ends rather
+  // than try to math out the thumb radius perfectly.
+  const defaultPct = ((defaultValue - spec.min) / (spec.max - spec.min)) * 100;
+
   return (
-    <div>
-      <div className="flex items-baseline justify-between gap-2">
+    <div className="min-w-0">
+      <div className="flex items-center gap-1.5 mb-0.5">
         <label
-          className="text-xs text-foreground/90 font-medium cursor-help"
-          title={spec.hint}
+          className="text-[11px] text-foreground/85 font-medium cursor-help truncate flex-1"
+          title={`${spec.hint} · range ${fmtValue(spec.min)}–${fmtValue(spec.max)}`}
         >
           {spec.label}
         </label>
-        <div className="flex items-center gap-1">
-          <input
-            type="number"
-            value={value}
-            onChange={(e) => onText(e.target.value)}
-            disabled={disabled}
-            min={spec.min}
-            max={spec.max}
-            step={spec.step}
-            className={`w-24 px-2 py-1 rounded bg-background/60 border border-border/60 font-mono text-[11px] tabular-nums focus:border-fuchsia-400/60 focus:outline-none disabled:opacity-50 text-right ${
-              isDefault ? 'text-foreground/70' : 'text-fuchsia-300'
-            }`}
-          />
+        {/* Fixed-width slot keeps the number input from shifting when the reset
+            icon appears/disappears as the user drags off/onto default. */}
+        <div className="w-3 h-3 flex items-center justify-center">
+          {!isDefault && (
+            <button
+              type="button"
+              onClick={() => onChange(defaultValue)}
+              disabled={disabled}
+              className="text-muted-foreground/60 hover:text-fuchsia-400 disabled:opacity-30 transition-colors"
+              title={`Reset to default (${fmtValue(defaultValue)})`}
+              tabIndex={-1}
+            >
+              <RotateCcw className="h-2.5 w-2.5" />
+            </button>
+          )}
         </div>
+        <input
+          type="number"
+          value={value}
+          onChange={(e) => onText(e.target.value)}
+          disabled={disabled}
+          min={spec.min}
+          max={spec.max}
+          step={spec.step}
+          className={`w-[68px] px-1.5 py-0.5 rounded bg-background/60 border border-border/50 font-mono text-[10.5px] tabular-nums focus:border-fuchsia-400/60 focus:outline-none disabled:opacity-50 text-right [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${
+            isDefault ? 'text-foreground/65' : 'text-fuchsia-300'
+          }`}
+        />
       </div>
-      <input
-        type="range"
-        value={value}
-        onChange={(e) => onText(e.target.value)}
-        disabled={disabled}
-        min={spec.min}
-        max={spec.max}
-        step={spec.step}
-        className="w-full mt-1 accent-fuchsia-400 disabled:opacity-50"
-      />
-      <div className="flex items-center justify-between text-[9px] text-muted-foreground/70 tabular-nums">
-        <span>{fmtValue(spec.min)}</span>
-        <span className={isDefault ? '' : 'text-fuchsia-400/70'}>
-          {isDefault ? `default ${fmtValue(defaultValue)}` : `default ${fmtValue(defaultValue)}`}
-        </span>
-        <span>{fmtValue(spec.max)}</span>
+      <div className="relative h-3.5 flex items-center">
+        {/* Default-value tick — sits on the track, behind the thumb. */}
+        <div
+          className="absolute top-1/2 -translate-y-1/2 w-px h-2 bg-foreground/40 pointer-events-none"
+          style={{ left: `calc(${defaultPct}% )` }}
+          aria-hidden
+        />
+        <input
+          type="range"
+          value={value}
+          onChange={(e) => onText(e.target.value)}
+          disabled={disabled}
+          min={spec.min}
+          max={spec.max}
+          step={spec.step}
+          className="w-full accent-fuchsia-400 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+        />
       </div>
     </div>
   );
