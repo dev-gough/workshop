@@ -313,6 +313,13 @@ export default function BrainfuckPage() {
   // so a newer best gene from polling doesn't yank the animation mid-execution.
   const [displayedGene, setDisplayedGene] = useState<string | null>(null);
   const latestGeneRef = useRef<string | null>(null);
+  // Tracks the highest best_fitness we've observed for the active run. When
+  // a poll surfaces a higher one, we force-swap displayedGene immediately
+  // (debounced to 1/s) instead of waiting for the animator's cycle to end —
+  // otherwise long programs leave the user staring at a stale gene for
+  // many seconds while better ones land in the DB.
+  const lastBestFitnessRef = useRef<number | null>(null);
+  const lastForcedSwapAtRef = useRef<number>(0);
   const pollRef = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
@@ -331,9 +338,24 @@ export default function BrainfuckPage() {
       if (!res.ok) return;
       const data = await res.json();
       setActiveProgress(data.progress ?? []);
-      latestGeneRef.current = data.run?.best_gene ?? null;
+      const newGene: string | null = data.run?.best_gene ?? null;
+      const newBest: number | null = data.run?.best_fitness ?? null;
+      latestGeneRef.current = newGene;
       // Initial gene assignment — only set on first non-null value to seed the animator.
-      setDisplayedGene((cur) => cur ?? data.run?.best_gene ?? null);
+      setDisplayedGene((cur) => cur ?? newGene);
+
+      // Force-swap on fitness improvement, throttled. The previous best is
+      // tracked in a ref so we don't re-fire the swap each poll while the
+      // gene/fitness sit unchanged — only the *transition* upward triggers it.
+      if (newGene && newBest != null && lastBestFitnessRef.current != null
+          && newBest > lastBestFitnessRef.current) {
+        const now = Date.now();
+        if (now - lastForcedSwapAtRef.current >= 1000) {
+          setDisplayedGene(newGene);
+          lastForcedSwapAtRef.current = now;
+        }
+      }
+      lastBestFitnessRef.current = newBest;
     } catch { /* leave previous state */ }
   }, []);
 
@@ -377,6 +399,8 @@ export default function BrainfuckPage() {
 
   // Reset displayed gene + progress when active run changes
   useEffect(() => {
+    lastBestFitnessRef.current = null;
+    lastForcedSwapAtRef.current = 0;
     if (activeId == null) {
       setDisplayedGene(null);
       latestGeneRef.current = null;
