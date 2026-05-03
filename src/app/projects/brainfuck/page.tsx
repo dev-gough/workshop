@@ -39,6 +39,83 @@ const DEFAULT_CONFIG: GAConfig = {
   macro_mut_rate: 0.05,
 };
 
+// ── Preset slots ────────────────────────────────────────────────────────────
+// Five slots stored in localStorage. Single-click loads, double-click saves
+// the current config to that slot. Seeded on first visit with two contrasting
+// configs designed to reveal what's actually bottlenecking the algorithm.
+
+const PRESET_SLOTS = 5;
+const PRESETS_STORAGE_KEY = 'bf-ga-presets-v1';
+
+const SEED_PRESETS: (GAConfig | null)[] = [
+  // 1: "1/L rule" — drop destructive per-char mutation to the textbook
+  // ~1/program-length sweet spot, raise skip-mutation for elitism, run
+  // crossover more often (gate is inverted: lower number = runs more).
+  {
+    ...DEFAULT_CONFIG,
+    mut_prob: 0.02,
+    mutation_rate: 0.20,
+    crossover_rate: 0.20,
+  },
+  // 2: "Tiny pop, fast iter" — small population means more generations per
+  // second; macro-mutation is cranked to compensate for the diversity loss.
+  {
+    ...DEFAULT_CONFIG,
+    pop_size: 30,
+    mut_prob: 0.05,
+    mutation_rate: 0.30,
+    macro_mut_rate: 0.15,
+    crossover_rate: 0.30,
+  },
+  null,
+  null,
+  null,
+];
+
+function configsEqual(a: GAConfig, b: GAConfig): boolean {
+  return (Object.keys(DEFAULT_CONFIG) as (keyof GAConfig)[]).every((k) => a[k] === b[k]);
+}
+
+function loadPresets(): (GAConfig | null)[] {
+  if (typeof window === 'undefined') return SEED_PRESETS;
+  try {
+    const raw = window.localStorage.getItem(PRESETS_STORAGE_KEY);
+    if (!raw) return SEED_PRESETS;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return SEED_PRESETS;
+    // Pad/truncate so the slot count is stable even after schema changes.
+    const out: (GAConfig | null)[] = [];
+    for (let i = 0; i < PRESET_SLOTS; i++) {
+      const v = parsed[i];
+      out.push(v && typeof v === 'object' ? { ...DEFAULT_CONFIG, ...v } : null);
+    }
+    return out;
+  } catch {
+    return SEED_PRESETS;
+  }
+}
+
+function savePresets(presets: (GAConfig | null)[]): void {
+  try {
+    window.localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(presets));
+  } catch {
+    /* localStorage full or disabled — nothing we can do */
+  }
+}
+
+// Compact diff string — used in slot tooltips so hovering tells you what's
+// actually different from defaults without opening the slot.
+function summarizeDiff(cfg: GAConfig): string {
+  const diffs: string[] = [];
+  (Object.keys(DEFAULT_CONFIG) as (keyof GAConfig)[]).forEach((k) => {
+    if (cfg[k] !== DEFAULT_CONFIG[k]) {
+      const v = Number.isInteger(cfg[k]) ? cfg[k] : (cfg[k] as number).toFixed(2);
+      diffs.push(`${k}=${v}`);
+    }
+  });
+  return diffs.length === 0 ? 'matches defaults' : diffs.join(', ');
+}
+
 interface KnobSpec {
   key: keyof GAConfig;
   label: string;
@@ -184,7 +261,25 @@ export default function BrainfuckPage() {
   const [activeId, setActiveId] = useState<number | null>(null);
   const [target, setTarget] = useState('hi');
   const [config, setConfig] = useState<GAConfig>(DEFAULT_CONFIG);
+  const [presets, setPresets] = useState<(GAConfig | null)[]>(() =>
+    Array.from({ length: PRESET_SLOTS }, () => null),
+  );
   const [advanced, setAdvanced] = useState(false);
+
+  // Hydrate from localStorage after mount so SSR markup matches and the
+  // presets survive page reloads. Seeds slots 1+2 if storage is empty.
+  useEffect(() => {
+    setPresets(loadPresets());
+  }, []);
+
+  const saveSlot = useCallback((idx: number, cfg: GAConfig) => {
+    setPresets((cur) => {
+      const next = [...cur];
+      next[idx] = cfg;
+      savePresets(next);
+      return next;
+    });
+  }, []);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
@@ -442,6 +537,13 @@ export default function BrainfuckPage() {
                   className="overflow-hidden"
                 >
                   <div className="space-y-3.5 pt-1 font-mono">
+                    <PresetSlots
+                      presets={presets}
+                      currentConfig={config}
+                      disabled={submitting || activeId != null}
+                      onLoad={(cfg) => setConfig(cfg)}
+                      onSave={(idx) => saveSlot(idx, config)}
+                    />
                     {KNOB_GROUPS.map((group) => (
                       <div key={group.title} className="space-y-2">
                         <div className="flex items-center gap-2">
@@ -943,6 +1045,98 @@ function BFReference() {
 function configEqualsDefault(c: GAConfig): boolean {
   return (Object.keys(DEFAULT_CONFIG) as (keyof GAConfig)[]).every(
     (k) => c[k] === DEFAULT_CONFIG[k],
+  );
+}
+
+function PresetSlots({
+  presets, currentConfig, disabled, onLoad, onSave,
+}: {
+  presets: (GAConfig | null)[];
+  currentConfig: GAConfig;
+  disabled: boolean;
+  onLoad: (cfg: GAConfig) => void;
+  onSave: (idx: number) => void;
+}) {
+  // Click vs double-click: schedule the load on a short timer so a follow-up
+  // double-click can cancel it and trigger the save instead. 220ms is short
+  // enough to feel responsive on single-click and long enough to catch
+  // typical double-click cadence reliably.
+  const clickTimerRef = useRef<number | null>(null);
+  const [savedFlash, setSavedFlash] = useState<number | null>(null);
+
+  const handleClick = (idx: number) => {
+    if (disabled) return;
+    const slot = presets[idx];
+    if (clickTimerRef.current != null) {
+      window.clearTimeout(clickTimerRef.current);
+    }
+    clickTimerRef.current = window.setTimeout(() => {
+      clickTimerRef.current = null;
+      if (slot) onLoad(slot);
+    }, 220);
+  };
+
+  const handleDoubleClick = (idx: number) => {
+    if (disabled) return;
+    if (clickTimerRef.current != null) {
+      window.clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = null;
+    }
+    onSave(idx);
+    setSavedFlash(idx);
+    window.setTimeout(() => setSavedFlash((cur) => (cur === idx ? null : cur)), 600);
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-fuchsia-400/70 text-[10px] shrink-0">{'>>>'}</span>
+      <span className="text-[10px] uppercase tracking-[0.15em] text-foreground/60 shrink-0">
+        presets
+      </span>
+      <div className="flex items-center gap-1 ml-1">
+        {Array.from({ length: PRESET_SLOTS }, (_, i) => {
+          const slot = presets[i];
+          const isFilled = !!slot;
+          const isActive = isFilled && configsEqual(slot!, currentConfig);
+          const isFlashing = savedFlash === i;
+          const title = isFilled
+            ? `Slot ${i + 1} — ${summarizeDiff(slot!)}\nClick to load · double-click to overwrite`
+            : `Slot ${i + 1} — empty\nDouble-click to save current config`;
+          return (
+            <button
+              key={i}
+              type="button"
+              onClick={() => handleClick(i)}
+              onDoubleClick={() => handleDoubleClick(i)}
+              disabled={disabled || (!isFilled && false)}
+              title={title}
+              className={`
+                relative flex items-center justify-center
+                w-7 h-6 rounded-sm border tabular-nums text-[11px] leading-none
+                transition-colors select-none
+                ${
+                  isActive
+                    ? 'border-fuchsia-400/70 bg-fuchsia-400/15 text-fuchsia-200'
+                    : isFilled
+                      ? 'border-fuchsia-400/30 bg-fuchsia-400/[0.04] text-fuchsia-300/85 hover:border-fuchsia-400/55 hover:bg-fuchsia-400/[0.08]'
+                      : 'border-foreground/10 bg-foreground/[0.02] text-foreground/40 hover:border-foreground/25 hover:text-foreground/60'
+                }
+                ${isFlashing ? 'ring-1 ring-fuchsia-400/70' : ''}
+                disabled:opacity-40 disabled:cursor-not-allowed
+              `}
+            >
+              <span className="text-fuchsia-400/45 text-[9px] mr-px">[</span>
+              {i + 1}
+              <span className="text-fuchsia-400/45 text-[9px] ml-px">]</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex-1" />
+      <span className="text-[9px] text-muted-foreground/50 hidden sm:inline">
+        click load · dbl-click save
+      </span>
+    </div>
   );
 }
 
