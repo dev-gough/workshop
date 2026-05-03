@@ -12,8 +12,8 @@ const POLL_INTERVAL = 10_000; // 10 seconds
 const CONFIG_PATH = path.join(process.cwd(), 'config.json');
 
 const pool = new Pool({
-  user: 'server',
-  password: 'workshop',
+  user: 'soulseek_ingest',
+  password: 'soulseek_ingest',
   host: 'localhost',
   port: 5432,
   database: 'workshop',

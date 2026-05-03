@@ -9,8 +9,8 @@ import {
 } from '../src/lib/riot';
 
 const pool = new Pool({
-  user: 'server',
-  password: 'workshop',
+  user: 'challenge_poller',
+  password: 'challenge_poller',
   host: 'localhost',
   port: 5432,
   database: 'workshop',
