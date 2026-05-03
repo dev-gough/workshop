@@ -1,23 +1,23 @@
 import { promises as fs } from 'fs';
 import path from 'path';
-import { Pool } from 'pg';
 import { parseFile } from 'music-metadata';
 import { cleanDownloadPath, sanitizeFilename } from '../src/lib/songUtils';
 import { scanSingleAlbum } from '../src/lib/musicScanner';
+import { getConfig, resetConfigCache } from '../src/lib/config';
+import { makePool } from '../src/lib/db';
 
-const MUSIC_DIR = '/home/server/music';
-const DOWNLOADS_DIR = '/home/server/music/.slskd-downloads';
-const AUDIO_EXTENSIONS = new Set(['.mp3', '.flac', '.wav', '.m4a', '.ogg']);
+function getDirs() {
+  resetConfigCache();
+  const music = getConfig().paths.musicDirectory;
+  if (!music) throw new Error('paths.musicDirectory is not configured in config.json');
+  return { music, downloads: path.join(music, '.slskd-downloads') };
+}
+
+const { music: MUSIC_DIR, downloads: DOWNLOADS_DIR } = getDirs();
+
 const POLL_INTERVAL = 10_000; // 10 seconds
-const CONFIG_PATH = path.join(process.cwd(), 'config.json');
 
-const pool = new Pool({
-  user: 'soulseek_ingest',
-  password: 'soulseek_ingest',
-  host: 'localhost',
-  port: 5432,
-  database: 'workshop',
-});
+const pool = makePool('soulseek_ingest');
 
 interface SlskdTransfer {
   id: string;
@@ -32,13 +32,14 @@ interface SlskdTransfer {
   endedAt?: string;
 }
 
-async function getSlskdConfig() {
-  const raw = await fs.readFile(CONFIG_PATH, 'utf-8');
-  return JSON.parse(raw).slskd as { baseUrl: string; apiKey: string };
+function getSlskdConfig() {
+  const cfg = getConfig().services.slskd;
+  if (!cfg) throw new Error('services.slskd is not configured in config.json');
+  return cfg;
 }
 
 async function slskdGet<T>(urlPath: string): Promise<T> {
-  const config = await getSlskdConfig();
+  const config = getSlskdConfig();
   const res = await fetch(`${config.baseUrl}${urlPath}`, {
     headers: { 'X-API-Key': config.apiKey },
   });
@@ -193,8 +194,8 @@ async function processCompletedDownloads() {
 // Auto-ingest mode: when enabled, automatically process staging items
 async function autoIngest() {
   try {
-    const config = JSON.parse(await fs.readFile(CONFIG_PATH, 'utf-8'));
-    if (!config.slskd?.autoIngest) return; // Only run if enabled
+    const slskd = getConfig().services.slskd;
+    if (!slskd?.autoIngest) return; // Only run if enabled
 
     const { rows } = await pool.query(
       "SELECT * FROM soulseek_downloads WHERE status = 'staging'"

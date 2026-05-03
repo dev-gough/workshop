@@ -1,24 +1,13 @@
-import { promises as fs } from 'fs';
-import path from 'path';
+import { getConfig, type TransmissionConfig } from './config';
 
-interface TransmissionConfig {
-  rpcUrl: string;
-  username: string;
-  password: string;
-}
-
-let _config: TransmissionConfig | null = null;
 let _sessionId: string | null = null;
 
-async function getConfig(): Promise<TransmissionConfig> {
-  if (_config) return _config;
-  const raw = await fs.readFile(path.join(process.cwd(), 'config.json'), 'utf-8');
-  const parsed = JSON.parse(raw);
-  if (!parsed.transmission) {
-    throw new Error('config.json missing "transmission" section — run scripts/jellyfin/setup-daemon.sh');
+function getTransmission(): TransmissionConfig {
+  const cfg = getConfig().services.transmission;
+  if (!cfg) {
+    throw new Error('transmission is not configured — visit /setup#transmission or edit config.json');
   }
-  _config = parsed.transmission;
-  return _config!;
+  return cfg;
 }
 
 function basicAuth(user: string, pass: string): string {
@@ -26,7 +15,7 @@ function basicAuth(user: string, pass: string): string {
 }
 
 async function rpc<T = unknown>(method: string, args: Record<string, unknown> = {}): Promise<T> {
-  const config = await getConfig();
+  const config = getTransmission();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Authorization: basicAuth(config.username, config.password),

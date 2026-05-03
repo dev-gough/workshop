@@ -1,18 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as net from 'net';
+import { getConfig } from '@/lib/config';
 
 export const dynamic = 'force-dynamic';
-
-// RCON port mapping for Minecraft services
-const RCON_CONFIG: Record<string, { port: number; password: string }> = {
-  'minecraft-atm6':         { port: 25585, password: 'root' },
-  'minecraft-atm10':        { port: 25586, password: 'root' },
-  'minecraft-stoneblock3':  { port: 25587, password: 'root' },
-  'minecraft-meatballcraft': { port: 25588, password: 'root' },
-  'minecraft-atm9sky':      { port: 25589, password: 'root' },
-  'minecraft-above-beyond': { port: 25585, password: 'root' },
-  'minecraft-star-technology': { port: 25590, password: 'root' },
-};
 
 // ── RCON Protocol ──
 // https://wiki.vg/RCON
@@ -107,12 +97,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing service or command' }, { status: 400 });
     }
 
-    const config = RCON_CONFIG[service];
-    if (!config) {
+    const server = getConfig().minecraftServers.find((s) => s.name === service);
+    if (!server) {
       return NextResponse.json({ error: 'RCON not configured for this service' }, { status: 400 });
     }
 
-    const response = await sendRconCommand('127.0.0.1', config.port, config.password, command);
+    const response = await sendRconCommand(server.host, server.port, server.password, command);
     return NextResponse.json({ response });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';

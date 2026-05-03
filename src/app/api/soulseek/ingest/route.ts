@@ -2,20 +2,26 @@ import { NextRequest, NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 import path from 'path';
 import pool from '@/lib/db';
+import { getConfig } from '@/lib/config';
 import { scanSingleAlbum, generateThumbnail } from '@/lib/musicScanner';
 import { sanitizeFilename, cleanSongDisplay } from '@/lib/songUtils';
 import { parseFile } from 'music-metadata';
 
 export const dynamic = 'force-dynamic';
 
-const MUSIC_DIR = '/home/server/music';
-const DOWNLOADS_DIR = '/home/server/music/.slskd-downloads';
+function getDirs(): { music: string; downloads: string } {
+  const music = getConfig().paths.musicDirectory;
+  if (!music) throw new Error('musicDirectory is not configured — visit /setup#music or edit config.json');
+  return { music, downloads: path.join(music, '.slskd-downloads') };
+}
+
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.flac', '.wav', '.m4a', '.ogg']);
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']);
 
 // GET - list staging area (completed downloads pending review)
 export async function GET() {
   try {
+    const { downloads: DOWNLOADS_DIR } = getDirs();
     // Get downloads in staging status
     const { rows: stagingRows } = await pool.query(
       "SELECT * FROM soulseek_downloads WHERE status = 'staging' ORDER BY created_at DESC"
@@ -24,7 +30,7 @@ export async function GET() {
     // Also scan the downloads directory for any files not yet tracked
     let pendingFiles: string[] = [];
     try {
-      pendingFiles = await walkDir(DOWNLOADS_DIR);
+      pendingFiles = await walkDir(DOWNLOADS_DIR, DOWNLOADS_DIR);
     } catch { /* dir might not exist */ }
 
     // Enrich staging items with cleaned names and cover art
@@ -33,7 +39,7 @@ export async function GET() {
       let coverImage: string | null = null;
 
       // Try to extract embedded cover art from the actual file
-      const localFile = await findDownloadFile(row.filename);
+      const localFile = await findDownloadFile(DOWNLOADS_DIR, row.filename);
       if (localFile) {
         try {
           const metadata = await parseFile(localFile);
@@ -59,6 +65,7 @@ export async function GET() {
 // POST - approve and ingest a download (or batch)
 export async function POST(request: NextRequest) {
   try {
+    const { music: MUSIC_DIR, downloads: DOWNLOADS_DIR } = getDirs();
     const { id, artist, album, files } = await request.json();
 
     if (!artist || !album) {
@@ -81,7 +88,7 @@ export async function POST(request: NextRequest) {
 
       const download = rows[0];
       // Find the actual file in downloads dir
-      const sourceFile = await findDownloadFile(download.filename);
+      const sourceFile = await findDownloadFile(DOWNLOADS_DIR, download.filename);
       if (sourceFile) {
         const destFile = path.join(targetDir, sanitizeFilename(path.basename(sourceFile)));
         await fs.rename(sourceFile, destFile);
@@ -143,13 +150,14 @@ export async function POST(request: NextRequest) {
 // DELETE - reject/discard a staged download
 export async function DELETE(request: NextRequest) {
   try {
+    const { downloads: DOWNLOADS_DIR } = getDirs();
     const { id, files } = await request.json();
 
     if (id) {
       const { rows } = await pool.query('SELECT * FROM soulseek_downloads WHERE id = $1', [id]);
       if (rows.length > 0) {
         const download = rows[0];
-        const sourceFile = await findDownloadFile(download.filename);
+        const sourceFile = await findDownloadFile(DOWNLOADS_DIR, download.filename);
         if (sourceFile) {
           await fs.unlink(sourceFile).catch(() => {});
         }
@@ -174,27 +182,27 @@ export async function DELETE(request: NextRequest) {
   }
 }
 
-// Helper: recursively walk a directory
-async function walkDir(dir: string): Promise<string[]> {
+// Helper: recursively walk a directory; returned paths are relative to `relTo`.
+async function walkDir(dir: string, relTo: string): Promise<string[]> {
   const results: string[] = [];
   const entries = await fs.readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      results.push(...await walkDir(fullPath));
+      results.push(...await walkDir(fullPath, relTo));
     } else {
-      results.push(path.relative(DOWNLOADS_DIR, fullPath));
+      results.push(path.relative(relTo, fullPath));
     }
   }
   return results;
 }
 
 // Helper: find a download file by name in the downloads directory
-async function findDownloadFile(filename: string): Promise<string | null> {
+async function findDownloadFile(downloadsDir: string, filename: string): Promise<string | null> {
   const basename = path.basename(filename.replace(/\\/g, '/'));
-  const files = await walkDir(DOWNLOADS_DIR);
+  const files = await walkDir(downloadsDir, downloadsDir);
   const match = files.find(f => path.basename(f) === basename);
-  return match ? path.join(DOWNLOADS_DIR, match) : null;
+  return match ? path.join(downloadsDir, match) : null;
 }
 
 // Helper: move cover art files from downloads subfolders to target album dir

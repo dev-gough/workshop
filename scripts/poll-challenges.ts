@@ -1,6 +1,5 @@
-import { promises as fs } from 'fs';
-import path from 'path';
-import { Pool } from 'pg';
+import { getConfig, resetConfigCache } from '../src/lib/config';
+import { makePool } from '../src/lib/db';
 import {
   getAccountByRiotId,
   getPlayerChallengeData,
@@ -8,22 +7,17 @@ import {
   getMatch,
 } from '../src/lib/riot';
 
-const pool = new Pool({
-  user: 'challenge_poller',
-  password: 'challenge_poller',
-  host: 'localhost',
-  port: 5432,
-  database: 'workshop',
-});
+const pool = makePool('challenge_poller');
 
 const POLL_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
-async function loadConfig() {
-  const config = JSON.parse(await fs.readFile(path.join(process.cwd(), 'config.json'), 'utf-8'));
-  if (!config.riotApiKey || !config.riotGameName || !config.riotTagLine) {
-    throw new Error('Missing Riot API config');
-  }
-  return config;
+function loadRiotConfig() {
+  // Re-read each poll so password rotations / new API keys take effect without
+  // restarting the daemon.
+  resetConfigCache();
+  const riot = getConfig().riot;
+  if (!riot) throw new Error('riot section is not configured in config.json');
+  return riot;
 }
 
 // Build a snapshot map from player challenge data: { challengeId: { value, level } }
@@ -90,8 +84,8 @@ function computeDeltas(
 }
 
 async function poll() {
-  const config = await loadConfig();
-  const { riotApiKey, riotGameName, riotTagLine, riotRegion } = config;
+  const riot = loadRiotConfig();
+  const { apiKey: riotApiKey, gameName: riotGameName, tagLine: riotTagLine, region: riotRegion } = riot;
 
   // Resolve PUUID
   const account = await getAccountByRiotId(riotApiKey, riotGameName, riotTagLine);

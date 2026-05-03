@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { execSync } from 'child_process';
+import { getConfig } from '@/lib/config';
 
 export const dynamic = 'force-dynamic';
+
+function jellyfinPort(): number {
+  const j = getConfig().services.jellyfin;
+  if (!j) return 8096;
+  try { return Number(new URL(j.baseUrl).port) || 8096; } catch { return 8096; }
+}
 
 // Services to show on the dashboard
 const TRACKED_SERVICES = [
@@ -30,7 +37,7 @@ interface ServiceEndpoint {
 
 const SERVICE_ENDPOINTS: Record<string, ServiceEndpoint[]> = {
   'nginx':                  [{ port: 80, protocol: 'http', label: 'Workshop' }],
-  'jellyfin':               [{ port: 8096, protocol: 'http', label: 'Jellyfin' }],
+  'jellyfin':               [{ port: jellyfinPort(), protocol: 'http', label: 'Jellyfin' }],
   'ssh':                    [{ port: 22, protocol: 'ssh' }],
   'postgresql@16-main':     [{ port: 5432, protocol: 'postgres', label: 'localhost only' }],
   'minecraft-atm10':        [{ port: 25565, label: 'Minecraft' }],

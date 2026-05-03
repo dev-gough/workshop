@@ -1,19 +1,15 @@
-import { promises as fs } from 'fs';
-import path from 'path';
-import { Pool } from 'pg';
+import { getConfig } from '../src/lib/config';
+import { makePool } from '../src/lib/db';
 import { scanAllAlbums } from '../src/lib/musicScanner';
 
-const pool = new Pool({
-  user: 'server',
-  password: 'workshop',
-  host: 'localhost',
-  port: 5432,
-  database: 'workshop',
-});
+const pool = makePool('workshop');
 
 async function main() {
-  const config = JSON.parse(await fs.readFile(path.join(process.cwd(), 'config.json'), 'utf-8'));
-  const musicDir = config.musicDirectory;
+  const musicDir = getConfig().paths.musicDirectory;
+  if (!musicDir) {
+    console.error('paths.musicDirectory is not configured in config.json');
+    process.exit(1);
+  }
 
   console.log(`Scanning ${musicDir}...`);
   const count = await scanAllAlbums(pool, musicDir);

@@ -6,15 +6,9 @@
 
 import { promises as fs } from 'fs';
 import { execSync } from 'child_process';
-import { Pool } from 'pg';
+import { makePool } from '../src/lib/db';
 
-const pool = new Pool({
-  user: 'server',
-  password: 'workshop',
-  host: 'localhost',
-  port: 5432,
-  database: 'workshop',
-});
+const pool = makePool('workshop');
 
 const TRACKED_SERVICES = [
   'workshop',

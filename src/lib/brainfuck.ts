@@ -1,11 +1,12 @@
 import { spawn, ChildProcess, execFileSync } from 'node:child_process';
 import readline from 'node:readline';
 import pool from '@/lib/db';
+import { brainfuckRepoPath, pythonBinPath } from '@/lib/config';
 
-const REPO_DIR = '/home/server/brainfuck-genetic';
-const PYTHON = `${REPO_DIR}/.venv/bin/python`;
-const RUNNER = 'Project/runner.py';
-const CWD = '/home/server';
+const REPO_DIR = brainfuckRepoPath();
+const PYTHON = pythonBinPath();
+const RUNNER = 'runner.py';
+const CWD = REPO_DIR;
 
 // ── GA hyperparameter config ────────────────────────────────────────────────
 // Mirrors util.GAConfig in the Python side. Keep field names in sync.

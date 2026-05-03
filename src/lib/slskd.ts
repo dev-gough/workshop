@@ -1,18 +1,13 @@
-import { promises as fs } from 'fs';
-import path from 'path';
+import { getConfig } from './config';
 
-let _config: { baseUrl: string; apiKey: string } | null = null;
-
-async function getConfig() {
-  if (_config) return _config;
-  const raw = await fs.readFile(path.join(process.cwd(), 'config.json'), 'utf-8');
-  const config = JSON.parse(raw);
-  _config = config.slskd;
-  return _config!;
+function getSlskd(): { baseUrl: string; apiKey: string } {
+  const cfg = getConfig().services.slskd;
+  if (!cfg) throw new Error('slskd is not configured — visit /setup#slskd or edit config.json');
+  return cfg;
 }
 
 async function slskdFetch(urlPath: string, options: RequestInit = {}): Promise<Response> {
-  const config = await getConfig();
+  const config = getSlskd();
   const url = `${config.baseUrl}${urlPath}`;
   const res = await fetch(url, {
     ...options,
