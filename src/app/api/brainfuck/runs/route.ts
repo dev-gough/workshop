@@ -8,12 +8,19 @@ const MAX_TARGET_LENGTH = 64;
 
 export async function GET() {
   try {
+    // LEFT JOIN with brainfuck_solutions so the UI can flag "gold standard"
+    // runs (halted + output_exact_match) without a second round-trip per row.
+    // Solutions are written only on 'found', so non-found runs match nothing
+    // and the flags come back NULL — handled fine on the client.
     const { rows } = await pool.query(
-      `SELECT id, target, status, pop_size, max_generations, generations,
-              best_fitness, best_gene, best_output, started_at, completed_at, error,
-              config_json
-       FROM brainfuck_runs
-       ORDER BY started_at DESC
+      `SELECT r.id, r.target, r.status, r.pop_size, r.max_generations, r.generations,
+              r.best_fitness, r.best_gene, r.best_output, r.started_at, r.completed_at,
+              r.error, r.config_json,
+              s.halted, s.output_exact_match
+       FROM brainfuck_runs r
+       LEFT JOIN brainfuck_solutions s
+         ON s.target = r.target AND s.gene = r.best_gene
+       ORDER BY r.started_at DESC
        LIMIT 50`,
     );
     return NextResponse.json({ runs: rows, activeId: getActiveRunId() });

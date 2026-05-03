@@ -219,6 +219,10 @@ interface Run {
   completed_at: string | null;
   error: string | null;
   config_json: GAConfig | null;
+  // Gold-standard flags — populated by LEFT JOIN with brainfuck_solutions.
+  // null when the run hasn't solved (no solution row exists).
+  halted: boolean | null;
+  output_exact_match: boolean | null;
 }
 
 interface ProgressPoint { gen: number; best_fitness: number; }
@@ -1465,6 +1469,10 @@ function HistoryRow({
   const badge = statusBadge(run.status);
   const pct = fitnessPercent(run.target, run.best_fitness);
   const [trail, setTrail] = useState<ProgressPoint[] | null>(null);
+  // Gold standard: solved AND halted naturally before MAX_OPS AND output is
+  // an exact match (no trailing junk). Rare across runs — celebrate it.
+  const isPerfect =
+    run.status === 'found' && run.halted === true && run.output_exact_match === true;
 
   useEffect(() => {
     if (!open || trail !== null) return;
@@ -1477,7 +1485,21 @@ function HistoryRow({
   }, [open, run.id, trail]);
 
   return (
-    <div className="rounded-lg bg-background/30 border border-border/30">
+    <motion.div
+      className={`rounded-lg border ${
+        isPerfect
+          ? 'bg-amber-300/[0.04] border-amber-300/60'
+          : 'bg-background/30 border-border/30'
+      }`}
+      animate={isPerfect ? {
+        boxShadow: [
+          '0 0 0 0 rgba(252,211,77,0)',
+          '0 0 14px 1px rgba(252,211,77,0.22)',
+          '0 0 0 0 rgba(252,211,77,0)',
+        ],
+      } : undefined}
+      transition={isPerfect ? { duration: 3.2, repeat: Infinity, ease: 'easeInOut' } : undefined}
+    >
       <button
         onClick={onToggle}
         className="w-full flex items-center gap-2 px-3 py-2 hover:bg-background/50 transition-colors text-left"
@@ -1487,6 +1509,16 @@ function HistoryRow({
           <badge.Icon className={`h-3 w-3 ${run.status === 'running' ? 'animate-spin' : ''}`} />
           {badge.label}
         </span>
+        {isPerfect && (
+          <motion.span
+            className="text-amber-300"
+            title="Gold standard: solved, halted, exact-match output"
+            animate={{ rotate: [0, 8, -8, 0], scale: [1, 1.15, 1] }}
+            transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+          </motion.span>
+        )}
         <span className="font-mono text-sm flex-1 truncate">&quot;{run.target}&quot;</span>
         <span className="text-xs text-muted-foreground tabular-nums">
           {run.generations.toLocaleString()} gen
@@ -1542,7 +1574,7 @@ function HistoryRow({
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
+    </motion.div>
   );
 }
 
