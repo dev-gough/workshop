@@ -184,7 +184,11 @@ export async function startRun(
     [
       RUNNER,
       '--target', target,
-      '--progress-every', '50',
+      // PyPy emits ~90k gens/sec. Per-event UPDATE+INSERT through Node's
+      // serialized chain caps at ~1k DB ops/sec — at the old 50-gen cadence
+      // the chain backlogged minutes behind Python and the UI looked frozen.
+      // 5000 keeps us comfortably ahead while still showing live progress.
+      '--progress-every', '5000',
       ...configToCliArgs(config),
     ],
     { cwd: CWD, stdio: ['ignore', 'pipe', 'pipe'] },
