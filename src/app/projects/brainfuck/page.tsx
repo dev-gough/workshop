@@ -1587,6 +1587,7 @@ interface TargetRollup {
   fastest_ops: number;
   halting_count: number;
   exact_match_count: number;
+  gold_count: number;
   last_seen_at: string;
   total_discoveries: number;
 }
@@ -1705,14 +1706,40 @@ function TargetRow({
   loading: boolean;
   onToggle: () => void;
 }) {
+  // At least one solution that's both halted and exact-match → target row
+  // gets the gold flair too. Doesn't pulse as strong as the per-card glow,
+  // since not every solution underneath is necessarily gold.
+  const hasGold = row.gold_count > 0;
   return (
-    <div className="rounded-lg border border-border/40 overflow-hidden">
+    <motion.div
+      className={`rounded-lg border overflow-hidden ${
+        hasGold ? 'border-amber-300/60 bg-amber-300/[0.03]' : 'border-border/40'
+      }`}
+      animate={hasGold ? {
+        boxShadow: [
+          '0 0 0 0 rgba(252,211,77,0)',
+          '0 0 12px 0 rgba(252,211,77,0.16)',
+          '0 0 0 0 rgba(252,211,77,0)',
+        ],
+      } : undefined}
+      transition={hasGold ? { duration: 3.6, repeat: Infinity, ease: 'easeInOut' } : undefined}
+    >
       <button
         onClick={onToggle}
         className="w-full px-3 py-2 flex items-center gap-3 hover:bg-foreground/5 transition-colors text-left"
       >
         {open ? <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
               : <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />}
+        {hasGold && (
+          <motion.span
+            className="text-amber-300 shrink-0"
+            title={`${row.gold_count} gold-standard solution${row.gold_count === 1 ? '' : 's'}`}
+            animate={{ rotate: [0, 8, -8, 0], scale: [1, 1.15, 1] }}
+            transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+          </motion.span>
+        )}
         <span className="font-mono text-sm text-foreground/90 truncate">
           &quot;{row.target}&quot;
         </span>
@@ -1721,6 +1748,11 @@ function TargetRow({
             <span className="text-foreground/80">{row.solution_count}</span>
             {' '}shape{row.solution_count === 1 ? '' : 's'}
           </span>
+          {hasGold && (
+            <span title="Solutions that both halt and match exactly" className="text-amber-300">
+              <span className="font-semibold">{row.gold_count}</span> gold
+            </span>
+          )}
           <span title="Shortest gene length">
             min <span className="text-foreground/80">{row.shortest_gene}</span> ch
           </span>
@@ -1745,13 +1777,45 @@ function TargetRow({
           )}
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }
 
 function SolutionCard({ sol }: { sol: Solution }) {
+  // Same trifecta as the History gold-standard: halted naturally + output
+  // matches target exactly. Solutions table only stores rows where the GA
+  // declared a solve, so 'status=found' is implied and not re-checked.
+  const isPerfect = sol.halted && sol.output_exact_match;
   return (
-    <div className="rounded-lg border border-border/40 bg-card/60 p-3 space-y-2">
+    <motion.div
+      className={`rounded-lg border p-3 space-y-2 ${
+        isPerfect
+          ? 'border-amber-300/60 bg-amber-300/[0.04]'
+          : 'border-border/40 bg-card/60'
+      }`}
+      animate={isPerfect ? {
+        boxShadow: [
+          '0 0 0 0 rgba(252,211,77,0)',
+          '0 0 14px 1px rgba(252,211,77,0.22)',
+          '0 0 0 0 rgba(252,211,77,0)',
+        ],
+      } : undefined}
+      transition={isPerfect ? { duration: 3.2, repeat: Infinity, ease: 'easeInOut' } : undefined}
+    >
+      {isPerfect && (
+        <div className="flex items-center gap-1.5 -mb-1">
+          <motion.span
+            className="text-amber-300"
+            animate={{ rotate: [0, 8, -8, 0], scale: [1, 1.15, 1] }}
+            transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+          >
+            <Sparkles className="h-3 w-3" />
+          </motion.span>
+          <span className="text-[9.5px] uppercase tracking-[0.18em] text-amber-300/90 font-medium">
+            gold standard
+          </span>
+        </div>
+      )}
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] tabular-nums">
         <SolStat label="length"   value={`${sol.gene_length} ch`} />
         <SolStat label="ops"      value={sol.ops_executed.toLocaleString()} />
@@ -1796,7 +1860,7 @@ function SolutionCard({ sol }: { sol: Solution }) {
         )}
         <span className="ml-auto">first seen {fmtTime(sol.first_seen_at)}</span>
       </div>
-    </div>
+    </motion.div>
   );
 }
 

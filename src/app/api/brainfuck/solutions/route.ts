@@ -34,6 +34,7 @@ export async function GET(request: NextRequest) {
               MIN(ops_executed)              AS fastest_ops,
               SUM(CASE WHEN halted THEN 1 ELSE 0 END) AS halting_count,
               SUM(CASE WHEN output_exact_match THEN 1 ELSE 0 END) AS exact_match_count,
+              SUM(CASE WHEN halted AND output_exact_match THEN 1 ELSE 0 END) AS gold_count,
               MAX(last_seen_at)              AS last_seen_at,
               SUM(times_found)               AS total_discoveries
          FROM brainfuck_solutions
