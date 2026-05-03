@@ -1,0 +1,3 @@
+[submodule "vendor/brainfuck-genetic"]
+	path = vendor/brainfuck-genetic
+	url = git@github.com:dev-gough/BrainFuck.git
