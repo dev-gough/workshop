@@ -60,13 +60,14 @@ export interface TransmissionTorrent {
   uploadedEver: number;
   downloadedEver: number;
   secondsSeeding: number;
+  torrentFile: string;     // absolute path to the .torrent file in transmission's config dir
 }
 
 const FIELDS = [
   'id', 'hashString', 'name', 'status', 'percentDone', 'totalSize',
   'downloadDir', 'rateDownload', 'rateUpload', 'eta', 'errorString',
   'isFinished', 'doneDate', 'addedDate', 'uploadRatio',
-  'uploadedEver', 'downloadedEver', 'secondsSeeding',
+  'uploadedEver', 'downloadedEver', 'secondsSeeding', 'torrentFile',
 ];
 
 export interface SessionStats {
@@ -124,6 +125,25 @@ export async function addTorrent(
 
 export async function removeTorrent(id: number, deleteLocalData = false): Promise<void> {
   await rpc('torrent-remove', { ids: [id], 'delete-local-data': deleteLocalData });
+}
+
+export async function startTorrent(id: number): Promise<void> {
+  await rpc('torrent-start', { ids: [id] });
+}
+
+export async function stopTorrent(id: number): Promise<void> {
+  await rpc('torrent-stop', { ids: [id] });
+}
+
+/**
+ * Push the "seed forever" session settings. Idempotent — safe to call repeatedly.
+ * Transmission persists these on graceful shutdown.
+ */
+export async function ensureSeedForeverSettings(): Promise<void> {
+  await rpc('session-set', {
+    seedRatioLimited: false,
+    'idle-seeding-limit-enabled': false,
+  });
 }
 
 export function statusLabel(status: number, isFinished: boolean): string {

@@ -5,7 +5,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Film, Tv, Download, Loader, Wifi, WifiOff, Plus, X,
   CheckCircle, AlertTriangle, ArrowRight, Clock, Trash2, Eye,
-  Upload, HeartHandshake, Share2, ExternalLink,
+  Upload, HeartHandshake, Share2, ExternalLink, Pause, Play,
+  Search, Archive, ListFilter,
 } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
@@ -19,12 +20,15 @@ interface Transfer {
   hash: string;
   name: string;
   status: string;
+  rawStatus: number;        // 0 stopped, 1-2 verify, 3-4 download, 5-6 seed
   percent: number;
   totalBytes: number;
   downBps: number;
   upBps: number;
   eta: number;
   ratio: number;
+  uploadedEver: number;
+  secondsSeeding: number;
   error: string | null;
   downloadDir: string;
   mode: Mode;
@@ -32,7 +36,27 @@ interface Transfer {
   doneAt: string | null;
   dbId: number | null;
   dbStatus: string | null;
+  archived: boolean;
 }
+
+type StatusGroup = 'downloading' | 'seeding' | 'paused' | 'verifying';
+type Filter = 'all' | StatusGroup;
+
+function groupOf(t: Transfer): StatusGroup {
+  if (t.rawStatus === 0) return 'paused';
+  if (t.rawStatus === 1 || t.rawStatus === 2) return 'verifying';
+  if (t.rawStatus === 3 || t.rawStatus === 4) return 'downloading';
+  return 'seeding';
+}
+
+const GROUP_ORDER: StatusGroup[] = ['downloading', 'verifying', 'seeding', 'paused'];
+
+const GROUP_META: Record<StatusGroup, { label: string; icon: React.ElementType; color: string; dot: string }> = {
+  downloading: { label: 'Downloading', icon: Download, color: 'text-blue-400', dot: 'bg-blue-400' },
+  seeding:     { label: 'Seeding',     icon: Share2,   color: 'text-emerald-400', dot: 'bg-emerald-400' },
+  verifying:   { label: 'Verifying',   icon: Loader,   color: 'text-amber-400', dot: 'bg-amber-400' },
+  paused:      { label: 'Paused',      icon: Pause,    color: 'text-zinc-400',  dot: 'bg-zinc-500' },
+};
 
 interface IngestFile {
   id: number;
@@ -450,11 +474,166 @@ function SubmitForm({ onSubmitted }: { onSubmitted: () => void }) {
   );
 }
 
-// ── Active transfers ──
+// ── Torrent row ──
 
-function ActiveTransfers({
-  transfers, onRemove, daemonOk,
-}: { transfers: Transfer[]; onRemove: (t: Transfer, deleteData: boolean) => void; daemonOk: boolean }) {
+function TorrentRow({
+  t, onRemove, onSeed,
+}: {
+  t: Transfer;
+  onRemove: (t: Transfer, deleteData: boolean) => void;
+  onSeed: (t: Transfer, action: 'start' | 'stop') => void;
+}) {
+  const badge = modeBadge(t.mode);
+  const Icon = badge.icon;
+  const grp = groupOf(t);
+  const meta = GROUP_META[grp];
+  const pct = Math.round(t.percent * 100);
+  const isDone = t.percent >= 1;
+  const paused = grp === 'paused';
+  const seeding = grp === 'seeding';
+
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={`relative rounded-lg bg-card border border-border/60 p-4 pl-5 space-y-2.5 overflow-hidden ${
+        paused ? 'opacity-60' : ''
+      }`}
+    >
+      {/* Status spine on the left edge */}
+      <div className={`absolute left-0 top-0 bottom-0 w-1 ${meta.dot}`} />
+
+      <div className="flex items-start gap-3">
+        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${badge.color} flex items-center gap-1 mt-0.5`}>
+          <Icon className="h-3 w-3" /> {badge.label}
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <div className="text-sm text-foreground truncate font-mono flex-1 min-w-0">{t.name}</div>
+            {t.archived && (
+              <span title="Archived (.torrent saved)" className="text-cyan-400/60">
+                <Archive className="h-3 w-3" />
+              </span>
+            )}
+          </div>
+          <div className="text-xs text-muted-foreground flex items-center gap-3 mt-1 flex-wrap">
+            <span className={statusColor(t.status)}>{t.status}</span>
+            <span>{fmtBytes(t.totalBytes)}</span>
+            {!isDone && !paused && (
+              <>
+                <span className="text-blue-400">↓ {fmtSpeed(t.downBps)}</span>
+                <span className="text-amber-400">↑ {fmtSpeed(t.upBps)}</span>
+                {t.eta > 0 && <span>ETA {fmtEta(t.eta)}</span>}
+              </>
+            )}
+            {isDone && !paused && (
+              <>
+                <span className="text-amber-400">↑ {fmtSpeed(t.upBps)}</span>
+                <span className={`tabular-nums ${ratioColor(t.ratio)}`}>ratio {t.ratio.toFixed(2)}</span>
+                {t.uploadedEver > 0 && <span>shared {fmtBytes(t.uploadedEver)}</span>}
+                {seeding && t.secondsSeeding > 0 && <span>{fmtDuration(t.secondsSeeding)} seeded</span>}
+              </>
+            )}
+            {paused && t.uploadedEver > 0 && (
+              <span>shared {fmtBytes(t.uploadedEver)} · ratio {t.ratio.toFixed(2)}</span>
+            )}
+          </div>
+          {t.error && (
+            <div className="text-xs text-red-400 mt-1 flex items-center gap-1">
+              <AlertTriangle className="h-3 w-3" /> {t.error}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          {paused ? (
+            <button
+              onClick={() => onSeed(t, 'start')}
+              className="p-1.5 rounded hover:bg-emerald-500/15 text-muted-foreground hover:text-emerald-400 transition-colors"
+              title="Resume"
+            >
+              <Play className="h-3.5 w-3.5" />
+            </button>
+          ) : (
+            <button
+              onClick={() => onSeed(t, 'stop')}
+              className="p-1.5 rounded hover:bg-amber-500/15 text-muted-foreground hover:text-amber-400 transition-colors"
+              title={seeding ? 'Pause seeding' : 'Pause'}
+            >
+              <Pause className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <button
+            onClick={() => {
+              if (confirm(`Remove "${t.name}" from transmission?\n(Data on disk is kept.)`)) {
+                onRemove(t, false);
+              }
+            }}
+            className="p-1.5 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
+            title="Remove (keep data)"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={() => {
+              if (confirm(`Remove "${t.name}" AND delete its files in staging?`)) {
+                onRemove(t, true);
+              }
+            }}
+            className="p-1.5 rounded hover:bg-red-500/15 text-muted-foreground hover:text-red-400 transition-colors"
+            title="Remove and delete data"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+      <div className="flex items-center gap-3">
+        <ProgressBar
+          percent={t.percent}
+          color={paused ? 'bg-zinc-500' : isDone ? 'bg-emerald-500' : 'bg-blue-500'}
+        />
+        <span className="text-xs text-muted-foreground tabular-nums w-10 text-right">{pct}%</span>
+      </div>
+    </motion.div>
+  );
+}
+
+// ── Torrents (unified, filterable, grouped) ──
+
+function TorrentsPanel({
+  transfers, onRemove, onSeed, daemonOk,
+}: {
+  transfers: Transfer[];
+  onRemove: (t: Transfer, deleteData: boolean) => void;
+  onSeed: (t: Transfer, action: 'start' | 'stop') => void;
+  daemonOk: boolean;
+}) {
+  const [filter, setFilter] = useState<Filter>('all');
+  const [query, setQuery] = useState('');
+
+  // Group counts always reflect the full transfer set, not the post-search subset.
+  // This is intentional — the search box is a within-group narrowing tool and the
+  // pill counts should keep showing how many torrents are actually in each state.
+  const counts = transfers.reduce<Record<Filter, number>>(
+    (acc, t) => { acc.all += 1; acc[groupOf(t)] += 1; return acc; },
+    { all: 0, downloading: 0, seeding: 0, paused: 0, verifying: 0 },
+  );
+
+  const q = query.trim().toLowerCase();
+  const filtered = transfers.filter((t) => {
+    if (filter !== 'all' && groupOf(t) !== filter) return false;
+    if (q && !t.name.toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  // Group + sort within group: downloads by ETA asc, seeders by upload speed desc, others by added desc.
+  const grouped: Record<StatusGroup, Transfer[]> = { downloading: [], verifying: [], seeding: [], paused: [] };
+  for (const t of filtered) grouped[groupOf(t)].push(t);
+  grouped.downloading.sort((a, b) => (a.eta < 0 ? Infinity : a.eta) - (b.eta < 0 ? Infinity : b.eta));
+  grouped.seeding.sort((a, b) => b.upBps - a.upBps || b.uploadedEver - a.uploadedEver);
+  grouped.verifying.sort((a, b) => b.percent - a.percent);
+  grouped.paused.sort((a, b) => (b.addedAt || '').localeCompare(a.addedAt || ''));
+
   if (!daemonOk) {
     return (
       <div className="rounded-xl border border-border/60 p-5 text-center text-sm text-muted-foreground">
@@ -464,90 +643,100 @@ function ActiveTransfers({
     );
   }
 
-  if (transfers.length === 0) {
-    return (
-      <div className="rounded-xl border border-border/60 p-5 text-center text-sm text-muted-foreground">
-        No active torrents. Submit a link above to start.
-      </div>
-    );
-  }
+  const filterPills: { value: Filter; label: string }[] = [
+    { value: 'all',         label: 'All' },
+    { value: 'downloading', label: 'Downloading' },
+    { value: 'seeding',     label: 'Seeding' },
+    { value: 'paused',      label: 'Paused' },
+  ];
 
   return (
-    <div className="space-y-2">
-      {transfers.map((t) => {
-        const badge = modeBadge(t.mode);
-        const Icon = badge.icon;
-        const pct = Math.round(t.percent * 100);
-        const isDone = t.percent >= 1;
-        return (
-          <motion.div
-            key={t.id}
-            layout
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="rounded-lg bg-card border border-border/60 p-4 space-y-2.5"
-          >
-            <div className="flex items-start gap-3">
-              <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${badge.color} flex items-center gap-1 mt-0.5`}>
-                <Icon className="h-3 w-3" /> {badge.label}
-              </span>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm text-foreground truncate font-mono">{t.name}</div>
-                <div className="text-xs text-muted-foreground flex items-center gap-3 mt-1 flex-wrap">
-                  <span className={statusColor(t.status)}>{t.status}</span>
-                  <span>{fmtBytes(t.totalBytes)}</span>
-                  {!isDone && (
-                    <>
-                      <span className="text-blue-400">↓ {fmtSpeed(t.downBps)}</span>
-                      <span className="text-amber-400">↑ {fmtSpeed(t.upBps)}</span>
-                      {t.eta > 0 && <span>ETA {fmtEta(t.eta)}</span>}
-                    </>
-                  )}
-                  {isDone && (
-                    <>
-                      <span className="text-amber-400">↑ {fmtSpeed(t.upBps)}</span>
-                      <span>ratio {t.ratio.toFixed(2)}</span>
-                    </>
-                  )}
-                </div>
-                {t.error && (
-                  <div className="text-xs text-red-400 mt-1 flex items-center gap-1">
-                    <AlertTriangle className="h-3 w-3" /> {t.error}
+    <div className="space-y-3">
+      {/* Filter + search bar */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <ListFilter className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+        <div className="flex items-center gap-1 flex-wrap">
+          {filterPills.map((p) => {
+            const active = filter === p.value;
+            const count = counts[p.value];
+            return (
+              <button
+                key={p.value}
+                onClick={() => setFilter(p.value)}
+                className={`text-xs px-2.5 py-1 rounded-full border transition-colors flex items-center gap-1.5 ${
+                  active
+                    ? 'bg-primary/15 border-primary/40 text-foreground'
+                    : 'bg-muted/30 border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                }`}
+              >
+                {p.label}
+                <span className={`tabular-nums text-[10px] ${active ? 'text-foreground/70' : 'text-muted-foreground/70'}`}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="relative ml-auto flex-1 min-w-[180px] max-w-xs">
+          <Search className="h-3 w-3 text-muted-foreground absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Filter by name…"
+            className="w-full pl-7 pr-7 py-1.5 rounded-md bg-muted/40 border border-border/60 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/50 transition-colors"
+          />
+          {query && (
+            <button
+              onClick={() => setQuery('')}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-muted-foreground hover:text-foreground"
+              title="Clear"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="rounded-xl border border-border/60 p-5 text-center text-sm text-muted-foreground">
+          {transfers.length === 0
+            ? 'No torrents yet. Submit a link above to start.'
+            : q
+              ? <>No torrents match <span className="font-mono text-foreground">&ldquo;{query}&rdquo;</span>.</>
+              : 'No torrents in this state.'}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {GROUP_ORDER.map((g) => {
+            const items = grouped[g];
+            if (items.length === 0) return null;
+            const meta = GROUP_META[g];
+            const GIcon = meta.icon;
+            // Hide the section header when filter narrows to one group anyway.
+            const showHeader = filter === 'all';
+            return (
+              <div key={g} className="space-y-2">
+                {showHeader && (
+                  <div className="sticky top-[57px] z-10 -mx-1 px-1 py-1 backdrop-blur-sm bg-background/80 border-b border-border/30">
+                    <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider font-semibold">
+                      <span className={`inline-block h-1.5 w-1.5 rounded-full ${meta.dot}`} />
+                      <GIcon className={`h-3 w-3 ${meta.color}`} />
+                      <span className={meta.color}>{meta.label}</span>
+                      <span className="text-muted-foreground tabular-nums">{items.length}</span>
+                    </div>
                   </div>
                 )}
+                <div className="space-y-2">
+                  {items.map((t) => (
+                    <TorrentRow key={t.id} t={t} onRemove={onRemove} onSeed={onSeed} />
+                  ))}
+                </div>
               </div>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => {
-                    if (confirm(`Remove "${t.name}" from transmission?\n(Data on disk is kept.)`)) {
-                      onRemove(t, false);
-                    }
-                  }}
-                  className="p-1.5 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
-                  title="Remove (keep data)"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  onClick={() => {
-                    if (confirm(`Remove "${t.name}" AND delete its files in staging?`)) {
-                      onRemove(t, true);
-                    }
-                  }}
-                  className="p-1.5 rounded hover:bg-red-500/15 text-muted-foreground hover:text-red-400 transition-colors"
-                  title="Remove and delete data"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <ProgressBar percent={t.percent} color={isDone ? 'bg-emerald-500' : 'bg-blue-500'} />
-              <span className="text-xs text-muted-foreground tabular-nums w-10 text-right">{pct}%</span>
-            </div>
-          </motion.div>
-        );
-      })}
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -693,6 +882,21 @@ export default function JellyfinPage() {
     } catch { /* ignore */ }
   }, [refreshTransfers]);
 
+  const handleSeed = useCallback(async (t: Transfer, action: 'start' | 'stop') => {
+    // Optimistic flip so the UI reacts before the next 2s poll lands.
+    setTransfers((prev) => prev.map((p) =>
+      p.id === t.id ? { ...p, rawStatus: action === 'stop' ? 0 : (p.percent >= 1 ? 6 : 4) } : p
+    ));
+    try {
+      await fetch('/api/jellyfin/seed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: t.id, action }),
+      });
+    } catch { /* refresh will reconcile */ }
+    refreshTransfers();
+  }, [refreshTransfers]);
+
   return (
     <PageTransition>
       <div className="p-6 md:p-8">
@@ -736,17 +940,20 @@ export default function JellyfinPage() {
           )}
 
           <FadeIn delay={0.1}>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  <Download className="h-4 w-4 text-blue-400" />
-                  Active
-                  {transfers.length > 0 && (
-                    <span className="text-xs text-muted-foreground">({transfers.length})</span>
-                  )}
-                </h2>
-              </div>
-              <ActiveTransfers transfers={transfers} onRemove={handleRemove} daemonOk={daemonOk !== false} />
+            <div className="space-y-3">
+              <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <Download className="h-4 w-4 text-blue-400" />
+                Torrents
+                {transfers.length > 0 && (
+                  <span className="text-xs text-muted-foreground">({transfers.length})</span>
+                )}
+              </h2>
+              <TorrentsPanel
+                transfers={transfers}
+                onRemove={handleRemove}
+                onSeed={handleSeed}
+                daemonOk={daemonOk !== false}
+              />
             </div>
           </FadeIn>
 

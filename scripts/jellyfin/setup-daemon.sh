@@ -25,8 +25,8 @@ apt-get install -y -qq transmission-daemon transmission-cli jq postgresql-client
 echo "==> Stopping daemon to edit settings"
 systemctl stop transmission-daemon || true
 
-mkdir -p /Media/.staging/tv /Media/.staging/movies /Media/.incomplete /var/log/jellyfin-fetch
-chown -R "$SERVER_USER:$SERVER_USER" /Media/.staging /Media/.incomplete /var/log/jellyfin-fetch
+mkdir -p /Media/.staging/tv /Media/.staging/movies /Media/.incomplete /Media/.torrents /var/log/jellyfin-fetch
+chown -R "$SERVER_USER:$SERVER_USER" /Media/.staging /Media/.incomplete /Media/.torrents /var/log/jellyfin-fetch
 
 # Run the daemon as the `server` user so it can read/write /Media without perm gymnastics.
 # Force Type=simple — the package ships Type=notify but transmission-daemon doesn't reliably
@@ -60,10 +60,8 @@ cat >"$USER_CONFIG_DIR/settings.json" <<EOF
   "umask": 2,
   "script-torrent-done-enabled": true,
   "script-torrent-done-filename": "$WORKSHOP_DIR/scripts/jellyfin/ingest.sh",
-  "seedRatioLimit": 10.0,
-  "seedRatioLimited": true,
-  "idle-seeding-limit-enabled": true,
-  "idle-seeding-limit": 10080
+  "seedRatioLimited": false,
+  "idle-seeding-limit-enabled": false
 }
 EOF
 chown "$SERVER_USER:$SERVER_USER" "$USER_CONFIG_DIR/settings.json"
@@ -103,4 +101,5 @@ echo "Done. transmission-daemon is running on 127.0.0.1:$RPC_PORT"
 echo "  RPC user: $RPC_USER"
 echo "  RPC pass: $RPC_PASS"
 echo "  Staging:  /Media/.staging/{tv,movies}"
+echo "  Archive:  /Media/.torrents (.torrent files saved here)"
 echo "  Done hook: $WORKSHOP_DIR/scripts/jellyfin/ingest.sh"
