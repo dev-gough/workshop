@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
-import { startRun, getActiveRunId, parseRunConfig } from '@/lib/brainfuck';
+import { startRun, getActiveRunId, getActiveRunIds, parseRunConfig } from '@/lib/brainfuck';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,7 +15,7 @@ export async function GET() {
     const { rows } = await pool.query(
       `SELECT r.id, r.target, r.status, r.pop_size, r.max_generations, r.generations,
               r.best_fitness, r.best_gene, r.best_output, r.started_at, r.completed_at,
-              r.error, r.config_json,
+              r.error, r.config_json, r.race_id,
               s.halted, s.output_exact_match
        FROM brainfuck_runs r
        LEFT JOIN brainfuck_solutions s
@@ -23,7 +23,11 @@ export async function GET() {
        ORDER BY r.started_at DESC
        LIMIT 50`,
     );
-    return NextResponse.json({ runs: rows, activeId: getActiveRunId() });
+    return NextResponse.json({
+      runs: rows,
+      activeId: getActiveRunId(),
+      activeIds: getActiveRunIds(),
+    });
   } catch (error) {
     return NextResponse.json(
       { runs: [], error: 'Failed to load runs', detail: String(error) },
@@ -51,8 +55,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: String((e as Error).message) }, { status: 400 });
     }
 
-    const { id } = await startRun(target, config);
-    return NextResponse.json({ id });
+    const { ids, raceId } = await startRun(target, config);
+    // Back-compat: clients reading `id` get the first lane's id; multi-lane
+    // clients use `ids` to track the whole race.
+    return NextResponse.json({ id: ids[0], ids, raceId });
   } catch (error) {
     return NextResponse.json(
       { error: 'Start failed', detail: String(error) },

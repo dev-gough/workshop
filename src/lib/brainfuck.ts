@@ -26,6 +26,13 @@ export interface GAConfig {
   bracket_mut_rate: number;
   islands: number;
   migration_every: number;
+  // Workshop-only knob (not passed to runner.py): when > 1, "Start run"
+  // spawns N independent runner processes racing for the same target. First
+  // one to emit a 'found' event wins; siblings get killed and marked
+  // 'superseded'. Different RNG seeds across processes give lottery-style
+  // diversity on top of whatever in-process diversity (islands, restart) is
+  // already configured.
+  parallel_runs: number;
 }
 
 export const DEFAULT_CONFIG: GAConfig = {
@@ -43,6 +50,7 @@ export const DEFAULT_CONFIG: GAConfig = {
   bracket_mut_rate: 0.30,
   islands: 1,
   migration_every: 10_000,
+  parallel_runs: 1,
 };
 
 interface NumericRange {
@@ -68,6 +76,7 @@ export const CONFIG_BOUNDS: Record<keyof GAConfig, NumericRange> = {
   bracket_mut_rate:   { min: 0,     max: 1 },
   islands:            { min: 1,     max: 10,         integer: true },
   migration_every:    { min: 0,     max: 1_000_000,  integer: true },
+  parallel_runs:      { min: 1,     max: 4,          integer: true },
 };
 
 export function parseRunConfig(body: Record<string, unknown>): GAConfig {
@@ -152,9 +161,21 @@ type SolutionEvent = {
 };
 type Event = ProgressEvent | FoundEvent | DoneEvent | StartEvent | BenchmarkEvent | ErrorEvent | SolutionEvent;
 
-let activeRunId: number | null = null;
+// Each currently-running runner subprocess (1..N for parallel races, always 1
+// for solo runs). The race_id groups siblings together so a 'found' event on
+// one can identify the others to terminate.
+interface ActiveLane {
+  runId: number;
+  raceId: string | null;
+  child: ChildProcess;
+}
+let activeLanes: ActiveLane[] = [];
 let activeBenchmarkId: number | null = null;
 let activeChild: ChildProcess | null = null;
+// IDs that were intentionally killed because a sibling won the race. The
+// child's exit handler checks this set and writes 'superseded' rather than
+// the default 'stopped' for SIGTERM exits.
+const supersededIds = new Set<number>();
 let bootstrapped = false;
 
 async function bootstrap(): Promise<void> {
@@ -192,10 +213,10 @@ function getBFVersion(): { hash: string | null; subject: string | null } {
 export async function startRun(
   target: string,
   config: GAConfig,
-): Promise<{ id: number }> {
+): Promise<{ ids: number[]; raceId: string | null }> {
   await bootstrap();
 
-  if (activeChild) {
+  if (activeLanes.length > 0 || activeChild) {
     throw new Error(
       activeBenchmarkId != null
         ? 'A benchmark is in progress. Wait for it to finish before starting a new run.'
@@ -203,18 +224,35 @@ export async function startRun(
     );
   }
 
+  const lanes = Math.max(1, Math.min(4, Math.trunc(config.parallel_runs || 1)));
+  const raceId = lanes > 1 ? `race-${Date.now()}` : null;
+  const bfVersion = getBFVersion();
+
+  const ids: number[] = [];
+  for (let i = 0; i < lanes; i++) {
+    const id = await spawnLane(target, config, raceId, bfVersion.hash);
+    ids.push(id);
+  }
+  return { ids, raceId };
+}
+
+async function spawnLane(
+  target: string,
+  config: GAConfig,
+  raceId: string | null,
+  versionHash: string | null,
+): Promise<number> {
   const { rows } = await pool.query(
-    `INSERT INTO brainfuck_runs (target, max_generations, pop_size, status, config_json)
-     VALUES ($1, $2, $3, 'running', $4) RETURNING id`,
-    [target, config.max_generations, config.pop_size, JSON.stringify(config)],
+    `INSERT INTO brainfuck_runs (target, max_generations, pop_size, status, config_json, race_id)
+     VALUES ($1, $2, $3, 'running', $4, $5) RETURNING id`,
+    [target, config.max_generations, config.pop_size, JSON.stringify(config), raceId],
   );
   const id: number = rows[0].id;
 
   // Captured here so the 'solution' event handler (which is keyed by run id
   // only) can write the discovery context — target, config, BF repo HEAD —
   // without re-querying the runs row.
-  const bfVersion = getBFVersion();
-  const runContext = { target, config, versionHash: bfVersion.hash };
+  const runContext = { target, config, versionHash };
 
   const child = spawn(
     PYTHON,
@@ -231,15 +269,14 @@ export async function startRun(
     { cwd: CWD, stdio: ['ignore', 'pipe', 'pipe'] },
   );
 
-  activeRunId = id;
-  activeChild = child;
+  activeLanes.push({ runId: id, raceId, child });
 
   if (child.pid) {
     await pool.query(`UPDATE brainfuck_runs SET pid = $1 WHERE id = $2`, [child.pid, id]);
   }
 
   const rl = readline.createInterface({ input: child.stdout!, crlfDelay: Infinity });
-  // Serialize handlers per-run so events are applied to the DB in the same
+  // Serialize handlers per-lane so events are applied to the DB in the same
   // order they arrived on stdout. Without this, async handlers race and a
   // late progress UPDATE can clobber the values written by an earlier 'done'
   // (we hit exactly that: status='found' with sub-target best_fitness).
@@ -265,14 +302,13 @@ export async function startRun(
   });
 
   child.on('exit', (code, signal) => {
-    activeRunId = null;
-    activeChild = null;
+    activeLanes = activeLanes.filter((l) => l.runId !== id);
     finalize(id, code, signal, stderrBuf).catch((e) =>
       console.error('[brainfuck] finalize', e),
     );
   });
 
-  return { id };
+  return id;
 }
 
 interface RunContext {
@@ -286,7 +322,9 @@ async function handleEvent(id: number, evt: Event, ctx: RunContext): Promise<voi
     // Monotonic guard: best_fitness can only ever go up. The progress trail
     // (brainfuck_progress) still records every event for the sparkline, but
     // the row's "best" snapshot never regresses even if a stale handler runs
-    // after a higher-fitness one wrote first.
+    // after a higher-fitness one wrote first. The status='running' check
+    // also prevents progress writes from siblings that have already been
+    // marked 'superseded' but whose chain is still draining.
     await pool.query(
       `UPDATE brainfuck_runs
        SET generations = GREATEST(generations, $2),
@@ -294,6 +332,7 @@ async function handleEvent(id: number, evt: Event, ctx: RunContext): Promise<voi
            best_gene = $4,
            best_output = $5
        WHERE id = $1
+         AND status = 'running'
          AND ($3 >= COALESCE(best_fitness, $3))`,
       [id, evt.gen, evt.best_fitness, evt.best_gene, evt.best_output],
     );
@@ -301,6 +340,27 @@ async function handleEvent(id: number, evt: Event, ctx: RunContext): Promise<voi
       `INSERT INTO brainfuck_progress (run_id, gen, best_fitness) VALUES ($1, $2, $3)`,
       [id, evt.gen, evt.best_fitness],
     );
+
+    // First sibling to find a solution wins the race — kill the others and
+    // mark them 'superseded' so finalize() can distinguish "user stopped"
+    // from "race ended".
+    if (evt.type === 'found') {
+      const winnerLane = activeLanes.find((l) => l.runId === id);
+      if (winnerLane?.raceId) {
+        const losers = activeLanes.filter(
+          (l) => l.raceId === winnerLane.raceId && l.runId !== id,
+        );
+        for (const loser of losers) {
+          supersededIds.add(loser.runId);
+          await pool.query(
+            `UPDATE brainfuck_runs SET status='superseded', completed_at=NOW()
+             WHERE id=$1 AND status='running'`,
+            [loser.runId],
+          );
+          loser.child.kill('SIGTERM');
+        }
+      }
+    }
   } else if (evt.type === 'solution') {
     // Dedup-by-(target,gene) upsert into the solutions catalog. Same gene
     // discovered in a later run just bumps times_found + last_seen_at;
@@ -355,11 +415,12 @@ async function finalize(
 ): Promise<void> {
   // The exit handler also fires for runs that already wrote a terminal status
   // via {type: "done"} — only update rows still marked running.
+  const wasSuperseded = supersededIds.delete(id);
   if (signal === 'SIGTERM' || signal === 'SIGKILL') {
     await pool.query(
-      `UPDATE brainfuck_runs SET status = 'stopped', completed_at = NOW()
+      `UPDATE brainfuck_runs SET status = $2, completed_at = NOW()
        WHERE id = $1 AND status = 'running'`,
-      [id],
+      [id, wasSuperseded ? 'superseded' : 'stopped'],
     );
     return;
   }
@@ -372,14 +433,26 @@ async function finalize(
   }
 }
 
+// Stops one specific lane. If the lane belongs to a multi-lane race, the
+// other lanes keep running (matches "stop just this one" semantics). To
+// stop the whole race, the UI calls stopRun for each lane (or we can
+// expose a stopRace helper later if needed).
 export function stopRun(id: number): boolean {
-  if (activeRunId !== id || !activeChild) return false;
-  activeChild.kill('SIGTERM');
+  const lane = activeLanes.find((l) => l.runId === id);
+  if (!lane) return false;
+  lane.child.kill('SIGTERM');
   return true;
 }
 
+export function getActiveRunIds(): number[] {
+  return activeLanes.map((l) => l.runId);
+}
+
+// Back-compat scalar accessor — returns the *first* active lane id, or null.
+// Used by the runs/[id] DELETE check; multi-lane callers should use
+// getActiveRunIds().includes(id) instead.
 export function getActiveRunId(): number | null {
-  return activeRunId;
+  return activeLanes[0]?.runId ?? null;
 }
 
 // ── Benchmarks ────────────────────────────────────────────────────────────
@@ -408,9 +481,9 @@ export async function startBenchmarkBatch(
 ): Promise<{ batchId: string; rowIds: number[] }> {
   await bootstrap();
 
-  if (activeChild) {
+  if (activeChild || activeLanes.length > 0) {
     throw new Error(
-      activeRunId != null
+      activeLanes.length > 0
         ? 'A run is in progress. Stop it before starting a benchmark.'
         : 'A benchmark is already in progress.',
     );

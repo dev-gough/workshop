@@ -30,6 +30,7 @@ interface GAConfig {
   bracket_mut_rate: number;
   islands: number;
   migration_every: number;
+  parallel_runs: number;
 }
 
 const DEFAULT_CONFIG: GAConfig = {
@@ -47,6 +48,7 @@ const DEFAULT_CONFIG: GAConfig = {
   bracket_mut_rate: 0.30,
   islands: 1,
   migration_every: 10_000,
+  parallel_runs: 1,
 };
 
 // ── Preset slots ────────────────────────────────────────────────────────────
@@ -227,6 +229,14 @@ const KNOB_GROUPS: KnobGroup[] = [
         min: 0, max: 1_000_000, step: 1000, integer: true },
     ],
   },
+  {
+    title: 'parallelism',
+    glyph: '⇉',
+    knobs: [
+      { key: 'parallel_runs', label: 'racing runs', hint: 'Spawn N independent runner processes in parallel. First to find wins; siblings are killed. Caps at # of CPU cores',
+        min: 1, max: 4, step: 1, integer: true },
+    ],
+  },
 ];
 
 interface Run {
@@ -304,6 +314,7 @@ function statusBadge(status: string) {
     stopped:     { color: 'text-amber-400 bg-amber-400/10',     label: 'Stopped',     Icon: Square },
     failed:      { color: 'text-red-400 bg-red-400/10',         label: 'Failed',      Icon: AlertTriangle },
     interrupted: { color: 'text-amber-400 bg-amber-400/10',     label: 'Interrupted', Icon: AlertTriangle },
+    superseded:  { color: 'text-zinc-400 bg-zinc-400/10',       label: 'Superseded',  Icon: Square },
   };
   return map[status] ?? { color: 'text-zinc-400 bg-zinc-400/10', label: status, Icon: Clock };
 }
@@ -317,7 +328,11 @@ function fitnessPercent(target: string, fitness: number | null): number {
 
 export default function BrainfuckPage() {
   const [runs, setRuns] = useState<Run[]>([]);
-  const [activeId, setActiveId] = useState<number | null>(null);
+  // serverActiveIds: every run id the server reports as currently executing
+  // (1 for solo runs, N for parallel races). The display "leader" — the run
+  // shown in the active panel — is derived below as the highest-fitness
+  // member of this set, recomputed every render.
+  const [serverActiveIds, setServerActiveIds] = useState<number[]>([]);
   const [target, setTarget] = useState('hi');
   const [config, setConfig] = useState<GAConfig>(DEFAULT_CONFIG);
   const [presets, setPresets] = useState<(GAConfig | null)[]>(() =>
@@ -376,7 +391,9 @@ export default function BrainfuckPage() {
       const res = await fetch('/api/brainfuck/runs', { cache: 'no-store' });
       const data = await res.json();
       setRuns(data.runs ?? []);
-      setActiveId(data.activeId ?? null);
+      // Prefer the array (multi-lane). Fall back to the singular for older
+      // server snapshots without the field.
+      setServerActiveIds(data.activeIds ?? (data.activeId != null ? [data.activeId] : []));
     } catch { /* leave previous state */ }
   }, []);
 
@@ -445,6 +462,27 @@ export default function BrainfuckPage() {
       }
     };
   }, [activeBenchId, refreshBenchmarks]);
+
+  // Derived: the lane displayed in the active panel. With a single run it's
+  // just that run's id. With a parallel race it's the leader — the lane
+  // currently winning by best_fitness — so the animator follows whoever is
+  // closest to solving. Tie-breaks toward the lane that appeared first in
+  // the server's active set.
+  const activeId: number | null = (() => {
+    if (serverActiveIds.length === 0) return null;
+    if (serverActiveIds.length === 1) return serverActiveIds[0];
+    let leaderId = serverActiveIds[0];
+    let leaderFitness = -Infinity;
+    for (const id of serverActiveIds) {
+      const r = runs.find((x) => x.id === id);
+      const f = r?.best_fitness ?? -Infinity;
+      if (f > leaderFitness) {
+        leaderFitness = f;
+        leaderId = id;
+      }
+    }
+    return leaderId;
+  })();
 
   // Server activeId clears the moment the python child exits, but the run's
   // *status* lags behind by however long the chain takes to drain the final
@@ -560,7 +598,13 @@ export default function BrainfuckPage() {
   };
 
   const stop = async (id: number) => {
-    await fetch(`/api/brainfuck/runs/${id}/stop`, { method: 'POST' });
+    // For parallel races, stopping the leader cancels every lane — clicking
+    // Stop is "I'm done with this", not "swap leaders". For solo runs the
+    // active set is just the one id and this falls through unchanged.
+    const ids = serverActiveIds.length > 0 ? serverActiveIds : [id];
+    await Promise.all(
+      ids.map((i) => fetch(`/api/brainfuck/runs/${i}/stop`, { method: 'POST' })),
+    );
     refresh();
   };
 
@@ -602,14 +646,17 @@ export default function BrainfuckPage() {
   };
 
   const active = runs.find((r) => r.id === effectiveActiveId) ?? null;
-  // History is *finished* runs only, and excludes whatever the active panel
-  // is currently displaying (server-active OR pinned-finished). A row with
-  // status='running' that isn't activeId is a stale DB record (service died
-  // before bootstrap could mark it interrupted) — surfacing it in the
-  // history dropdown crashes on partial config_json and is misleading
-  // regardless. Hide until cleanup.
+  // History is *finished* runs only. Excludes:
+  //   - the active panel's displayed run (server-active leader, or pinned)
+  //   - all *other* active racing lanes (so a race-of-4 hides all 4 from
+  //     history while running, only the leader is shown above)
+  //   - stale 'running' / 'queued' rows (service died before bootstrap
+  //     could mark them interrupted) — surfacing them crashes on partial
+  //     config_json and is misleading regardless
+  const activeLaneSet = new Set<number>(serverActiveIds);
+  if (effectiveActiveId != null) activeLaneSet.add(effectiveActiveId);
   const history = runs.filter(
-    (r) => r.id !== effectiveActiveId && r.status !== 'running' && r.status !== 'queued',
+    (r) => !activeLaneSet.has(r.id) && r.status !== 'running' && r.status !== 'queued',
   );
 
   const animatorTrail = activeProgress.map((p) => ({ gen: p.gen, fitness: p.best_fitness }));

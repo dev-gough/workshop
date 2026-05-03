@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
-import { getActiveRunId } from '@/lib/brainfuck';
+import { getActiveRunId, getActiveRunIds } from '@/lib/brainfuck';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,7 +39,7 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
     if (!Number.isFinite(runId)) {
       return NextResponse.json({ error: 'invalid id' }, { status: 400 });
     }
-    if (getActiveRunId() === runId) {
+    if (getActiveRunIds().includes(runId)) {
       return NextResponse.json(
         { error: 'cannot delete an active run; stop it first' },
         { status: 409 },
