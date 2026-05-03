@@ -13,7 +13,8 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     }
     const { rows } = await pool.query(
       `SELECT id, target, status, pop_size, max_generations, generations,
-              best_fitness, best_gene, best_output, started_at, completed_at, error
+              best_fitness, best_gene, best_output, started_at, completed_at, error,
+              config_json
        FROM brainfuck_runs WHERE id = $1`,
       [runId],
     );

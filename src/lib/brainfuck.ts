@@ -7,6 +7,91 @@ const PYTHON = `${REPO_DIR}/.venv/bin/python`;
 const RUNNER = 'Project/runner.py';
 const CWD = '/home/server';
 
+// ── GA hyperparameter config ────────────────────────────────────────────────
+// Mirrors util.GAConfig in the Python side. Keep field names in sync.
+
+export interface GAConfig {
+  pop_size: number;
+  max_generations: number;
+  max_prog_len: number;
+  min_prog_len: number;
+  max_crossover_dist: number;
+  crossover_rate: number;
+  mutation_rate: number;
+  mut_prob: number;
+  macro_mut_rate: number;
+}
+
+export const DEFAULT_CONFIG: GAConfig = {
+  pop_size: 100,
+  max_generations: 1_000_000,
+  max_prog_len: 300,
+  min_prog_len: 10,
+  max_crossover_dist: 10,
+  crossover_rate: 0.5,
+  mutation_rate: 0.1,
+  mut_prob: 0.7,
+  macro_mut_rate: 0.05,
+};
+
+interface NumericRange {
+  min: number;
+  max: number;
+  integer?: boolean;
+}
+
+// Bounds for each knob — used by parseRunConfig to validate POST bodies and
+// also exported so the UI can pull them rather than duplicating constants.
+export const CONFIG_BOUNDS: Record<keyof GAConfig, NumericRange> = {
+  pop_size:           { min: 10,    max: 500,        integer: true },
+  max_generations:    { min: 100,   max: 10_000_000, integer: true },
+  max_prog_len:       { min: 20,    max: 2000,       integer: true },
+  min_prog_len:       { min: 1,     max: 200,        integer: true },
+  max_crossover_dist: { min: 1,     max: 100,        integer: true },
+  crossover_rate:     { min: 0,     max: 1 },
+  mutation_rate:      { min: 0,     max: 1 },
+  mut_prob:           { min: 0,     max: 1 },
+  macro_mut_rate:     { min: 0,     max: 1 },
+};
+
+export function parseRunConfig(body: Record<string, unknown>): GAConfig {
+  const out = { ...DEFAULT_CONFIG };
+  for (const key of Object.keys(CONFIG_BOUNDS) as (keyof GAConfig)[]) {
+    if (!(key in body)) continue;
+    const raw = body[key];
+    const v = typeof raw === 'number' ? raw : Number(raw);
+    if (!Number.isFinite(v)) {
+      throw new Error(`${key} must be a number`);
+    }
+    const b = CONFIG_BOUNDS[key];
+    if (v < b.min || v > b.max) {
+      throw new Error(`${key} must be in [${b.min}, ${b.max}]`);
+    }
+    if (b.integer && !Number.isInteger(v)) {
+      throw new Error(`${key} must be an integer`);
+    }
+    out[key] = v;
+  }
+  if (out.min_prog_len > out.max_prog_len) {
+    throw new Error('min_prog_len cannot exceed max_prog_len');
+  }
+  return out;
+}
+
+function configToCliArgs(cfg: GAConfig): string[] {
+  return [
+    '--pop-size',           String(cfg.pop_size),
+    '--max-gen',            String(cfg.max_generations),
+    '--max-prog-len',       String(cfg.max_prog_len),
+    '--min-prog-len',       String(cfg.min_prog_len),
+    '--max-crossover-dist', String(cfg.max_crossover_dist),
+    '--crossover-rate',     String(cfg.crossover_rate),
+    '--mutation-rate',      String(cfg.mutation_rate),
+    '--mut-prob',           String(cfg.mut_prob),
+    '--macro-mut-rate',     String(cfg.macro_mut_rate),
+  ];
+}
+
 type ProgressEvent = { type: 'progress'; gen: number; best_fitness: number; best_gene: string; best_output: string };
 type FoundEvent = { type: 'found'; gen: number; best_fitness: number; best_gene: string; best_output: string };
 type DoneEvent = { type: 'done'; gen: number; best_fitness: number; best_gene: string; best_output: string; found: boolean };
@@ -66,8 +151,7 @@ function getBFVersion(): { hash: string | null; subject: string | null } {
 
 export async function startRun(
   target: string,
-  maxGen: number,
-  popSize: number,
+  config: GAConfig,
 ): Promise<{ id: number }> {
   await bootstrap();
 
@@ -80,9 +164,9 @@ export async function startRun(
   }
 
   const { rows } = await pool.query(
-    `INSERT INTO brainfuck_runs (target, max_generations, pop_size, status)
-     VALUES ($1, $2, $3, 'running') RETURNING id`,
-    [target, maxGen, popSize],
+    `INSERT INTO brainfuck_runs (target, max_generations, pop_size, status, config_json)
+     VALUES ($1, $2, $3, 'running', $4) RETURNING id`,
+    [target, config.max_generations, config.pop_size, JSON.stringify(config)],
   );
   const id: number = rows[0].id;
 
@@ -91,9 +175,8 @@ export async function startRun(
     [
       RUNNER,
       '--target', target,
-      '--max-gen', String(maxGen),
-      '--pop-size', String(popSize),
       '--progress-every', '50',
+      ...configToCliArgs(config),
     ],
     { cwd: CWD, stdio: ['ignore', 'pipe', 'pipe'] },
   );

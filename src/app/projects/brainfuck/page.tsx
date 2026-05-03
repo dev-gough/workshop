@@ -5,10 +5,85 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Code2, Play, Square, Trash2, Loader, ChevronDown, ChevronRight,
   Target, Hash, Zap, CheckCircle, AlertTriangle, Clock, Gauge, GitCommit,
+  RotateCcw, Sliders,
 } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
 import BrainfuckAnimator from '@/components/BrainfuckAnimator';
+
+// ── GA config knobs ─────────────────────────────────────────────────────────
+// Mirror of the server-side DEFAULT_CONFIG / CONFIG_BOUNDS in lib/brainfuck.ts.
+// Kept duplicated here to avoid pulling a server-only module into a client file.
+
+interface GAConfig {
+  pop_size: number;
+  max_generations: number;
+  max_prog_len: number;
+  min_prog_len: number;
+  max_crossover_dist: number;
+  crossover_rate: number;
+  mutation_rate: number;
+  mut_prob: number;
+  macro_mut_rate: number;
+}
+
+const DEFAULT_CONFIG: GAConfig = {
+  pop_size: 100,
+  max_generations: 1_000_000,
+  max_prog_len: 300,
+  min_prog_len: 10,
+  max_crossover_dist: 10,
+  crossover_rate: 0.5,
+  mutation_rate: 0.1,
+  mut_prob: 0.7,
+  macro_mut_rate: 0.05,
+};
+
+interface KnobSpec {
+  key: keyof GAConfig;
+  label: string;
+  hint: string;
+  min: number;
+  max: number;
+  step: number;
+  integer?: boolean;
+}
+
+const KNOB_GROUPS: { title: string; knobs: KnobSpec[] }[] = [
+  {
+    title: 'Population & runtime',
+    knobs: [
+      { key: 'pop_size',        label: 'Population', hint: 'Programs alive each generation',
+        min: 10,  max: 500,        step: 1,  integer: true },
+      { key: 'max_generations', label: 'Max gens',   hint: 'Hard ceiling on the run',
+        min: 100, max: 10_000_000, step: 100, integer: true },
+      { key: 'min_prog_len',    label: 'Min length', hint: 'Lower bound on gene size',
+        min: 1,   max: 200,        step: 1,  integer: true },
+      { key: 'max_prog_len',    label: 'Max length', hint: 'Upper bound on gene size',
+        min: 20,  max: 2000,       step: 1,  integer: true },
+    ],
+  },
+  {
+    title: 'Mutation',
+    knobs: [
+      { key: 'mutation_rate', label: 'Skip-mutation rate', hint: 'Chance to leave a child untouched',
+        min: 0, max: 1, step: 0.01 },
+      { key: 'mut_prob',      label: 'Per-char mutation',   hint: 'Per-character mutation probability — try ≈ 1/L',
+        min: 0, max: 1, step: 0.01 },
+      { key: 'macro_mut_rate', label: 'Macro mutation',     hint: 'Chance of bulk insert/delete pass',
+        min: 0, max: 1, step: 0.01 },
+    ],
+  },
+  {
+    title: 'Crossover',
+    knobs: [
+      { key: 'crossover_rate',     label: 'Skip-crossover rate', hint: 'Chance to skip recombination (gate is inverted!)',
+        min: 0, max: 1, step: 0.01 },
+      { key: 'max_crossover_dist', label: 'Crossover span',      hint: 'Number of adjacent positions swapped',
+        min: 1, max: 100, step: 1, integer: true },
+    ],
+  },
+];
 
 interface Run {
   id: number;
@@ -23,6 +98,7 @@ interface Run {
   started_at: string;
   completed_at: string | null;
   error: string | null;
+  config_json: GAConfig | null;
 }
 
 interface ProgressPoint { gen: number; best_fitness: number; }
@@ -95,8 +171,7 @@ export default function BrainfuckPage() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [target, setTarget] = useState('hi');
-  const [maxGen, setMaxGen] = useState(1_000_000);
-  const [popSize, setPopSize] = useState(100);
+  const [config, setConfig] = useState<GAConfig>(DEFAULT_CONFIG);
   const [advanced, setAdvanced] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -223,7 +298,7 @@ export default function BrainfuckPage() {
       const res = await fetch('/api/brainfuck/runs', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ target, max_generations: maxGen, pop_size: popSize }),
+        body: JSON.stringify({ target, ...config }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -321,14 +396,28 @@ export default function BrainfuckPage() {
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setAdvanced((v) => !v)}
-              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
-            >
-              {advanced ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-              Advanced
-            </button>
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setAdvanced((v) => !v)}
+                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+              >
+                {advanced ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                <Sliders className="h-3 w-3" />
+                Hyperparameters
+              </button>
+              {advanced && !configEqualsDefault(config) && (
+                <button
+                  type="button"
+                  onClick={() => setConfig(DEFAULT_CONFIG)}
+                  disabled={submitting || activeId != null}
+                  className="text-[11px] text-muted-foreground hover:text-fuchsia-400 flex items-center gap-1 disabled:opacity-40"
+                  title="Reset all knobs to repo defaults"
+                >
+                  <RotateCcw className="h-3 w-3" /> Reset defaults
+                </button>
+              )}
+            </div>
 
             <AnimatePresence initial={false}>
               {advanced && (
@@ -339,35 +428,26 @@ export default function BrainfuckPage() {
                   transition={{ duration: 0.2 }}
                   className="overflow-hidden"
                 >
-                  <div className="grid grid-cols-2 gap-3 pt-1">
-                    <div>
-                      <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                        Max generations
-                      </label>
-                      <input
-                        type="number"
-                        value={maxGen}
-                        onChange={(e) => setMaxGen(parseInt(e.target.value) || 0)}
-                        min={100}
-                        max={10_000_000}
-                        disabled={submitting || activeId != null}
-                        className="mt-1 w-full px-3 py-2 rounded-lg bg-background border border-border/60 font-mono text-sm focus:border-fuchsia-400/60 focus:outline-none disabled:opacity-50"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                        Population
-                      </label>
-                      <input
-                        type="number"
-                        value={popSize}
-                        onChange={(e) => setPopSize(parseInt(e.target.value) || 0)}
-                        min={10}
-                        max={500}
-                        disabled={submitting || activeId != null}
-                        className="mt-1 w-full px-3 py-2 rounded-lg bg-background border border-border/60 font-mono text-sm focus:border-fuchsia-400/60 focus:outline-none disabled:opacity-50"
-                      />
-                    </div>
+                  <div className="space-y-4 pt-1">
+                    {KNOB_GROUPS.map((group) => (
+                      <div key={group.title} className="space-y-2">
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+                          {group.title}
+                        </div>
+                        <div className="space-y-2.5 pl-1">
+                          {group.knobs.map((spec) => (
+                            <KnobRow
+                              key={spec.key}
+                              spec={spec}
+                              value={config[spec.key]}
+                              defaultValue={DEFAULT_CONFIG[spec.key]}
+                              disabled={submitting || activeId != null}
+                              onChange={(v) => setConfig((c) => ({ ...c, [spec.key]: v }))}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </motion.div>
               )}
@@ -841,6 +921,99 @@ function BFReference() {
   );
 }
 
+function configEqualsDefault(c: GAConfig): boolean {
+  return (Object.keys(DEFAULT_CONFIG) as (keyof GAConfig)[]).every(
+    (k) => c[k] === DEFAULT_CONFIG[k],
+  );
+}
+
+function KnobRow({
+  spec, value, defaultValue, disabled, onChange,
+}: {
+  spec: KnobSpec;
+  value: number;
+  defaultValue: number;
+  disabled: boolean;
+  onChange: (v: number) => void;
+}) {
+  const isDefault = value === defaultValue;
+  const fmtValue = (v: number) =>
+    spec.integer ? v.toLocaleString() : v.toFixed(2);
+  const onText = (raw: string) => {
+    const v = spec.integer ? parseInt(raw, 10) : parseFloat(raw);
+    if (!Number.isFinite(v)) return;
+    onChange(Math.max(spec.min, Math.min(spec.max, v)));
+  };
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2">
+        <label
+          className="text-xs text-foreground/90 font-medium cursor-help"
+          title={spec.hint}
+        >
+          {spec.label}
+        </label>
+        <div className="flex items-center gap-1">
+          <input
+            type="number"
+            value={value}
+            onChange={(e) => onText(e.target.value)}
+            disabled={disabled}
+            min={spec.min}
+            max={spec.max}
+            step={spec.step}
+            className={`w-24 px-2 py-1 rounded bg-background/60 border border-border/60 font-mono text-[11px] tabular-nums focus:border-fuchsia-400/60 focus:outline-none disabled:opacity-50 text-right ${
+              isDefault ? 'text-foreground/70' : 'text-fuchsia-300'
+            }`}
+          />
+        </div>
+      </div>
+      <input
+        type="range"
+        value={value}
+        onChange={(e) => onText(e.target.value)}
+        disabled={disabled}
+        min={spec.min}
+        max={spec.max}
+        step={spec.step}
+        className="w-full mt-1 accent-fuchsia-400 disabled:opacity-50"
+      />
+      <div className="flex items-center justify-between text-[9px] text-muted-foreground/70 tabular-nums">
+        <span>{fmtValue(spec.min)}</span>
+        <span className={isDefault ? '' : 'text-fuchsia-400/70'}>
+          {isDefault ? `default ${fmtValue(defaultValue)}` : `default ${fmtValue(defaultValue)}`}
+        </span>
+        <span>{fmtValue(spec.max)}</span>
+      </div>
+    </div>
+  );
+}
+
+function ConfigSummary({ cfg }: { cfg: GAConfig }) {
+  // Compact one-line representation of the knobs that differ from defaults,
+  // plus the always-shown pop/gens. Keeps history rows scannable.
+  const diffs: string[] = [];
+  (Object.keys(DEFAULT_CONFIG) as (keyof GAConfig)[]).forEach((k) => {
+    if (k === 'pop_size' || k === 'max_generations') return;
+    if (cfg[k] !== DEFAULT_CONFIG[k]) {
+      const v = Number.isInteger(cfg[k]) ? cfg[k] : (cfg[k] as number).toFixed(2);
+      diffs.push(`${k}=${v}`);
+    }
+  });
+  return (
+    <div className="rounded bg-background/40 border border-border/40 px-2 py-1.5 text-[10px] font-mono text-foreground/70 leading-snug">
+      <div className="text-muted-foreground/80 uppercase tracking-wider text-[9px] mb-0.5">
+        Config
+      </div>
+      pop {cfg.pop_size} · gens {cfg.max_generations.toLocaleString()}
+      {diffs.length > 0 && (
+        <span className="text-fuchsia-300/80">{' · ' + diffs.join(' · ')}</span>
+      )}
+      {diffs.length === 0 && <span className="text-muted-foreground/60"> · defaults</span>}
+    </div>
+  );
+}
+
 function Stat({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) {
   return (
     <div className="rounded-lg bg-background/40 px-2 py-1.5">
@@ -909,6 +1082,7 @@ function HistoryRow({
                 <Stat label="Max gen" value={run.max_generations.toLocaleString()} />
                 <Stat label="Elapsed" value={fmtDuration(run.started_at, run.completed_at)} />
               </div>
+              {run.config_json && <ConfigSummary cfg={run.config_json} />}
               {run.best_gene && (
                 <BrainfuckAnimator
                   gene={run.best_gene}
