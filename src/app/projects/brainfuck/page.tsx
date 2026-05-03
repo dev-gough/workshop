@@ -25,6 +25,8 @@ interface GAConfig {
   mutation_rate: number;
   mut_prob: number;
   macro_mut_rate: number;
+  restart_every: number;
+  restart_keep_frac: number;
 }
 
 const DEFAULT_CONFIG: GAConfig = {
@@ -37,6 +39,8 @@ const DEFAULT_CONFIG: GAConfig = {
   mutation_rate: 0.1,
   mut_prob: 0.7,
   macro_mut_rate: 0.05,
+  restart_every: 250_000,
+  restart_keep_frac: 0.2,
 };
 
 // ── Preset slots ────────────────────────────────────────────────────────────
@@ -170,6 +174,16 @@ const KNOB_GROUPS: KnobGroup[] = [
         min: 0, max: 1, step: 0.01 },
       { key: 'max_crossover_dist', label: 'span',      hint: 'Number of adjacent positions swapped',
         min: 1, max: 100, step: 1, integer: true },
+    ],
+  },
+  {
+    title: 'diversity',
+    glyph: ',',
+    knobs: [
+      { key: 'restart_every',     label: 'restart every', hint: 'Reseed bottom of pop every N gens (0 = off)',
+        min: 0, max: 10_000_000, step: 10_000, integer: true },
+      { key: 'restart_keep_frac', label: 'elites kept',   hint: 'Top fraction of pop preserved across restarts',
+        min: 0, max: 1, step: 0.01 },
     ],
   },
 ];
