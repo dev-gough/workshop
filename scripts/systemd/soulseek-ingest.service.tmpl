@@ -1,0 +1,15 @@
+[Unit]
+Description=Soulseek Download Ingestion Service
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=$SERVER_USER
+WorkingDirectory=$WORKSHOP_DIR
+ExecStart=/usr/bin/env npx tsx scripts/ingest-downloads.ts
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

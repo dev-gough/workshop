@@ -1,0 +1,49 @@
+# Quick bring-up of Postgres + slskd + Transmission for self-hosters who'd
+# rather not install three daemons via apt. Run `docker compose up -d`, then
+# `npm run setup` (answer postgres/workshop for the Postgres superuser).
+#
+# Jellyfin is NOT included here — it's heavy and opinionated about media paths.
+# Install it natively if you need it.
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: workshop
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  slskd:
+    image: slskd/slskd:latest
+    restart: unless-stopped
+    ports:
+      - "5030:5030"   # web UI / API
+      - "5031:5031"   # https
+      - "50300:50300" # soulseek protocol
+    volumes:
+      - slskd_data:/app
+      - ${MUSIC_DIR:-./music}:/music
+
+  transmission:
+    image: lscr.io/linuxserver/transmission:latest
+    restart: unless-stopped
+    environment:
+      USER: workshop
+      PASS: workshop
+      TZ: Etc/UTC
+    ports:
+      - "9091:9091"
+      - "51413:51413"
+      - "51413:51413/udp"
+    volumes:
+      - transmission_config:/config
+      - ${MUSIC_DIR:-./music}/.staging:/downloads
+
+volumes:
+  postgres_data:
+  slskd_data:
+  transmission_config:

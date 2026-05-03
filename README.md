@@ -334,29 +334,28 @@ The dashboard that watches the box hosting all of the above. CPU/memory/disk gau
 
 ---
 
-## Local Development
+## Quick Start
 
 ```bash
-# clone, install
-git clone git@github.com:dev-gough/workshop.git devys-workshop
+git clone --recurse-submodules git@github.com:dev-gough/workshop.git devys-workshop
 cd devys-workshop
 npm install
-
-# postgres — create the workshop db and per-service roles
-sudo -u postgres psql -c "CREATE DATABASE workshop;"
-sudo -u postgres psql -c "CREATE USER workshop WITH PASSWORD 'workshop';"
-sudo -u postgres psql -c "GRANT ALL ON DATABASE workshop TO workshop;"
-
-# apply migrations in order
-for f in scripts/migrations/*.sql; do
-  PGPASSWORD=workshop psql -h localhost -U workshop -d workshop -f "$f"
-done
-
-# run
-npm run dev   # → http://localhost:3000
+npm run setup            # creates DB + roles, applies migrations, builds the BF venv,
+                         # writes config.json with generated passwords + a setup token
+npm run dev              # → http://localhost:3000
 ```
 
-Per-project setup notes (Soulseek's `slskd` daemon, Jellyfin endpoints, Riot API key, Python venv for the BF GA, etc.) live in the `scripts/` and `docs/` subtrees.
+Then open <http://localhost:3000/setup> and fill in the optional services (slskd, Transmission, Jellyfin, Riot API, music directory, Minecraft RCON) in the browser. The six **browser-pure** projects (polar clock, GoL, house planner, image evolver, ecosystem, neuroevolution, splitwiser) work immediately; the others light up as you connect their dependencies.
+
+| Project | Needs |
+|---|---|
+| BrainFuck GA | Python 3.10+ venv (auto-installed by `npm run setup`) |
+| BarFoo, Soulseek | `paths.musicDirectory`, slskd daemon |
+| Jellyfin Ingest | Transmission RPC, Jellyfin server |
+| LoL Challenges | Riot API key + summoner |
+| Server Dashboard | Linux + systemd (RCON commands need `minecraftServers`) |
+
+Per-service install guides (Postgres, slskd, Transmission, Jellyfin, Riot API, music library layout, Minecraft RCON) live in [`docs/setup/`](docs/setup/). For systemd unit files: `bash scripts/install-systemd.sh`.
 
 ---
 

@@ -1,0 +1,15 @@
+[Unit]
+Description=LoL Challenge Poller
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=$SERVER_USER
+WorkingDirectory=$WORKSHOP_DIR
+ExecStart=/usr/bin/env npx tsx scripts/poll-challenges.ts
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
