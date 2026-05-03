@@ -27,6 +27,7 @@ interface GAConfig {
   macro_mut_rate: number;
   restart_every: number;
   restart_keep_frac: number;
+  bracket_mut_rate: number;
 }
 
 const DEFAULT_CONFIG: GAConfig = {
@@ -41,6 +42,7 @@ const DEFAULT_CONFIG: GAConfig = {
   macro_mut_rate: 0.05,
   restart_every: 250_000,
   restart_keep_frac: 0.2,
+  bracket_mut_rate: 0.30,
 };
 
 // ── Preset slots ────────────────────────────────────────────────────────────
@@ -191,6 +193,14 @@ const KNOB_GROUPS: KnobGroup[] = [
         min: 0, max: 1, step: 0.01 },
       { key: 'max_crossover_dist', label: 'span',      hint: 'Number of adjacent positions swapped',
         min: 1, max: 100, step: 1, integer: true },
+    ],
+  },
+  {
+    title: 'loops',
+    glyph: '[…]',
+    knobs: [
+      { key: 'bracket_mut_rate', label: 'bracket rate', hint: 'Per-child chance of inserting/deleting a balanced [...] pair',
+        min: 0, max: 1, step: 0.01 },
     ],
   },
   {

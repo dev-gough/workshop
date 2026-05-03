@@ -23,6 +23,7 @@ export interface GAConfig {
   macro_mut_rate: number;
   restart_every: number;
   restart_keep_frac: number;
+  bracket_mut_rate: number;
 }
 
 export const DEFAULT_CONFIG: GAConfig = {
@@ -37,6 +38,7 @@ export const DEFAULT_CONFIG: GAConfig = {
   macro_mut_rate: 0.05,
   restart_every: 250_000,
   restart_keep_frac: 0.2,
+  bracket_mut_rate: 0.30,
 };
 
 interface NumericRange {
@@ -59,6 +61,7 @@ export const CONFIG_BOUNDS: Record<keyof GAConfig, NumericRange> = {
   macro_mut_rate:     { min: 0,     max: 1 },
   restart_every:      { min: 0,     max: 10_000_000, integer: true },
   restart_keep_frac:  { min: 0,     max: 1 },
+  bracket_mut_rate:   { min: 0,     max: 1 },
 };
 
 export function parseRunConfig(body: Record<string, unknown>): GAConfig {
@@ -98,6 +101,7 @@ function configToCliArgs(cfg: GAConfig): string[] {
     '--macro-mut-rate',     String(cfg.macro_mut_rate),
     '--restart-every',      String(cfg.restart_every),
     '--restart-keep-frac',  String(cfg.restart_keep_frac),
+    '--bracket-mut-rate',   String(cfg.bracket_mut_rate),
   ];
 }
 
