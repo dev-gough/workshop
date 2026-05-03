@@ -20,11 +20,15 @@ export async function GET(request: NextRequest) {
 	}
 
 	const config = JSON.parse(await fs.readFile(path.join(process.cwd(), 'config.json'), 'utf-8'));
-	let filePath = path.join(config.musicDirectory, artist, album, song);
+	const musicDir = config.paths?.musicDirectory;
+	if (!musicDir) {
+		return NextResponse.json({ error: 'paths.musicDirectory is not configured' }, { status: 500 });
+	}
+	const filePath = path.join(musicDir, artist, album, song);
 
 	// Prevent path traversal
 	let resolved = path.resolve(filePath);
-	if (!resolved.startsWith(path.resolve(config.musicDirectory))) {
+	if (!resolved.startsWith(path.resolve(musicDir))) {
 		return NextResponse.json({ error: 'Invalid path' }, { status: 403 });
 	}
 
@@ -34,9 +38,9 @@ export async function GET(request: NextRequest) {
 	} catch {
 		const discMatch = song.match(/^Disc \d+\/(.+)$/);
 		if (discMatch) {
-			const fallback = path.join(config.musicDirectory, artist, album, discMatch[1]);
+			const fallback = path.join(musicDir, artist, album, discMatch[1]);
 			const fallbackResolved = path.resolve(fallback);
-			if (fallbackResolved.startsWith(path.resolve(config.musicDirectory))) {
+			if (fallbackResolved.startsWith(path.resolve(musicDir))) {
 				resolved = fallbackResolved;
 			}
 		}
