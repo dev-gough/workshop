@@ -469,9 +469,15 @@ export function getActiveRunId(): number | null {
 // pop/gen scaling so a single click captures throughput at a few operating
 // points, not just one. Sequential — they share the JVM lock.
 export const BENCHMARK_PRESET: { target: string; popSize: number; maxGen: number }[] = [
-  { target: 'hi',     popSize: 50,  maxGen: 50  },
-  { target: 'devy',   popSize: 50,  maxGen: 100 },
-  { target: 'hello',  popSize: 100, maxGen: 100 },
+  { target: 'hi',       popSize: 50,  maxGen: 50  },
+  { target: 'devy',     popSize: 50,  maxGen: 100 },
+  { target: 'hello',    popSize: 100, maxGen: 100 },
+  // Heavy probe: 8-char target the recent algo can solve in ~1m gens with
+  // racing+lexicase but earlier versions can't touch. Runs full 1m gens on
+  // commits where it doesn't solve, giving a real throughput delta vs the
+  // old algos. Use scripts/backfill-bf-benchmarks.ts to populate this row
+  // for historical commits.
+  { target: 'sparqsys', popSize: 100, maxGen: 1_000_000 },
 ];
 
 interface BatchQueueItem {
