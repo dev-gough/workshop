@@ -26,6 +26,11 @@ export interface GAConfig {
   bracket_mut_rate: number;
   islands: number;
   migration_every: number;
+  // 0/1 — switch parent selection from tournament to lexicase (per-target-
+  // position case filtering). Stored as 0|1 so the rest of the numeric
+  // knob plumbing (bounds, parser, CLI) stays uniform; the runner casts
+  // it to bool.
+  lexicase: number;
   // Workshop-only knob (not passed to runner.py): when > 1, "Start run"
   // spawns N independent runner processes racing for the same target. First
   // one to emit a 'found' event wins; siblings get killed and marked
@@ -50,6 +55,7 @@ export const DEFAULT_CONFIG: GAConfig = {
   bracket_mut_rate: 0.30,
   islands: 1,
   migration_every: 10_000,
+  lexicase: 0,
   parallel_runs: 1,
 };
 
@@ -76,6 +82,7 @@ export const CONFIG_BOUNDS: Record<keyof GAConfig, NumericRange> = {
   bracket_mut_rate:   { min: 0,     max: 1 },
   islands:            { min: 1,     max: 10,         integer: true },
   migration_every:    { min: 0,     max: 1_000_000,  integer: true },
+  lexicase:           { min: 0,     max: 1,          integer: true },
   parallel_runs:      { min: 1,     max: 4,          integer: true },
 };
 
@@ -119,6 +126,7 @@ function configToCliArgs(cfg: GAConfig): string[] {
     '--bracket-mut-rate',   String(cfg.bracket_mut_rate),
     '--islands',            String(cfg.islands),
     '--migration-every',    String(cfg.migration_every),
+    '--lexicase',           String(cfg.lexicase),
   ];
 }
 

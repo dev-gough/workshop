@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Code2, Play, Square, Trash2, Loader, ChevronDown, ChevronRight,
   Target, Hash, Zap, CheckCircle, AlertTriangle, Clock, Gauge, GitCommit,
-  RotateCcw, Sparkles, Infinity as InfinityIcon,
+  RotateCcw, Sparkles, Infinity as InfinityIcon, Copy, X,
 } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
@@ -30,6 +30,7 @@ interface GAConfig {
   bracket_mut_rate: number;
   islands: number;
   migration_every: number;
+  lexicase: number;
   parallel_runs: number;
 }
 
@@ -48,6 +49,7 @@ const DEFAULT_CONFIG: GAConfig = {
   bracket_mut_rate: 0.30,
   islands: 1,
   migration_every: 10_000,
+  lexicase: 0,
   parallel_runs: 1,
 };
 
@@ -230,6 +232,14 @@ const KNOB_GROUPS: KnobGroup[] = [
     ],
   },
   {
+    title: 'selection',
+    glyph: '?',
+    knobs: [
+      { key: 'lexicase', label: 'lexicase (0/1)', hint: 'Use lexicase parent selection (per-target-position case filtering) instead of tournament. Helps on deceptive multi-case targets where a "good enough" gene takes over the population',
+        min: 0, max: 1, step: 1, integer: true },
+    ],
+  },
+  {
     title: 'parallelism',
     glyph: '⇉',
     knobs: [
@@ -355,6 +365,40 @@ export default function BrainfuckPage() {
       return next;
     });
   }, []);
+  const clearSlot = useCallback((idx: number) => {
+    setPresets((cur) => {
+      const next = [...cur];
+      next[idx] = null;
+      savePresets(next);
+      return next;
+    });
+  }, []);
+  // Capture-mode state. Set to {runId, cfg} when the user clicks "Copy config"
+  // on a history row; PresetSlots then highlights free slots and assigns to
+  // the first one clicked. We snapshot the config (not the run row) so a
+  // mid-poll refresh of `runs` can't yank it out from under us, and we keep
+  // the runId around for UI affordances on the originating row.
+  const [pendingCopy, setPendingCopy] = useState<{ runId: number; cfg: GAConfig } | null>(null);
+  const beginCopyConfig = useCallback((runId: number, cfg: GAConfig) => {
+    setAdvanced(true); // ensure preset row is visible
+    setPendingCopy({ runId, cfg });
+  }, []);
+  const cancelCopyConfig = useCallback(() => setPendingCopy(null), []);
+  const assignPendingToSlot = useCallback((idx: number) => {
+    setPendingCopy((cur) => {
+      if (cur) saveSlot(idx, cur.cfg);
+      return null;
+    });
+  }, [saveSlot]);
+  // ESC cancels capture mode no matter where focus is.
+  useEffect(() => {
+    if (!pendingCopy) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPendingCopy(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [pendingCopy]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
@@ -659,7 +703,13 @@ export default function BrainfuckPage() {
     (r) => !activeLaneSet.has(r.id) && r.status !== 'running' && r.status !== 'queued',
   );
 
-  const animatorTrail = activeProgress.map((p) => ({ gen: p.gen, fitness: p.best_fitness }));
+  // Memoized so the array reference is stable across polls — otherwise it
+  // forces the BrainfuckAnimator's rAF effect to tear down and re-setup
+  // every 1s for the entire life of a run.
+  const animatorTrail = useMemo(
+    () => activeProgress.map((p) => ({ gen: p.gen, fitness: p.best_fitness })),
+    [activeProgress],
+  );
   const targetFitness = active ? 256 * active.target.length : 0;
 
   return (
@@ -766,6 +816,10 @@ export default function BrainfuckPage() {
                       disabled={submitting || activeId != null}
                       onLoad={(cfg) => setConfig(cfg)}
                       onSave={(idx) => saveSlot(idx, config)}
+                      onClear={(idx) => clearSlot(idx)}
+                      pendingCopyConfig={pendingCopy?.cfg ?? null}
+                      onAssignPending={assignPendingToSlot}
+                      onCancelPending={cancelCopyConfig}
                     />
                     {KNOB_GROUPS.map((group) => (
                       <div key={group.title} className="space-y-2">
@@ -915,6 +969,8 @@ export default function BrainfuckPage() {
                     open={expanded === r.id}
                     onToggle={() => setExpanded((cur) => (cur === r.id ? null : r.id))}
                     onDelete={() => remove(r.id)}
+                    onCopyConfig={(cfg) => beginCopyConfig(r.id, cfg)}
+                    copyArmed={pendingCopy?.runId === r.id}
                   />
                 ))}
               </div>
@@ -1283,13 +1339,18 @@ function configEqualsDefault(c: GAConfig): boolean {
 }
 
 function PresetSlots({
-  presets, currentConfig, disabled, onLoad, onSave,
+  presets, currentConfig, disabled, onLoad, onSave, onClear,
+  pendingCopyConfig, onAssignPending, onCancelPending,
 }: {
   presets: (GAConfig | null)[];
   currentConfig: GAConfig;
   disabled: boolean;
   onLoad: (cfg: GAConfig) => void;
   onSave: (idx: number) => void;
+  onClear: (idx: number) => void;
+  pendingCopyConfig: GAConfig | null;
+  onAssignPending: (idx: number) => void;
+  onCancelPending: () => void;
 }) {
   // Click vs double-click: schedule the load on a short timer so a follow-up
   // double-click can cancel it and trigger the save instead. 220ms is short
@@ -1297,8 +1358,31 @@ function PresetSlots({
   // typical double-click cadence reliably.
   const clickTimerRef = useRef<number | null>(null);
   const [savedFlash, setSavedFlash] = useState<number | null>(null);
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  const capture = pendingCopyConfig != null;
+
+  // Click-outside cancels capture mode. The trigger button (in HistoryRow)
+  // also lives outside, so the mousedown that opened capture would itself
+  // dismiss it — guard against same-tick cancellation by checking the event
+  // target against the originating button via [data-copy-config-trigger].
+  useEffect(() => {
+    if (!capture) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (rowRef.current?.contains(t)) return;
+      if (t?.closest('[data-copy-config-trigger]')) return;
+      onCancelPending();
+    };
+    window.addEventListener('mousedown', onDown);
+    return () => window.removeEventListener('mousedown', onDown);
+  }, [capture, onCancelPending]);
 
   const handleClick = (idx: number) => {
+    if (capture) {
+      const slot = presets[idx];
+      if (!slot) onAssignPending(idx);
+      return;
+    }
     if (disabled) return;
     const slot = presets[idx];
     if (clickTimerRef.current != null) {
@@ -1311,7 +1395,7 @@ function PresetSlots({
   };
 
   const handleDoubleClick = (idx: number) => {
-    if (disabled) return;
+    if (capture || disabled) return;
     if (clickTimerRef.current != null) {
       window.clearTimeout(clickTimerRef.current);
       clickTimerRef.current = null;
@@ -1321,8 +1405,14 @@ function PresetSlots({
     window.setTimeout(() => setSavedFlash((cur) => (cur === idx ? null : cur)), 600);
   };
 
+  const handleClear = (idx: number, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onClear(idx);
+  };
+
   return (
-    <div className="flex items-center gap-2">
+    <div ref={rowRef} className="flex items-center gap-2">
       <span className="text-fuchsia-400/70 text-[10px] shrink-0">{'>>>'}</span>
       <span className="text-[10px] uppercase tracking-[0.15em] text-foreground/60 shrink-0">
         presets
@@ -1331,45 +1421,77 @@ function PresetSlots({
         {Array.from({ length: PRESET_SLOTS }, (_, i) => {
           const slot = presets[i];
           const isFilled = !!slot;
-          const isActive = isFilled && configsEqual(slot!, currentConfig);
+          const isActive = !capture && isFilled && configsEqual(slot!, currentConfig);
           const isFlashing = savedFlash === i;
-          const title = isFilled
-            ? `Slot ${i + 1} — ${summarizeDiff(slot!)}\nClick to load · double-click to overwrite`
+          // In capture mode, free slots are the receivers; filled ones are
+          // visibly out of play.
+          const isReceiver = capture && !isFilled;
+          const isOccupiedDuringCapture = capture && isFilled;
+          const baseTitle = isFilled
+            ? `Slot ${i + 1} — ${summarizeDiff(slot!)}\nClick to load · double-click to overwrite · right-click to clear`
             : `Slot ${i + 1} — empty\nDouble-click to save current config`;
+          const title = capture
+            ? (isFilled
+                ? `Slot ${i + 1} — already in use\nPick an empty slot, or right-click to clear this one first`
+                : `Slot ${i + 1} — empty\nClick to copy the pending config here`)
+            : baseTitle;
+          // Capture-mode receivers stay enabled even when `disabled` is true
+          // (a run can be in progress without blocking a save to localStorage).
+          const buttonDisabled = capture ? false : disabled;
           return (
-            <button
-              key={i}
-              type="button"
-              onClick={() => handleClick(i)}
-              onDoubleClick={() => handleDoubleClick(i)}
-              disabled={disabled || (!isFilled && false)}
-              title={title}
-              className={`
-                relative flex items-center justify-center
-                w-7 h-6 rounded-sm border tabular-nums text-[11px] leading-none
-                transition-colors select-none
-                ${
-                  isActive
-                    ? 'border-fuchsia-400/70 bg-fuchsia-400/15 text-fuchsia-200'
-                    : isFilled
-                      ? 'border-fuchsia-400/30 bg-fuchsia-400/[0.04] text-fuchsia-300/85 hover:border-fuchsia-400/55 hover:bg-fuchsia-400/[0.08]'
-                      : 'border-foreground/10 bg-foreground/[0.02] text-foreground/40 hover:border-foreground/25 hover:text-foreground/60'
-                }
-                ${isFlashing ? 'ring-1 ring-fuchsia-400/70' : ''}
-                disabled:opacity-40 disabled:cursor-not-allowed
-              `}
-            >
-              <span className="text-fuchsia-400/45 text-[9px] mr-px">[</span>
-              {i + 1}
-              <span className="text-fuchsia-400/45 text-[9px] ml-px">]</span>
-            </button>
+            <div key={i} className="relative">
+              <button
+                type="button"
+                onClick={() => handleClick(i)}
+                onDoubleClick={() => handleDoubleClick(i)}
+                onContextMenu={isFilled && !capture ? (e) => handleClear(i, e) : undefined}
+                disabled={buttonDisabled}
+                title={title}
+                className={`
+                  relative flex items-center justify-center
+                  w-7 h-6 rounded-sm border tabular-nums text-[11px] leading-none
+                  transition-colors select-none
+                  ${
+                    isReceiver
+                      ? 'border-fuchsia-400/80 bg-fuchsia-400/[0.10] text-fuchsia-200 cursor-pointer animate-pulse hover:bg-fuchsia-400/20'
+                      : isOccupiedDuringCapture
+                        ? 'border-foreground/15 bg-foreground/[0.02] text-foreground/30 cursor-not-allowed'
+                        : isActive
+                          ? 'border-fuchsia-400/70 bg-fuchsia-400/15 text-fuchsia-200'
+                          : isFilled
+                            ? 'border-fuchsia-400/30 bg-fuchsia-400/[0.04] text-fuchsia-300/85 hover:border-fuchsia-400/55 hover:bg-fuchsia-400/[0.08]'
+                            : 'border-foreground/10 bg-foreground/[0.02] text-foreground/40 hover:border-foreground/25 hover:text-foreground/60'
+                  }
+                  ${isFlashing ? 'ring-1 ring-fuchsia-400/70' : ''}
+                  disabled:opacity-40 disabled:cursor-not-allowed
+                `}
+              >
+                <span className="text-fuchsia-400/45 text-[9px] mr-px">[</span>
+                {i + 1}
+                <span className="text-fuchsia-400/45 text-[9px] ml-px">]</span>
+              </button>
+            </div>
           );
         })}
       </div>
       <div className="flex-1" />
-      <span className="text-[9px] text-muted-foreground/50 hidden sm:inline">
-        click load · dbl-click save
-      </span>
+      {capture ? (
+        <span className="text-[9px] text-fuchsia-300/90 flex items-center gap-1.5">
+          pick an empty slot
+          <button
+            type="button"
+            onClick={onCancelPending}
+            className="text-foreground/50 hover:text-foreground/90 underline-offset-2 hover:underline"
+            title="Cancel (esc)"
+          >
+            cancel
+          </button>
+        </span>
+      ) : (
+        <span className="text-[9px] text-muted-foreground/50 hidden sm:inline">
+          click load · dbl-click save · right-click clear
+        </span>
+      )}
     </div>
   );
 }
@@ -1533,9 +1655,16 @@ function Stat({ label, value, icon }: { label: string; value: string; icon?: Rea
 }
 
 function HistoryRow({
-  run, open, onToggle, onDelete,
+  run, open, onToggle, onDelete, onCopyConfig, copyArmed,
 }: {
-  run: Run; open: boolean; onToggle: () => void; onDelete: () => void;
+  run: Run;
+  open: boolean;
+  onToggle: () => void;
+  onDelete: () => void;
+  onCopyConfig: (cfg: GAConfig) => void;
+  // True when this row is the one whose config_json is currently pending —
+  // used to keep the trigger button visibly active while the user picks a slot.
+  copyArmed: boolean;
 }) {
   const badge = statusBadge(run.status);
   const pct = fitnessPercent(run.target, run.best_fitness);
@@ -1544,6 +1673,14 @@ function HistoryRow({
   // an exact match (no trailing junk). Rare across runs — celebrate it.
   const isPerfect =
     run.status === 'found' && run.halted === true && run.output_exact_match === true;
+
+  // Stable reference for the animator — otherwise every parent re-render
+  // (every 1s while a run polls) hands BrainfuckAnimator a new array and
+  // its rAF effect cycles needlessly.
+  const animatorTrail = useMemo(
+    () => trail?.map((p) => ({ gen: p.gen, fitness: p.best_fitness })),
+    [trail],
+  );
 
   useEffect(() => {
     if (!open || trail !== null) return;
@@ -1622,7 +1759,7 @@ function HistoryRow({
                 <BrainfuckAnimator
                   gene={run.best_gene}
                   target={run.target}
-                  fitnessTrail={trail ? trail.map((p) => ({ gen: p.gen, fitness: p.best_fitness })) : undefined}
+                  fitnessTrail={animatorTrail}
                   targetFitness={256 * run.target.length}
                   height={240}
                   compact
@@ -1633,7 +1770,24 @@ function HistoryRow({
                   {run.error}
                 </div>
               )}
-              <div className="flex justify-end pt-1">
+              <div className="flex justify-end gap-2 pt-1">
+                {run.config_json && (
+                  <button
+                    type="button"
+                    data-copy-config-trigger
+                    onClick={() => onCopyConfig(run.config_json!)}
+                    className={`text-xs px-2 py-1 rounded flex items-center gap-1 transition-colors ${
+                      copyArmed
+                        ? 'bg-fuchsia-400/20 text-fuchsia-200 ring-1 ring-fuchsia-400/60'
+                        : 'bg-fuchsia-400/10 text-fuchsia-300 hover:bg-fuchsia-400/20'
+                    }`}
+                    title={copyArmed
+                      ? 'Pick an empty preset slot above (esc to cancel)'
+                      : 'Copy this run’s config to a preset slot'}
+                  >
+                    <Copy className="h-3 w-3" /> {copyArmed ? 'Pick a slot…' : 'Copy config'}
+                  </button>
+                )}
                 <button
                   onClick={onDelete}
                   className="text-xs px-2 py-1 rounded bg-red-400/10 text-red-400 hover:bg-red-400/20 flex items-center gap-1"
