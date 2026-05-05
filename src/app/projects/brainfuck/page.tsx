@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Code2, Play, Square, Trash2, Loader, ChevronDown, ChevronRight,
+  Code2, Play, Square, Trash2, Loader, ChevronDown, ChevronRight, ChevronLeft,
   Target, Hash, Zap, CheckCircle, AlertTriangle, Clock, Gauge, GitCommit,
   RotateCcw, Sparkles, Infinity as InfinityIcon, Copy, X,
 } from 'lucide-react';
@@ -403,6 +403,10 @@ export default function BrainfuckPage() {
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [activeProgress, setActiveProgress] = useState<ProgressPoint[]>([]);
+  const [historyPage, setHistoryPage] = useState(0);
+  const [historyPerPage, setHistoryPerPage] = useState(10);
+  const [benchPage, setBenchPage] = useState(0);
+  const [benchPerPage, setBenchPerPage] = useState(10);
   const [benchmarks, setBenchmarks] = useState<Benchmark[]>([]);
   const [activeBenchId, setActiveBenchId] = useState<number | null>(null);
   const [benchPreset, setBenchPreset] = useState<BenchmarkPresetItem[]>([]);
@@ -961,19 +965,33 @@ export default function BrainfuckPage() {
                 No previous runs. Start one above.
               </div>
             ) : (
-              <div className="space-y-1">
-                {history.map((r) => (
-                  <HistoryRow
-                    key={r.id}
-                    run={r}
-                    open={expanded === r.id}
-                    onToggle={() => setExpanded((cur) => (cur === r.id ? null : r.id))}
-                    onDelete={() => remove(r.id)}
-                    onCopyConfig={(cfg) => beginCopyConfig(r.id, cfg)}
-                    copyArmed={pendingCopy?.runId === r.id}
-                  />
-                ))}
-              </div>
+              <>
+                <div className="space-y-1">
+                  {history
+                    .slice(
+                      Math.min(historyPage, Math.max(0, Math.ceil(history.length / historyPerPage) - 1)) * historyPerPage,
+                      Math.min(historyPage, Math.max(0, Math.ceil(history.length / historyPerPage) - 1)) * historyPerPage + historyPerPage,
+                    )
+                    .map((r) => (
+                    <HistoryRow
+                      key={r.id}
+                      run={r}
+                      open={expanded === r.id}
+                      onToggle={() => setExpanded((cur) => (cur === r.id ? null : r.id))}
+                      onDelete={() => remove(r.id)}
+                      onCopyConfig={(cfg) => beginCopyConfig(r.id, cfg)}
+                      copyArmed={pendingCopy?.runId === r.id}
+                    />
+                  ))}
+                </div>
+                <Pagination
+                  page={historyPage}
+                  perPage={historyPerPage}
+                  total={history.length}
+                  onPageChange={setHistoryPage}
+                  onPerPageChange={(n) => { setHistoryPerPage(n); setHistoryPage(0); }}
+                />
+              </>
             )}
           </div>
         </FadeIn>
@@ -1058,17 +1076,31 @@ export default function BrainfuckPage() {
               </button>
             )}
 
-            {benchmarks.length > 0 && (
-              <div className="pt-2 space-y-3">
-                {groupBenchmarksByBatch(benchmarks).map((group) => (
-                  <BenchmarkBatchCard
-                    key={group.key}
-                    group={group}
-                    onDelete={(id) => deleteBenchmark(id)}
+            {benchmarks.length > 0 && (() => {
+              const groups = groupBenchmarksByBatch(benchmarks);
+              const totalPages = Math.max(1, Math.ceil(groups.length / benchPerPage));
+              const safePage = Math.min(benchPage, totalPages - 1);
+              const start = safePage * benchPerPage;
+              const visible = groups.slice(start, start + benchPerPage);
+              return (
+                <div className="pt-2 space-y-3">
+                  {visible.map((group) => (
+                    <BenchmarkBatchCard
+                      key={group.key}
+                      group={group}
+                      onDelete={(id) => deleteBenchmark(id)}
+                    />
+                  ))}
+                  <Pagination
+                    page={benchPage}
+                    perPage={benchPerPage}
+                    total={groups.length}
+                    onPageChange={setBenchPage}
+                    onPerPageChange={(n) => { setBenchPerPage(n); setBenchPage(0); }}
                   />
-                ))}
-              </div>
-            )}
+                </div>
+              );
+            })()}
           </div>
         </FadeIn>
 
@@ -1095,6 +1127,102 @@ export default function BrainfuckPage() {
         </aside>
       </div>
     </PageTransition>
+  );
+}
+
+// ── Pagination ──
+// Shared between History and Benchmarks. Page is 0-indexed; clamps internally
+// so callers don't need to worry about deletes shrinking total below page*perPage.
+function Pagination({
+  page, perPage, total, onPageChange, onPerPageChange,
+}: {
+  page: number;
+  perPage: number;
+  total: number;
+  onPageChange: (p: number) => void;
+  onPerPageChange: (n: number) => void;
+}) {
+  const totalPages = Math.max(1, Math.ceil(total / perPage));
+  const safePage = Math.min(page, totalPages - 1);
+  const startIdx = safePage * perPage;
+  const endIdx = Math.min(total, startIdx + perPage);
+
+  // Compact page list with ellipses for >7 pages: 1 … 4 5 6 … 12
+  const pages: (number | 'gap')[] = [];
+  if (totalPages <= 7) {
+    for (let i = 0; i < totalPages; i++) pages.push(i);
+  } else {
+    pages.push(0);
+    if (safePage > 2) pages.push('gap');
+    const lo = Math.max(1, safePage - 1);
+    const hi = Math.min(totalPages - 2, safePage + 1);
+    for (let i = lo; i <= hi; i++) pages.push(i);
+    if (safePage < totalPages - 3) pages.push('gap');
+    pages.push(totalPages - 1);
+  }
+
+  const btnBase =
+    'min-w-[26px] px-1.5 h-7 rounded-md border tabular-nums text-[11px] flex items-center justify-center transition-colors';
+  const btnIdle =
+    'border-border/60 bg-background/40 text-foreground/80 hover:border-fuchsia-400/60 hover:text-fuchsia-300';
+  const btnActive =
+    'border-fuchsia-400 bg-fuchsia-500/90 text-white';
+  const navBase =
+    'h-7 w-7 rounded-md border border-border/60 bg-background/40 text-foreground/80 hover:border-fuchsia-400/60 hover:text-fuchsia-300 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:border-border/60 disabled:hover:text-foreground/80 transition-colors flex items-center justify-center';
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 pt-3 mt-1 border-t border-border/40 text-[11px]">
+      <div className="text-muted-foreground tabular-nums">
+        {total === 0 ? '0' : `${startIdx + 1}–${endIdx}`}{' '}
+        <span className="text-muted-foreground/60">of</span>{' '}
+        <span className="text-foreground/80">{total}</span>
+      </div>
+
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => onPageChange(Math.max(0, safePage - 1))}
+          disabled={safePage === 0}
+          className={navBase}
+          aria-label="Previous page"
+        >
+          <ChevronLeft className="h-3 w-3" />
+        </button>
+        {pages.map((p, i) =>
+          p === 'gap' ? (
+            <span key={`gap${i}`} className="px-1 text-muted-foreground/60 select-none">…</span>
+          ) : (
+            <button
+              key={p}
+              onClick={() => onPageChange(p)}
+              className={`${btnBase} ${p === safePage ? btnActive : btnIdle}`}
+            >
+              {p + 1}
+            </button>
+          )
+        )}
+        <button
+          onClick={() => onPageChange(Math.min(totalPages - 1, safePage + 1))}
+          disabled={safePage >= totalPages - 1}
+          className={navBase}
+          aria-label="Next page"
+        >
+          <ChevronRight className="h-3 w-3" />
+        </button>
+      </div>
+
+      <label className="flex items-center gap-2 text-muted-foreground">
+        <span className="text-[10px] uppercase tracking-wider">Per page</span>
+        <select
+          value={perPage}
+          onChange={(e) => onPerPageChange(Number(e.target.value))}
+          className="h-7 px-2 rounded-md bg-background border border-border/60 text-foreground/90 text-[11px] focus:border-fuchsia-400/60 focus:outline-none cursor-pointer"
+        >
+          {[10, 25, 50, 100].map((n) => (
+            <option key={n} value={n}>{n}</option>
+          ))}
+        </select>
+      </label>
+    </div>
   );
 }
 
