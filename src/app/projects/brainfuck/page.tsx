@@ -31,6 +31,7 @@ interface GAConfig {
   islands: number;
   migration_every: number;
   lexicase: number;
+  share_strength: number;
   parallel_runs: number;
 }
 
@@ -50,6 +51,7 @@ const DEFAULT_CONFIG: GAConfig = {
   islands: 1,
   migration_every: 10_000,
   lexicase: 0,
+  share_strength: 0,
   parallel_runs: 1,
 };
 
@@ -237,6 +239,8 @@ const KNOB_GROUPS: KnobGroup[] = [
     knobs: [
       { key: 'lexicase', label: 'lexicase (0/1)', hint: 'Use lexicase parent selection (per-target-position case filtering) instead of tournament. Helps on deceptive multi-case targets where a "good enough" gene takes over the population',
         min: 0, max: 1, step: 1, integer: true },
+      { key: 'share_strength', label: 'output sharing', hint: 'Output-fitness-sharing strength. 0 = off. Divides each program\'s selection-fitness by 1/(count of others sharing its output)^strength so dominant clusters can\'t monopolize parents. Try 0.5 (soft) or 1.0 (sharp). Pairs well with lexicase',
+        min: 0, max: 2, step: 0.05 },
     ],
   },
   {

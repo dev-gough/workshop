@@ -31,6 +31,12 @@ export interface GAConfig {
   // knob plumbing (bounds, parser, CLI) stays uniform; the runner casts
   // it to bool.
   lexicase: number;
+  // Output-fitness-sharing strength. 0 disables (baseline). >0 rescales each
+  // program's selection-fitness by 1 / count[output]^strength, so dominant
+  // output clusters can't monopolize parent selection. 1.0 = sharp ("score
+  // per copy"), 0.5 = soft (sqrt-crowding). Pairs well with lexicase: sharing
+  // becomes the lexicase-tie weighting instead of a fitness rescale.
+  share_strength: number;
   // Workshop-only knob (not passed to runner.py): when > 1, "Start run"
   // spawns N independent runner processes racing for the same target. First
   // one to emit a 'found' event wins; siblings get killed and marked
@@ -56,6 +62,7 @@ export const DEFAULT_CONFIG: GAConfig = {
   islands: 1,
   migration_every: 10_000,
   lexicase: 0,
+  share_strength: 0,
   parallel_runs: 1,
 };
 
@@ -83,6 +90,7 @@ export const CONFIG_BOUNDS: Record<keyof GAConfig, NumericRange> = {
   islands:            { min: 1,     max: 10,         integer: true },
   migration_every:    { min: 0,     max: 1_000_000,  integer: true },
   lexicase:           { min: 0,     max: 1,          integer: true },
+  share_strength:     { min: 0,     max: 2 },
   parallel_runs:      { min: 1,     max: 4,          integer: true },
 };
 
@@ -127,6 +135,7 @@ function configToCliArgs(cfg: GAConfig): string[] {
     '--islands',            String(cfg.islands),
     '--migration-every',    String(cfg.migration_every),
     '--lexicase',           String(cfg.lexicase),
+    '--share-strength',     String(cfg.share_strength),
   ];
 }
 
