@@ -1,0 +1,10 @@
+[Unit]
+Description=Run paper-trading-quotes.service every 60s
+
+[Timer]
+OnBootSec=45
+OnUnitActiveSec=60
+AccuracySec=5
+
+[Install]
+WantedBy=timers.target

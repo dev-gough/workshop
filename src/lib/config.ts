@@ -57,6 +57,11 @@ export interface SlskdConfig {
   autoIngest: boolean;
 }
 
+export interface FinnhubConfig {
+  /** API key for finnhub.io. Used as the fallback quote source for paper trading. */
+  apiKey: string;
+}
+
 export interface RiotConfig {
   apiKey: string;
   gameName: string;
@@ -78,6 +83,7 @@ export interface Config {
     jellyfin: JellyfinConfig | null;
     transmission: TransmissionConfig | null;
     slskd: SlskdConfig | null;
+    finnhub: FinnhubConfig | null;
   };
   riot: RiotConfig | null;
   minecraftServers: MinecraftServer[];
@@ -181,6 +187,9 @@ function validate(raw: unknown): Config {
       baseUrl: asString(s.slskd, 'baseUrl', 'services.slskd'),
       apiKey: asString(s.slskd, 'apiKey', 'services.slskd'),
       autoIngest: asBoolean(s.slskd, 'autoIngest', 'services.slskd', false),
+    },
+    finnhub: s.finnhub == null ? null : {
+      apiKey: asString(s.finnhub, 'apiKey', 'services.finnhub'),
     },
   };
 

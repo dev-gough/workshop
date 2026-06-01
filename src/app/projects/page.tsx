@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
-import { Clock, Grid3X3, Home, Music, Trophy, Server, ArrowRight, Palette, Bug, Brain, Atom, Share2, Film, Wallet, Code2 } from 'lucide-react';
+import { Clock, Grid3X3, Home, Music, Trophy, Server, ArrowRight, Palette, Bug, Brain, Atom, Share2, Film, Wallet, Code2, CandlestickChart } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
 import { motion } from 'motion/react';
@@ -212,6 +212,36 @@ function SplitWiserVisual() {
       {/* Coin floating bottom-right */}
       <circle cx={102} cy={52} r={5} fill="hsl(45,93%,55%)" fillOpacity={0.85} />
       <text x={102} y={54.5} textAnchor="middle" fontSize={6} fill="hsl(45,90%,15%)" fontFamily="monospace" fontWeight={900}>$</text>
+    </svg>
+  );
+}
+
+function PaperTradingVisual() {
+  // Candlestick mini-chart with an overlaid trend line.
+  const candles = [
+    { x: 6,  o: 38, c: 28, h: 24, l: 42, up: true },
+    { x: 20, o: 30, c: 34, h: 26, l: 40, up: false },
+    { x: 34, o: 34, c: 22, h: 18, l: 38, up: true },
+    { x: 48, o: 24, c: 20, h: 14, l: 30, up: true },
+    { x: 62, o: 22, c: 28, h: 18, l: 34, up: false },
+    { x: 76, o: 26, c: 16, h: 12, l: 30, up: true },
+    { x: 90, o: 18, c: 12, h: 8,  l: 24, up: true },
+  ];
+  return (
+    <svg viewBox="0 0 110 56" className="w-full h-14">
+      <polyline points="6,34 20,32 34,28 48,24 62,26 76,20 90,12"
+        fill="none" stroke="hsl(150,70%,55%)" strokeOpacity={0.5} strokeWidth={1} strokeLinecap="round" strokeLinejoin="round" />
+      {candles.map((k, i) => {
+        const color = k.up ? 'hsl(150,70%,50%)' : 'hsl(0,70%,58%)';
+        const top = Math.min(k.o, k.c);
+        const body = Math.max(2, Math.abs(k.o - k.c));
+        return (
+          <g key={i}>
+            <line x1={k.x} x2={k.x} y1={k.h} y2={k.l} stroke={color} strokeOpacity={0.5} strokeWidth={1} />
+            <rect x={k.x - 3} y={top} width={6} height={body} rx={1} fill={color} fillOpacity={0.85} />
+          </g>
+        );
+      })}
     </svg>
   );
 }
@@ -503,6 +533,20 @@ export default function ProjectsPage() {
                 Self-hosted Splitwise. Track who paid for what across groups, with magic-link auth and ghost users for friends who don&#39;t want to log in.
               </p>
               <SplitWiserVisual />
+            </ProjectCard>
+
+            {/* ── Paper Trading ── */}
+            <ProjectCard href="/projects/paper-trading" delay={0.32}
+              className="bg-gradient-to-br from-emerald-950/70 to-teal-950/40">
+              <div className="flex items-center gap-2 mb-3">
+                <CandlestickChart className="h-4 w-4 text-emerald-400" />
+                <span className="text-[10px] uppercase tracking-[0.2em] text-emerald-400/60 font-medium">Finance</span>
+              </div>
+              <h2 className="text-lg font-bold text-white mb-1.5">Paper Trading</h2>
+              <p className="text-sm text-white/45 leading-relaxed mb-2">
+                Test investing strategies with fake money. Multiple accounts, market &amp; limit orders on real stock quotes, live P&amp;L, equity curves, and a full trade log.
+              </p>
+              <PaperTradingVisual />
             </ProjectCard>
 
             {/* ── Jellyfin Fetcher ── */}

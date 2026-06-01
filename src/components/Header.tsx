@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import {
 	Sun, Moon, Menu, UserCircle, Music, Wallet, Film, Tv,
-	ExternalLink, ChevronRight, X,
+	ExternalLink, ChevronRight, X, CandlestickChart,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -52,6 +52,7 @@ const Header = () => {
 	const quickProjects: QuickProject[] = [
 		{ href: '/projects/barfoo',     icon: Music,  label: 'BarFoo',          sublabel: 'Music library',     color: '#a78bfa' },
 		{ href: '/projects/splitwiser', icon: Wallet, label: 'SplitWiser',      sublabel: 'Split expenses',    color: '#fbbf24' },
+		{ href: '/projects/paper-trading', icon: CandlestickChart, label: 'Paper Trading', sublabel: 'Test strategies', color: '#34d399' },
 		{ href: '/projects/jellyfin',   icon: Film,   label: 'Jellyfin Fetcher', sublabel: 'Add torrents',     color: '#22d3ee' },
 	];
 

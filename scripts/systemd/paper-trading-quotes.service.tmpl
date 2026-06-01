@@ -1,0 +1,10 @@
+[Unit]
+Description=Workshop Paper Trading (quote refresh + order fills + snapshots, 60s)
+After=postgresql.service network.target
+
+[Service]
+Type=oneshot
+User=$SERVER_USER
+WorkingDirectory=$WORKSHOP_DIR
+ExecStart=/usr/bin/env npx tsx scripts/collect-quotes.ts
+TimeoutStartSec=60
