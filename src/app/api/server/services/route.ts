@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { execSync } from 'child_process';
 import { getConfig } from '@/lib/config';
+import { sendRconCommand } from '@/lib/rcon';
 
 export const dynamic = 'force-dynamic';
 
@@ -124,6 +125,27 @@ function getServiceInfo(name: string): ServiceInfo {
   }
 }
 
+async function gracefulMinecraftStop(service: string): Promise<void> {
+  const mc = getConfig().minecraftServers.find((s) => s.name === service);
+  if (!mc) return;
+  if (getServiceInfo(service).status !== 'running') return;
+
+  try {
+    await sendRconCommand(mc.host, mc.port, mc.password, 'stop');
+  } catch (err) {
+    console.warn(`RCON /stop failed for ${service}; falling back to systemctl:`, err);
+    return;
+  }
+
+  // Wait for the unit to leave the active state (java finishing chunk saves).
+  const deadline = Date.now() + 150_000;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 1000));
+    if (getServiceInfo(service).status !== 'running') return;
+  }
+  console.warn(`RCON /stop for ${service} did not finish within 150s; systemctl will SIGTERM`);
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
@@ -162,7 +184,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Cannot stop the workshop service from the dashboard' }, { status: 400 });
     }
 
-    execSync(`sudo systemctl ${action} ${service}.service`, { timeout: 30000 });
+    // For Minecraft, prefer RCON /stop so the world saves cleanly and the unit
+    // exits 0 instead of being SIGTERM'd to status 143.
+    if ((action === 'stop' || action === 'restart') && service.startsWith('minecraft-')) {
+      await gracefulMinecraftStop(service);
+    }
+
+    execSync(`sudo systemctl ${action} ${service}.service`, { timeout: 180000 });
 
     // Wait a moment for state to settle
     await new Promise(r => setTimeout(r, 1000));

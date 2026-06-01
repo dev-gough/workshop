@@ -51,6 +51,14 @@
   --color-chart-3: hsl(350 80% 60%);
   --color-chart-4: hsl(45 93% 58%);
   --color-chart-5: hsl(280 65% 60%);
+
+  /* Server dashboard accents (added for /server overhaul) */
+  --color-ok: hsl(160 60% 45%);
+  --color-warn: hsl(38 90% 55%);
+  --color-grid: hsl(220 13% 88%);
+  --color-cursor: hsl(225 65% 40%);
+  --color-brand-maroon: #8c334d;
+  --color-brand-darkmaroon: #633342;
 }
 
 .dark {
@@ -86,6 +94,14 @@
   --color-chart-3: hsl(350 80% 65%);
   --color-chart-4: hsl(45 93% 58%);
   --color-chart-5: hsl(280 65% 65%);
+
+  /* Server dashboard accents (dark) */
+  --color-ok: hsl(160 60% 50%);
+  --color-warn: hsl(38 90% 60%);
+  --color-grid: hsl(225 20% 18%);
+  --color-cursor: hsl(225 70% 65%);
+  --color-brand-maroon: #8c334d;
+  --color-brand-darkmaroon: #633342;
 }
 
 /* LoL Challenge Tracker theme */
@@ -141,6 +157,208 @@
   --lol-red: #E84057;
   --lol-gradient-start: #0A1428;
   --lol-gradient-end: #010A13;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Control Center scope — applied to /projects/server/* shell.
+   Deep matte bg, fine grid, cyan/amber/rose phosphor palette.
+   ──────────────────────────────────────────────────────────── */
+.cc-scope {
+  /* Palette */
+  --cc-bg:         hsl(220 32% 4%);
+  --cc-bg-2:       hsl(220 30% 6%);
+  --cc-card:       hsl(220 30% 8%);
+  --cc-card-2:     hsl(220 32% 10.5%);
+  --cc-bezel:      hsl(220 28% 18%);
+  --cc-border:     hsl(220 22% 16%);
+  --cc-grid:       hsl(220 26% 11%);
+  --cc-text:       hsl(45 22% 95%);
+  --cc-dim:        hsl(218 14% 64%);
+  --cc-muted:      hsl(220 12% 36%);
+  --cc-cyan:       hsl(184 95% 58%);
+  --cc-cyan-deep:  hsl(184 70% 38%);
+  --cc-amber:      hsl(38 100% 62%);
+  --cc-amber-deep: hsl(38 78% 42%);
+  --cc-rose:       hsl(350 88% 64%);
+  --cc-rose-deep:  hsl(350 65% 40%);
+  --cc-lime:       hsl(140 70% 56%);
+  --cc-violet:     hsl(265 90% 72%);
+
+  /* Override existing theme tokens inside this scope so existing
+     components (uPlot, lucide, shadcn pieces) inherit the new palette. */
+  --color-background:       var(--cc-bg);
+  --color-foreground:       var(--cc-text);
+  --color-card:             var(--cc-card);
+  --color-border:           var(--cc-border);
+  --color-muted-foreground: var(--cc-dim);
+  --color-primary:          var(--cc-cyan);
+  --color-accent:           var(--cc-amber);
+  --color-warn:             var(--cc-amber);
+  --color-ok:               var(--cc-lime);
+  --color-grid:             var(--cc-grid);
+  --color-chart-1:          var(--cc-cyan);
+  --color-chart-2:          var(--cc-amber);
+  --color-chart-3:          var(--cc-rose);
+  --color-chart-4:          var(--cc-lime);
+  --color-chart-5:          var(--cc-violet);
+  --color-brand-maroon:     hsl(350 78% 60%);
+
+  color: var(--cc-text);
+  background-color: var(--cc-bg);
+  background-image:
+    radial-gradient(ellipse 70% 45% at 50% -8%,  hsl(184 100% 50% / 0.07), transparent 70%),
+    radial-gradient(ellipse 90% 50% at 50% 110%, hsl(220 70% 28% / 0.10), transparent 65%),
+    linear-gradient(to right,  hsl(220 30% 14% / 0.42) 1px, transparent 1px),
+    linear-gradient(to bottom, hsl(220 30% 14% / 0.42) 1px, transparent 1px),
+    linear-gradient(to right,  hsl(184 50% 22% / 0.22) 1px, transparent 1px),
+    linear-gradient(to bottom, hsl(184 50% 22% / 0.22) 1px, transparent 1px);
+  background-size:
+    100% 100%,
+    100% 100%,
+    32px 32px,
+    32px 32px,
+    160px 160px,
+    160px 160px;
+  background-attachment: fixed, fixed, scroll, scroll, scroll, scroll;
+}
+
+/* Instrument card */
+.cc-card {
+  position: relative;
+  background: linear-gradient(180deg, var(--cc-card-2) 0%, var(--cc-card) 100%);
+  border: 1px solid var(--cc-border);
+  border-radius: 3px;
+  box-shadow:
+    inset 0 1px 0   hsl(220 30% 24% / 0.55),
+    inset 0 -1px 0  hsl(220 30% 0% / 0.4),
+    inset 0 0 0 1px hsl(0 0% 0% / 0.35),
+    0 2px 18px     hsl(220 80% 1% / 0.55);
+}
+.cc-card::before {
+  /* Faint scanlines — sells the "instrument glass" feel without being noisy. */
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.32;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 3px,
+    hsl(220 30% 0% / 0.22) 3px,
+    hsl(220 30% 0% / 0.22) 4px
+  );
+  mix-blend-mode: multiply;
+  border-radius: inherit;
+}
+
+/* Viewfinder corner brackets */
+.cc-corner {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  pointer-events: none;
+  color: var(--cc-cyan);
+  opacity: 0.55;
+  z-index: 1;
+}
+.cc-corner-tl { top: -1px;    left: -1px;  border-top:    1px solid currentColor; border-left:  1px solid currentColor; }
+.cc-corner-tr { top: -1px;    right: -1px; border-top:    1px solid currentColor; border-right: 1px solid currentColor; }
+.cc-corner-bl { bottom: -1px; left: -1px;  border-bottom: 1px solid currentColor; border-left:  1px solid currentColor; }
+.cc-corner-br { bottom: -1px; right: -1px; border-bottom: 1px solid currentColor; border-right: 1px solid currentColor; }
+
+/* Status LEDs */
+.cc-led {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow:
+    0 0 7px currentColor,
+    inset 0 0 2px hsl(0 0% 100% / 0.5);
+  flex-shrink: 0;
+}
+.cc-led-ok    { color: var(--cc-lime); }
+.cc-led-warn  { color: var(--cc-amber); }
+.cc-led-crit  { color: var(--cc-rose); }
+.cc-led-idle  { color: var(--cc-muted); box-shadow: none; }
+@keyframes cc-led-pulse { 50% { opacity: 0.32; } }
+.cc-led-pulse { animation: cc-led-pulse 1.8s infinite ease-in-out; }
+
+/* Readout text glow helper */
+.cc-readout {
+  font-family: var(--font-readout), monospace;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  text-shadow: 0 0 22px color-mix(in srgb, currentColor 28%, transparent);
+}
+
+/* Gauge needle transition (uses native SVG transform attr) */
+.cc-gauge-needle  { transition: transform 700ms cubic-bezier(.2,.9,.2,1); transform-box: fill-box; }
+.cc-gauge-arc     { transition: stroke-dashoffset 700ms cubic-bezier(.2,.9,.2,1); }
+
+/* ── uPlot — themed for cc-scope ─────────────────────────────────── */
+.cc-scope .uplot,
+.cc-scope .u-wrap {
+  background: transparent !important;
+}
+.cc-scope .u-legend {
+  color: var(--cc-dim);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: transparent;
+  border: none;
+  margin-top: 6px;
+  padding: 0 6px;
+}
+.cc-scope .u-legend * {
+  background: transparent !important;
+  border: none !important;
+  color: inherit;
+}
+.cc-scope .u-legend table { width: 100%; border-collapse: collapse; }
+.cc-scope .u-legend th,
+.cc-scope .u-legend td {
+  padding: 1px 8px 1px 0;
+  vertical-align: middle;
+  font-weight: 400;
+}
+.cc-scope .u-legend th { text-align: left; }
+.cc-scope .u-legend .u-marker {
+  width: 8px !important;
+  height: 8px !important;
+  border-radius: 1px !important;
+  margin-right: 6px;
+  box-shadow: 0 0 6px currentColor;
+  border: none !important;
+}
+.cc-scope .u-legend .u-label { color: var(--cc-muted); }
+.cc-scope .u-legend .u-value {
+  color: var(--cc-text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.cc-scope .u-legend .u-series.u-off .u-marker { opacity: 0.3; }
+.cc-scope .u-legend .u-series.u-off * { opacity: 0.45; }
+.cc-scope .u-legend .u-series.u-off .u-value { color: var(--cc-muted); }
+
+/* uPlot axes / grid / cursor — inherit from --color-grid + --cc-text */
+.cc-scope .u-cursor-x,
+.cc-scope .u-cursor-y {
+  border-color: color-mix(in srgb, var(--cc-cyan) 55%, transparent) !important;
+}
+.cc-scope .u-cursor-pt {
+  border-color: var(--cc-cyan) !important;
+  box-shadow: 0 0 8px var(--cc-cyan);
+}
+.cc-scope .u-select {
+  background: color-mix(in srgb, var(--cc-cyan) 12%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--cc-cyan) 55%, transparent) !important;
 }
 
 @layer base {
@@ -274,5 +492,117 @@
       0 0 0 1px rgba(9, 9, 11, 1),
       0 0 0 2px rgba(232, 121, 249, 0.85),
       0 0 8px rgba(232, 121, 249, 0.35);
+  }
+
+  /* Floating player horizontal seek slider. */
+  .fp-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    width: 100%;
+    height: 14px;
+    cursor: pointer;
+    margin: 0;
+  }
+  .fp-slider:focus-visible { outline: none; }
+  .fp-slider::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 9999px;
+    background: linear-gradient(
+      to right,
+      var(--color-primary) 0%,
+      var(--color-primary) var(--fp-pct, 0%),
+      color-mix(in srgb, var(--color-muted-foreground) 30%, transparent) var(--fp-pct, 0%),
+      color-mix(in srgb, var(--color-muted-foreground) 30%, transparent) 100%
+    );
+  }
+  .fp-slider::-moz-range-track {
+    height: 4px;
+    border-radius: 9999px;
+    background: color-mix(in srgb, var(--color-muted-foreground) 30%, transparent);
+  }
+  .fp-slider::-moz-range-progress {
+    height: 4px;
+    border-radius: 9999px;
+    background: var(--color-primary);
+  }
+  .fp-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 9999px;
+    background: var(--color-primary);
+    border: 2px solid var(--color-card);
+    margin-top: -3px;
+    cursor: pointer;
+    transition: transform 120ms ease;
+  }
+  .fp-slider:hover::-webkit-slider-thumb,
+  .fp-slider:active::-webkit-slider-thumb { transform: scale(1.25); }
+  .fp-slider::-moz-range-thumb {
+    width: 10px;
+    height: 10px;
+    border-radius: 9999px;
+    background: var(--color-primary);
+    border: 2px solid var(--color-card);
+    cursor: pointer;
+    transition: transform 120ms ease;
+  }
+  .fp-slider:hover::-moz-range-thumb,
+  .fp-slider:active::-moz-range-thumb { transform: scale(1.25); }
+
+  /* Floating player vertical volume slider (rotated horizontal range). */
+  .fp-vslider {
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    cursor: pointer;
+    margin: 0;
+    width: 80px;
+    height: 14px;
+    transform: rotate(-90deg);
+    transform-origin: center;
+  }
+  .fp-vslider:focus-visible { outline: none; }
+  .fp-vslider::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 9999px;
+    background: linear-gradient(
+      to right,
+      var(--color-primary) 0%,
+      var(--color-primary) var(--fp-pct, 0%),
+      color-mix(in srgb, var(--color-muted-foreground) 30%, transparent) var(--fp-pct, 0%),
+      color-mix(in srgb, var(--color-muted-foreground) 30%, transparent) 100%
+    );
+  }
+  .fp-vslider::-moz-range-track {
+    height: 4px;
+    border-radius: 9999px;
+    background: color-mix(in srgb, var(--color-muted-foreground) 30%, transparent);
+  }
+  .fp-vslider::-moz-range-progress {
+    height: 4px;
+    border-radius: 9999px;
+    background: var(--color-primary);
+  }
+  .fp-vslider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 9999px;
+    background: var(--color-primary);
+    border: 2px solid var(--color-card);
+    margin-top: -4px;
+    cursor: pointer;
+  }
+  .fp-vslider::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    border-radius: 9999px;
+    background: var(--color-primary);
+    border: 2px solid var(--color-card);
+    cursor: pointer;
   }
 }

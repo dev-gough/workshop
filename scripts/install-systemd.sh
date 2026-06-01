@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Install the workshop's systemd units (workshop, soulseek-ingest, challenge-poller)
-# from the templates under scripts/systemd/. Substitutes $WORKSHOP_DIR and
-# $SERVER_USER in each template.
+# Install the workshop's systemd units (services + timers) from the templates
+# under scripts/systemd/. Substitutes $WORKSHOP_DIR and $SERVER_USER in each.
+# Timers are enabled (so they auto-start at boot); regular services are enabled
+# but not started — start them manually after install.
 #
 # Usage: sudo bash scripts/install-systemd.sh
 set -euo pipefail
@@ -16,7 +17,8 @@ echo "==> Installing units"
 echo "    SERVER_USER=$SERVER_USER"
 echo "    WORKSHOP_DIR=$WORKSHOP_DIR"
 
-for tmpl in "$REPO_ROOT"/scripts/systemd/*.service.tmpl; do
+shopt -s nullglob
+for tmpl in "$REPO_ROOT"/scripts/systemd/*.service.tmpl "$REPO_ROOT"/scripts/systemd/*.timer.tmpl; do
   unit="$(basename "$tmpl" .tmpl)"
   out="/etc/systemd/system/$unit"
   echo "  → $out"
@@ -25,11 +27,18 @@ for tmpl in "$REPO_ROOT"/scripts/systemd/*.service.tmpl; do
 done
 
 systemctl daemon-reload
-echo "==> Enabling units (start them with: sudo systemctl start <unit>)"
-for tmpl in "$REPO_ROOT"/scripts/systemd/*.service.tmpl; do
+
+echo "==> Enabling units"
+for tmpl in "$REPO_ROOT"/scripts/systemd/*.service.tmpl "$REPO_ROOT"/scripts/systemd/*.timer.tmpl; do
   unit="$(basename "$tmpl" .tmpl)"
   systemctl enable "$unit" 2>/dev/null || true
 done
 
-echo "==> Done. Start with:"
+echo "==> Starting timers (services left for manual start)"
+for tmpl in "$REPO_ROOT"/scripts/systemd/*.timer.tmpl; do
+  unit="$(basename "$tmpl" .tmpl)"
+  systemctl start "$unit" 2>/dev/null || true
+done
+
+echo "==> Done. Start long-running services with:"
 echo "    sudo systemctl start workshop soulseek-ingest challenge-poller"

@@ -486,6 +486,38 @@ export default function BarFooPage() {
     if (currentTrack) setSelectedAlbum(currentTrack.albumIndex);
   }, [currentTrack]);
 
+  // Deep-link via ?artist=...&album=... (used by FloatingPlayer).
+  // Read directly from window.location to avoid Next 15's Suspense boundary
+  // requirement around useSearchParams in statically rendered pages.
+  const consumedDeepLinkRef = useRef(false);
+  useEffect(() => {
+    if (consumedDeepLinkRef.current) return;
+    if (!albums.length) return;
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const artist = params.get('artist');
+    const album = params.get('album');
+    if (!artist && !album) return;
+    consumedDeepLinkRef.current = true;
+    if (artist && album) {
+      const idx = albums.findIndex(a => a.artist === artist && a.name === album);
+      if (idx >= 0) {
+        setSelectedAlbum(idx);
+        setSidebarOpen(true);
+        setShowStats(false);
+        setShowPlaylists(false);
+        setActiveArtist(null);
+        requestAnimationFrame(() => scrollToAlbum(idx));
+      }
+    } else if (artist) {
+      setActiveArtist(artist);
+      setShowStats(false);
+      setShowPlaylists(false);
+    }
+    // Clean the URL so the deep link isn't re-applied on refresh / back-nav
+    window.history.replaceState(null, '', window.location.pathname);
+  }, [albums, scrollToAlbum]);
+
   const playPlaylistLocal = (songs: PlaylistDetail['songs'], shuffle = false) => {
     setSidebarOpen(true);
     ctxPlayPlaylist(songs, shuffle);

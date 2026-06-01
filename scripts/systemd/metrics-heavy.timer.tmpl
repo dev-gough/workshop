@@ -1,0 +1,10 @@
+[Unit]
+Description=Run metrics-heavy.service every 60s
+
+[Timer]
+OnBootSec=35
+OnUnitActiveSec=60
+AccuracySec=2
+
+[Install]
+WantedBy=timers.target

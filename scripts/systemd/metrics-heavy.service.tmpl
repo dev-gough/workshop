@@ -1,0 +1,12 @@
+[Unit]
+Description=Workshop Metrics (per-process + net + disk, 60s)
+After=postgresql.service network.target
+
+[Service]
+Type=oneshot
+User=$SERVER_USER
+WorkingDirectory=$WORKSHOP_DIR
+StateDirectory=devys-metrics
+Environment=PROC_PREV_CACHE=/var/lib/devys-metrics/proc-prev.json
+ExecStart=/usr/bin/env npx tsx scripts/collect-heavy.ts
+TimeoutStartSec=45

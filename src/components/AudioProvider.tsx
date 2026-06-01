@@ -48,6 +48,7 @@ interface AudioContextType {
   shuffleAll: () => void;
   // Audio controls
   seek: (e: React.MouseEvent<HTMLDivElement>) => void;
+  seekTo: (seconds: number) => void;
   setVolumeValue: (v: number) => void;
   changeVolume: (e: React.ChangeEvent<HTMLInputElement>) => void;
   handleVolumeWheel: (e: React.WheelEvent) => void;
@@ -403,6 +404,14 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
     audio.currentTime = ratio * audio.duration;
   }, []);
 
+  const seekTo = useCallback((seconds: number) => {
+    const audio = audioRef.current;
+    if (!audio || !audio.duration) return;
+    const clamped = Math.max(0, Math.min(audio.duration, seconds));
+    audio.currentTime = clamped;
+    setProgress(clamped);
+  }, []);
+
   const setVolumeValue = useCallback((v: number) => {
     const clamped = Math.max(0, Math.min(1, v));
     setVolume(clamped);
@@ -453,7 +462,7 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
       username, setUsername,
       playTrack, playSong, playAlbum, playPlaylist, playFromQueue,
       playNext, playPrev, togglePlayPause, shuffleAll,
-      seek, setVolumeValue, changeVolume, handleVolumeWheel, toggleMute,
+      seek, seekTo, setVolumeValue, changeVolume, handleVolumeWheel, toggleMute,
       setQueue, setQueueIndex, setShuffleMode,
       formatTime, currentAlbum, currentSongName,
       getFrequencyData,
