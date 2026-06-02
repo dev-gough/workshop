@@ -4,6 +4,7 @@ import "./globals.css";
 import Header from "../components/Header";
 import ThemeProvider from "../components/ThemeProvider";
 import ThemeScript from "../components/ThemeScript";
+import { HeaderConfigProvider } from "../components/header-config";
 import AudioProvider from "../components/AudioProvider";
 import FloatingPlayer from "../components/FloatingPlayer";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -71,10 +72,12 @@ export default function RootLayout({
 				<ThemeProvider>
 					<TooltipProvider>
 						<AudioProvider>
-							<Header />
-							<main>
-								{children}
-							</main>
+							<HeaderConfigProvider>
+								<Header />
+								<main>
+									{children}
+								</main>
+							</HeaderConfigProvider>
 							<FloatingPlayer />
 						</AudioProvider>
 					</TooltipProvider>

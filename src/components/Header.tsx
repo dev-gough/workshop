@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTheme } from './ThemeProvider';
+import { useHeaderConfigValue } from './header-config';
 import { motion, AnimatePresence } from 'motion/react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import {
@@ -30,6 +31,7 @@ interface QuickProject {
 
 const Header = () => {
 	const { theme, toggleTheme } = useTheme();
+	const { scopeClass } = useHeaderConfigValue();
 	const pathname = usePathname();
 	const [mobileOpen, setMobileOpen] = useState(false);
 	const [jellyfinUrl, setJellyfinUrl] = useState<string | null>(null);
@@ -57,7 +59,7 @@ const Header = () => {
 	];
 
 	return (
-		<header className="sticky top-0 z-50 w-full bg-background/95 md:bg-background/60 md:backdrop-blur-xl border-b border-border/40">
+		<header className={`${scopeClass ?? ''} sticky top-0 z-50 w-full bg-background/95 md:bg-background/60 md:backdrop-blur-xl border-b border-border/40`}>
 			<div className="container mx-auto flex h-14 items-center px-4">
 				{/* Logo */}
 				<Link href="/" className="group flex items-center gap-2.5 mr-8">

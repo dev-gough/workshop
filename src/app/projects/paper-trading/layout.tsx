@@ -7,6 +7,7 @@ import { motion } from 'motion/react';
 import { Settings2, ChevronDown, ArrowLeftRight } from 'lucide-react';
 import { AccountProvider, useAccounts } from './_lib/account-context';
 import { TradeProvider, useTrade } from './_lib/trade-context';
+import { useHeaderConfig } from '@/components/header-config';
 import { isMarketOpen } from '@/lib/market';
 import ManageAccounts from './_components/manage-accounts';
 import TradeSheet from './_components/trade-sheet';
@@ -18,6 +19,8 @@ const TABS = [
 ] as const;
 
 export default function PaperTradingLayout({ children }: { children: ReactNode }) {
+  // Recolor + refont the global site header to match the Wealthsimple scope.
+  useHeaderConfig({ scopeClass: 'ws-theme' });
   return (
     <AccountProvider>
       <TradeProvider>
