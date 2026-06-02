@@ -176,6 +176,7 @@
   --ws-gain:     #1f9254;
   --ws-loss:     #c8472e;
   --ws-accent:   #e0a82e;
+  --ws-cursor:   rgba(50, 48, 47, 0.4);
 
   /* Map onto the shared tokens so inherited components follow suit. */
   --color-background:        var(--ws-paper);
@@ -213,6 +214,7 @@
   --ws-gain:     #4cc47c;
   --ws-loss:     #f06a4e;
   --ws-accent:   #e8b84b;
+  --ws-cursor:   rgba(244, 241, 234, 0.45);
 
   --color-background:        var(--ws-paper);
   --color-foreground:        var(--ws-ink);
@@ -245,6 +247,12 @@
 .pt-loss    { color: var(--color-loss); }
 .pt-bg-gain { background-color: var(--color-gain); }
 .pt-bg-loss { background-color: var(--color-loss); }
+
+/* uPlot cursor — WS style: solid full-height vertical guide, no horizontal
+   line, and a dot on the series ringed by the paper bg so it reads cleanly. */
+.ws-theme .u-cursor-y { display: none !important; }
+.ws-theme .u-cursor-x { border-right: 1px solid var(--ws-cursor) !important; }
+.ws-theme .u-cursor-pt { box-shadow: 0 0 0 2px var(--color-background); }
 
 /* ─────────────────────────────────────────────────────────────
    Control Center scope — applied to /projects/server/* shell.

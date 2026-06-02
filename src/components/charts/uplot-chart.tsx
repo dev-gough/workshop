@@ -24,8 +24,10 @@ export interface UplotChartProps {
   syncKey?: string;
   /** Called with unix seconds when the user click-drags a window. */
   onZoom?: (fromUnix: number, toUnix: number) => void;
-  /** Called continuously as the user hovers; null when leaving. */
-  onHover?: (ts: number | null) => void;
+  /** Called continuously as the user hovers; null when leaving. The second
+   *  arg is the cursor's pixel offset within the plot, for positioning an
+   *  external label/marker. */
+  onHover?: (ts: number | null, leftPx?: number) => void;
   className?: string;
   /** Compact preset: no axes, no legend, no cursor. */
   spark?: boolean;
@@ -107,7 +109,7 @@ export default function UplotChart({
           const idx = u.cursor.idx;
           if (idx == null) { onHover(null); return; }
           const x = u.data[0][idx];
-          onHover(typeof x === 'number' ? x : null);
+          onHover(typeof x === 'number' ? x : null, u.cursor.left);
         }] : [],
       },
       ...opts,
