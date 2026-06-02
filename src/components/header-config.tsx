@@ -45,12 +45,14 @@ export function useHeaderConfigValue(): HeaderConfig {
  * default header before hydration — acceptable for our purposes).
  */
 export function useHeaderConfig({ scopeClass }: HeaderConfig) {
-  const ctx = useContext(HeaderConfigContext);
+  // Grab the setter directly — it's the stable useState dispatch, whereas the
+  // context *object* is re-created whenever config changes. Depending on the
+  // whole object here would loop: setConfig → config changes → ctx identity
+  // changes → effect re-runs → setConfig … (React error #185).
+  const setConfig = useContext(HeaderConfigContext)?.setConfig;
   useIsoLayoutEffect(() => {
-    if (!ctx) return;
-    ctx.setConfig({ scopeClass });
-    return () => ctx.setConfig({});
-    // Depend on the primitive fields, not the (re-created) object literal.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ctx, scopeClass]);
+    if (!setConfig) return;
+    setConfig({ scopeClass });
+    return () => setConfig({});
+  }, [setConfig, scopeClass]);
 }
