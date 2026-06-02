@@ -4,10 +4,12 @@ import { useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion } from 'motion/react';
-import { Settings2, ChevronDown } from 'lucide-react';
+import { Settings2, ChevronDown, ArrowLeftRight } from 'lucide-react';
 import { AccountProvider, useAccounts } from './_lib/account-context';
+import { TradeProvider, useTrade } from './_lib/trade-context';
 import { isMarketOpen } from '@/lib/market';
 import ManageAccounts from './_components/manage-accounts';
+import TradeSheet from './_components/trade-sheet';
 
 const TABS = [
   { href: '/projects/paper-trading', label: 'Portfolio' },
@@ -18,14 +20,17 @@ const TABS = [
 export default function PaperTradingLayout({ children }: { children: ReactNode }) {
   return (
     <AccountProvider>
-      <div className="min-h-[calc(100vh-57px)]">
-        <div className="p-4 sm:p-8">
-          <div className="container mx-auto max-w-6xl">
-            <Header />
-            {children}
+      <TradeProvider>
+        <div className="ws-theme min-h-[calc(100vh-57px)]">
+          <div className="px-4 py-6 sm:px-8 sm:py-10">
+            <div className="container mx-auto max-w-3xl">
+              <Header />
+              {children}
+            </div>
           </div>
+          <TradeSheet />
         </div>
-      </div>
+      </TradeProvider>
     </AccountProvider>
   );
 }
@@ -40,9 +45,9 @@ function MarketStatus() {
   }, []);
   if (open == null) return null;
   return (
-    <span className="inline-flex items-center gap-1.5 text-[11px] font-medium">
-      <span className={`h-2 w-2 rounded-full ${open ? 'bg-emerald-500 animate-pulse' : 'bg-muted-foreground/50'}`} />
-      <span className={open ? 'text-emerald-500' : 'text-muted-foreground'}>{open ? 'Market open' : 'Market closed'}</span>
+    <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+      <span className={`h-1.5 w-1.5 rounded-full ${open ? 'pt-bg-gain animate-pulse' : 'bg-muted-foreground/50'}`} />
+      {open ? 'Markets open' : 'Markets closed'}
     </span>
   );
 }
@@ -50,13 +55,14 @@ function MarketStatus() {
 function Header() {
   const pathname = usePathname();
   const { accounts, selected, select } = useAccounts();
+  const { openTrade } = useTrade();
   const [manageOpen, setManageOpen] = useState(false);
 
   return (
-    <header className="mb-6">
-      <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Paper Trading</h1>
+    <header className="mb-8">
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-baseline gap-3">
+          <h1 className="ws-serif text-3xl font-semibold tracking-tight sm:text-4xl">Paper Trading</h1>
           <MarketStatus />
         </div>
 
@@ -65,7 +71,7 @@ function Header() {
             <select
               value={selected?.id ?? ''}
               onChange={(e) => select(Number(e.target.value))}
-              className="appearance-none rounded-lg border border-border bg-card py-2 pl-3 pr-9 text-sm font-medium outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+              className="appearance-none rounded-full border border-border bg-card py-2 pl-4 pr-9 text-sm font-medium outline-none transition-colors hover:border-foreground/30 focus:border-foreground/40 disabled:opacity-50"
               disabled={accounts.length === 0}
             >
               {accounts.length === 0 && <option value="">No accounts</option>}
@@ -73,30 +79,39 @@ function Header() {
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
             </select>
-            <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           </div>
           <button
             onClick={() => setManageOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted/50"
+            className="inline-flex items-center justify-center rounded-full border border-border bg-card p-2.5 text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+            aria-label="Manage accounts"
           >
-            <Settings2 className="h-4 w-4" /> Manage
+            <Settings2 className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => openTrade()}
+            disabled={!selected}
+            className="inline-flex items-center gap-1.5 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+          >
+            <ArrowLeftRight className="h-4 w-4" /> Trade
           </button>
         </div>
       </div>
 
-      <nav className="relative inline-flex rounded-lg border border-border bg-card/60 p-1">
+      <nav className="relative flex gap-6 border-b border-border">
         {TABS.map((tab) => {
           const active = tab.href === '/projects/paper-trading'
             ? pathname === tab.href
             : pathname.startsWith(tab.href);
           return (
-            <Link key={tab.href} href={tab.href} className="relative isolate px-4 py-1.5 text-sm font-medium transition-colors"
-              style={{ color: active ? 'var(--color-primary-foreground)' : 'var(--color-muted-foreground)' }}>
-              {active && (
-                <motion.span layoutId="pt-tab-bg" className="absolute inset-0 -z-10 rounded-md bg-primary"
-                  transition={{ type: 'spring', stiffness: 420, damping: 32 }} />
-              )}
+            <Link key={tab.href} href={tab.href}
+              className="relative -mb-px py-2.5 text-sm font-medium transition-colors"
+              style={{ color: active ? 'var(--color-foreground)' : 'var(--color-muted-foreground)' }}>
               {tab.label}
+              {active && (
+                <motion.span layoutId="pt-tab-underline" className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-foreground"
+                  transition={{ type: 'spring', stiffness: 420, damping: 34 }} />
+              )}
             </Link>
           );
         })}

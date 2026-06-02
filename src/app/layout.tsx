@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, JetBrains_Mono, Fraunces } from "next/font/google";
+import { Geist, Geist_Mono, JetBrains_Mono, Fraunces, Jost } from "next/font/google";
 import "./globals.css";
 import Header from "../components/Header";
 import ThemeProvider from "../components/ThemeProvider";
@@ -34,6 +34,22 @@ const fraunces = Fraunces({
 	axes: ["SOFT"],
 });
 
+// Wealthsimple scope: geometric sans (Futura analog) for UI + numbers.
+const jost = Jost({
+	variable: "--font-ws-sans",
+	subsets: ["latin"],
+	weight: ["400", "500", "600", "700"],
+});
+
+// Wealthsimple scope: chunky roman serif accent (Caslon Graphique analog).
+const wsSerif = Fraunces({
+	variable: "--font-ws-serif",
+	subsets: ["latin"],
+	weight: "variable",
+	style: ["normal"],
+	axes: ["SOFT", "WONK"],
+});
+
 export const metadata: Metadata = {
 	title: "Devy's Workshop",
 	description: "A personal server dashboard and creative coding workshop.",
@@ -50,7 +66,7 @@ export default function RootLayout({
 				<ThemeScript />
 			</head>
 			<body
-				className={`${geistSans.variable} ${geistMono.variable} ${jetbrainsMono.variable} ${fraunces.variable} antialiased`}
+				className={`${geistSans.variable} ${geistMono.variable} ${jetbrainsMono.variable} ${fraunces.variable} ${jost.variable} ${wsSerif.variable} antialiased`}
 			>
 				<ThemeProvider>
 					<TooltipProvider>

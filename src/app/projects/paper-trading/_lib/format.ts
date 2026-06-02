@@ -14,10 +14,10 @@ export function fmtPct(pct: number, opts: { sign?: boolean } = {}): string {
   return `${s}%`;
 }
 
-/** Tailwind text color class for a P&L value. */
+/** Text color class for a P&L value (token-driven via the .ws-theme scope). */
 export function pnlColor(cents: number): string {
-  if (cents > 0) return 'text-emerald-500';
-  if (cents < 0) return 'text-red-500';
+  if (cents > 0) return 'pt-gain';
+  if (cents < 0) return 'pt-loss';
   return 'text-muted-foreground';
 }
 

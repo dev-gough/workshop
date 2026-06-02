@@ -160,6 +160,93 @@
 }
 
 /* ─────────────────────────────────────────────────────────────
+   Wealthsimple scope — applied to /projects/paper-trading shell.
+   Warm paper + "Dune" ink, geometric sans (Jost) + chunky serif
+   accent (Fraunces). Redefines the shared --color-* tokens locally
+   so existing utilities (bg-card, border-border, …) render warm.
+   ──────────────────────────────────────────────────────────── */
+.ws-theme {
+  /* Palette — light (warm paper / ink) */
+  --ws-paper:    #faf8f3;
+  --ws-surface:  #ffffff;
+  --ws-elevated: #f3efe8;
+  --ws-ink:      #32302f;  /* Dune */
+  --ws-ink-soft: #6f6b64;
+  --ws-line:     #ece7de;
+  --ws-gain:     #1f9254;
+  --ws-loss:     #c8472e;
+  --ws-accent:   #e0a82e;
+
+  /* Map onto the shared tokens so inherited components follow suit. */
+  --color-background:        var(--ws-paper);
+  --color-foreground:        var(--ws-ink);
+  --color-card:              var(--ws-surface);
+  --color-card-foreground:   var(--ws-ink);
+  --color-popover:           var(--ws-surface);
+  --color-popover-foreground:var(--ws-ink);
+  --color-muted:             var(--ws-elevated);
+  --color-muted-foreground:  var(--ws-ink-soft);
+  --color-secondary:         var(--ws-elevated);
+  --color-secondary-foreground: var(--ws-ink);
+  --color-border:            var(--ws-line);
+  --color-input:             var(--ws-line);
+  --color-ring:              var(--ws-ink);
+  --color-primary:           var(--ws-ink);
+  --color-primary-foreground:#ffffff;
+  --color-accent:            var(--ws-accent);
+  --color-gain:              var(--ws-gain);
+  --color-loss:              var(--ws-loss);
+
+  font-family: var(--font-ws-sans), system-ui, -apple-system, sans-serif;
+  color: var(--ws-ink);
+  background-color: var(--ws-paper);
+}
+
+.dark .ws-theme {
+  /* Palette — dark (warm near-black, not blue-black) */
+  --ws-paper:    #1a1917;
+  --ws-surface:  #232120;
+  --ws-elevated: #2a2825;
+  --ws-ink:      #f4f1ea;
+  --ws-ink-soft: #a8a39a;
+  --ws-line:     #322f2b;
+  --ws-gain:     #4cc47c;
+  --ws-loss:     #f06a4e;
+  --ws-accent:   #e8b84b;
+
+  --color-background:        var(--ws-paper);
+  --color-foreground:        var(--ws-ink);
+  --color-card:              var(--ws-surface);
+  --color-card-foreground:   var(--ws-ink);
+  --color-popover:           var(--ws-surface);
+  --color-popover-foreground:var(--ws-ink);
+  --color-muted:             var(--ws-elevated);
+  --color-muted-foreground:  var(--ws-ink-soft);
+  --color-secondary:         var(--ws-elevated);
+  --color-secondary-foreground: var(--ws-ink);
+  --color-border:            var(--ws-line);
+  --color-input:             var(--ws-line);
+  --color-ring:              var(--ws-ink);
+  --color-primary:           var(--ws-ink);        /* light pill on dark */
+  --color-primary-foreground:#1a1917;              /* dark text on it */
+  --color-accent:            var(--ws-accent);
+  --color-gain:              var(--ws-gain);
+  --color-loss:              var(--ws-loss);
+}
+
+/* Chunky serif accent (titles / section headers). */
+.ws-serif {
+  font-family: var(--font-ws-serif), Georgia, "Times New Roman", serif;
+  font-optical-sizing: auto;
+}
+
+/* P&L semantics — token-driven so they follow the warm palette. */
+.pt-gain    { color: var(--color-gain); }
+.pt-loss    { color: var(--color-loss); }
+.pt-bg-gain { background-color: var(--color-gain); }
+.pt-bg-loss { background-color: var(--color-loss); }
+
+/* ─────────────────────────────────────────────────────────────
    Control Center scope — applied to /projects/server/* shell.
    Deep matte bg, fine grid, cyan/amber/rose phosphor palette.
    ──────────────────────────────────────────────────────────── */

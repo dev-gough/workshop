@@ -11,17 +11,25 @@ type Side = 'buy' | 'sell';
 type OrderType = 'market' | 'limit';
 type EntryMode = 'shares' | 'dollars';
 
-export default function TradeTicket({ accountId, cashCents, onDone }: { accountId: number; cashCents: number; onDone: () => void }) {
-  const [query, setQuery] = useState('');
+export default function TradeTicket({
+  accountId, cashCents, onDone, initialSymbol, initialSide,
+}: {
+  accountId: number;
+  cashCents: number;
+  onDone: () => void;
+  initialSymbol?: string;
+  initialSide?: Side;
+}) {
+  const [query, setQuery] = useState(initialSymbol ?? '');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [showResults, setShowResults] = useState(false);
 
-  const [symbol, setSymbol] = useState<string | null>(null);
+  const [symbol, setSymbol] = useState<string | null>(initialSymbol ?? null);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
 
-  const [side, setSide] = useState<Side>('buy');
+  const [side, setSide] = useState<Side>(initialSide ?? 'buy');
   const [type, setType] = useState<OrderType>('market');
   const [entryMode, setEntryMode] = useState<EntryMode>('shares');
   const [amount, setAmount] = useState('');
@@ -31,6 +39,12 @@ export default function TradeTicket({ accountId, cashCents, onDone }: { accountI
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
   const boxRef = useRef<HTMLDivElement>(null);
+
+  // Seed a quote when opened pre-filled from a holding row.
+  useEffect(() => {
+    if (initialSymbol) loadQuote(initialSymbol);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSymbol]);
 
   // Debounced symbol search.
   useEffect(() => {
@@ -117,27 +131,27 @@ export default function TradeTicket({ accountId, cashCents, onDone }: { accountI
     } finally { setSubmitting(false); }
   }
 
-  return (
-    <div className="rounded-xl border border-border bg-card p-4">
-      <div className="mb-3 text-sm font-semibold">Place an order</div>
+  const inputCls = 'w-full rounded-xl border border-border bg-card py-2.5 text-[15px] tabular-nums outline-none transition-colors focus:border-foreground/40';
 
+  return (
+    <div>
       {/* Symbol search */}
-      <div ref={boxRef} className="relative mb-3">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <div ref={boxRef} className="relative mb-4">
+        <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <input
           value={query}
           onChange={(e) => { setQuery(e.target.value.toUpperCase()); setSymbol(null); setQuote(null); }}
           onFocus={() => results.length && setShowResults(true)}
-          placeholder="Search symbol (e.g. AAPL)"
-          className="w-full rounded-md border border-input bg-background py-2 pl-9 pr-9 text-sm uppercase outline-none focus:ring-2 focus:ring-ring"
+          placeholder="Search a symbol"
+          className={`${inputCls} pl-10 pr-10 uppercase`}
         />
-        {searching && <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />}
+        {searching && <Loader2 className="absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />}
         {showResults && results.length > 0 && (
-          <div className="absolute z-20 mt-1 max-h-60 w-full overflow-y-auto rounded-md border border-border bg-popover shadow-lg">
+          <div className="absolute z-20 mt-1.5 max-h-60 w-full overflow-y-auto rounded-xl border border-border bg-popover p-1 shadow-xl">
             {results.map((r) => (
               <button key={r.symbol} onClick={() => pickSymbol(r.symbol)}
-                className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-muted/60">
-                <span className="font-medium">{r.symbol}</span>
+                className="flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-muted">
+                <span className="font-semibold">{r.symbol}</span>
                 <span className="truncate text-xs text-muted-foreground">{r.name}{r.exchange ? ` · ${r.exchange}` : ''}</span>
               </button>
             ))}
@@ -147,12 +161,12 @@ export default function TradeTicket({ accountId, cashCents, onDone }: { accountI
 
       {/* Quote */}
       {symbol && (
-        <div className="mb-3 flex items-center justify-between rounded-md bg-background/50 px-3 py-2">
+        <div className="mb-4 flex items-center justify-between rounded-xl bg-muted px-4 py-3">
           <div>
             <div className="text-sm font-semibold">{symbol}{quote?.name ? <span className="ml-2 text-xs font-normal text-muted-foreground">{quote.name}</span> : null}</div>
             {quote ? (
-              <div className="text-xs tabular-nums">
-                <span className="font-medium">{fmtMoney(quote.priceCents)}</span>
+              <div className="mt-0.5 text-xs tabular-nums">
+                <span className="font-semibold">{fmtMoney(quote.priceCents)}</span>
                 {dayChangeCents != null && (
                   <span className={`ml-2 ${pnlColor(dayChangeCents)}`}>
                     {fmtMoney(dayChangeCents, { sign: true })}{dayChangePct != null ? ` (${fmtPct(dayChangePct, { sign: true })})` : ''}
@@ -161,63 +175,63 @@ export default function TradeTicket({ accountId, cashCents, onDone }: { accountI
               </div>
             ) : <div className="text-xs text-muted-foreground">{quoteLoading ? 'Loading quote…' : 'No quote available'}</div>}
           </div>
-          <button onClick={() => loadQuote(symbol)} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted/60 hover:text-foreground" aria-label="Refresh quote">
+          <button onClick={() => loadQuote(symbol)} className="rounded-full p-2 text-muted-foreground hover:bg-card hover:text-foreground" aria-label="Refresh quote">
             <RefreshCw className={`h-3.5 w-3.5 ${quoteLoading ? 'animate-spin' : ''}`} />
           </button>
         </div>
       )}
 
       {/* Side + type toggles */}
-      <div className="mb-3 grid grid-cols-2 gap-2">
+      <div className="mb-4 grid grid-cols-2 gap-2">
         <Segmented value={side} onChange={(v) => setSide(v as Side)} options={[{ v: 'buy', l: 'Buy' }, { v: 'sell', l: 'Sell' }]}
-          activeClass={side === 'buy' ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white'} />
+          activeClass={side === 'buy' ? 'pt-bg-gain text-white' : 'pt-bg-loss text-white'} />
         <Segmented value={type} onChange={(v) => setType(v as OrderType)} options={[{ v: 'market', l: 'Market' }, { v: 'limit', l: 'Limit' }]}
           activeClass="bg-primary text-primary-foreground" />
       </div>
 
       {/* Limit price */}
       {type === 'limit' && (
-        <div className="mb-3">
-          <label className="mb-1 block text-xs text-muted-foreground">Limit price</label>
+        <div className="mb-4">
+          <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Limit price</label>
           <div className="relative">
-            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+            <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[15px] text-muted-foreground">$</span>
             <input value={limitPrice} onChange={(e) => setLimitPrice(e.target.value)} inputMode="decimal"
-              className="w-full rounded-md border border-input bg-background py-2 pl-7 pr-3 text-sm tabular-nums outline-none focus:ring-2 focus:ring-ring" />
+              className={`${inputCls} pl-7 pr-3.5`} />
           </div>
         </div>
       )}
 
       {/* Entry mode + amount */}
-      <div className="mb-3">
-        <div className="mb-1 flex items-center justify-between">
-          <label className="text-xs text-muted-foreground">Amount</label>
+      <div className="mb-4">
+        <div className="mb-1.5 flex items-center justify-between">
+          <label className="text-xs font-medium text-muted-foreground">Amount</label>
           <Segmented small value={entryMode} onChange={(v) => { setEntryMode(v as EntryMode); setAmount(''); }}
             options={[{ v: 'shares', l: 'Shares' }, { v: 'dollars', l: 'Dollars' }]} activeClass="bg-secondary text-secondary-foreground" />
         </div>
         <div className="relative">
-          {entryMode === 'dollars' && <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>}
+          {entryMode === 'dollars' && <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[15px] text-muted-foreground">$</span>}
           <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal"
             placeholder={entryMode === 'shares' ? 'Number of shares' : 'Dollar amount'}
-            className={`w-full rounded-md border border-input bg-background py-2 pr-3 text-sm tabular-nums outline-none focus:ring-2 focus:ring-ring ${entryMode === 'dollars' ? 'pl-7' : 'pl-3'}`} />
+            className={`${inputCls} pr-3.5 ${entryMode === 'dollars' ? 'pl-7' : 'pl-3.5'}`} />
         </div>
       </div>
 
       {/* Preview */}
       {preview && (
-        <div className="mb-3 rounded-md bg-background/50 px-3 py-2 text-xs tabular-nums text-muted-foreground">
+        <div className="mb-4 rounded-xl bg-muted px-4 py-3 text-xs tabular-nums text-muted-foreground">
           {entryMode === 'dollars'
-            ? <>Buys <span className="font-medium text-foreground">{preview.shares}</span> whole share{preview.shares !== 1 ? 's' : ''} ≈ <span className="font-medium text-foreground">{fmtMoney(preview.estCents)}</span>{preview.leftoverCents != null ? <> · {fmtMoney(preview.leftoverCents)} left over</> : null}</>
-            : <>Estimated {side === 'buy' ? 'cost' : 'proceeds'}: <span className="font-medium text-foreground">{fmtMoney(preview.estCents)}</span></>}
+            ? <>Buys <span className="font-semibold text-foreground">{preview.shares}</span> whole share{preview.shares !== 1 ? 's' : ''} ≈ <span className="font-semibold text-foreground">{fmtMoney(preview.estCents)}</span>{preview.leftoverCents != null ? <> · {fmtMoney(preview.leftoverCents)} left over</> : null}</>
+            : <>Estimated {side === 'buy' ? 'cost' : 'proceeds'}: <span className="font-semibold text-foreground">{fmtMoney(preview.estCents)}</span></>}
           {side === 'buy' && <> · cash {fmtMoney(cashCents)}</>}
         </div>
       )}
 
       <button onClick={submit} disabled={submitting || !symbol}
-        className={`w-full rounded-md px-4 py-2.5 text-sm font-semibold text-white transition-colors disabled:opacity-50 ${side === 'buy' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}`}>
+        className={`w-full rounded-full px-4 py-3 text-[15px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40 ${side === 'buy' ? 'pt-bg-gain' : 'pt-bg-loss'}`}>
         {submitting ? 'Placing…' : `${side === 'buy' ? 'Buy' : 'Sell'} ${symbol ?? ''}`.trim()}
       </button>
 
-      {message && <p className={`mt-3 text-sm ${message.ok ? 'text-emerald-500' : 'text-red-500'}`}>{message.text}</p>}
+      {message && <p className={`mt-3 text-sm ${message.ok ? 'pt-gain' : 'pt-loss'}`}>{message.text}</p>}
     </div>
   );
 }
@@ -226,10 +240,10 @@ function Segmented({ value, onChange, options, activeClass, small }: {
   value: string; onChange: (v: string) => void; options: { v: string; l: string }[]; activeClass: string; small?: boolean;
 }) {
   return (
-    <div className={`inline-flex w-full rounded-md border border-border bg-background p-0.5 ${small ? 'text-xs' : 'text-sm'}`}>
+    <div className={`inline-flex w-full rounded-full border border-border bg-card p-1 ${small ? 'text-xs' : 'text-sm'}`}>
       {options.map((o) => (
         <button key={o.v} onClick={() => onChange(o.v)}
-          className={`flex-1 rounded px-2 ${small ? 'py-0.5' : 'py-1.5'} font-medium transition-colors ${value === o.v ? activeClass : 'text-muted-foreground hover:text-foreground'}`}>
+          className={`flex-1 rounded-full px-2 ${small ? 'py-1' : 'py-2'} font-semibold transition-colors ${value === o.v ? activeClass : 'text-muted-foreground hover:text-foreground'}`}>
           {o.l}
         </button>
       ))}
