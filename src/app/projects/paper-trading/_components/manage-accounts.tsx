@@ -43,6 +43,8 @@ export default function ManageAccounts({ open, onClose }: { open: boolean; onClo
     setConfirmDelete(null);
   }
 
+  const inputCls = 'rounded-xl border border-border bg-card px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-foreground/40';
+
   return (
     <AnimatePresence>
       {open && (
@@ -50,49 +52,49 @@ export default function ManageAccounts({ open, onClose }: { open: boolean; onClo
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             transition={{ duration: 0.15 }}
-            className="fixed inset-0 z-50 bg-black/50" onClick={onClose}
+            className="fixed inset-0 z-50 bg-black/30 backdrop-blur-[1px]" onClick={onClose}
           />
           <motion.div
             initial={{ opacity: 0, scale: 0.96, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 8 }}
             transition={{ type: 'spring', stiffness: 360, damping: 30 }}
-            className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-card p-6 shadow-2xl"
+            className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-border bg-card p-6 shadow-2xl"
           >
             <div className="mb-5 flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Manage accounts</h2>
-              <button onClick={onClose} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted/60 hover:text-foreground" aria-label="Close">
-                <X className="h-4 w-4" />
+              <h2 className="ws-serif text-2xl font-semibold tracking-tight">Accounts</h2>
+              <button onClick={onClose} className="rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Close">
+                <X className="h-5 w-5" />
               </button>
             </div>
 
             {/* Existing accounts */}
-            <div className="mb-6 space-y-2 max-h-64 overflow-y-auto">
+            <div className="mb-6 max-h-64 space-y-1.5 overflow-y-auto">
               {accounts.length === 0 && <p className="text-sm text-muted-foreground">No accounts yet — create one below.</p>}
               {accounts.map((a) => (
-                <div key={a.id} className="flex items-center gap-2 rounded-lg border border-border/60 bg-background/40 px-3 py-2">
+                <div key={a.id} className="flex items-center gap-2 rounded-2xl bg-muted px-3.5 py-3">
                   {editingId === a.id ? (
                     <>
                       <input
                         autoFocus value={editName} onChange={(e) => setEditName(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleRename(a.id)}
-                        className="flex-1 rounded-md border border-input bg-background px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-ring"
+                        className="flex-1 rounded-xl border border-border bg-card px-3 py-2 text-sm outline-none focus:border-foreground/40"
                       />
-                      <button onClick={() => handleRename(a.id)} disabled={busy} className="rounded-md p-1.5 text-emerald-500 hover:bg-muted/60" aria-label="Save"><Check className="h-4 w-4" /></button>
-                      <button onClick={() => setEditingId(null)} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted/60" aria-label="Cancel"><X className="h-4 w-4" /></button>
+                      <button onClick={() => handleRename(a.id)} disabled={busy} className="rounded-full p-2 pt-gain hover:bg-card" aria-label="Save"><Check className="h-4 w-4" /></button>
+                      <button onClick={() => setEditingId(null)} className="rounded-full p-2 text-muted-foreground hover:bg-card" aria-label="Cancel"><X className="h-4 w-4" /></button>
                     </>
                   ) : confirmDelete === a.id ? (
                     <>
                       <span className="flex-1 text-sm">Delete <strong>{a.name}</strong>? This removes all its trades.</span>
-                      <button onClick={() => handleDelete(a.id)} disabled={busy} className="rounded-md bg-red-500/15 px-2 py-1 text-xs font-medium text-red-500 hover:bg-red-500/25">Delete</button>
-                      <button onClick={() => setConfirmDelete(null)} className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted/60">Cancel</button>
+                      <button onClick={() => handleDelete(a.id)} disabled={busy} className="rounded-full pt-bg-loss px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90">Delete</button>
+                      <button onClick={() => setConfirmDelete(null)} className="rounded-full px-3 py-1.5 text-xs text-muted-foreground hover:bg-card">Cancel</button>
                     </>
                   ) : (
                     <>
-                      <div className="flex-1 min-w-0">
-                        <div className="truncate text-sm font-medium">{a.name}</div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-semibold">{a.name}</div>
                         <div className="text-xs text-muted-foreground tabular-nums">{fmtMoney(a.totalValueCents)} · seed {fmtMoney(a.seedCents)}</div>
                       </div>
-                      <button onClick={() => { setEditingId(a.id); setEditName(a.name); }} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted/60 hover:text-foreground" aria-label="Rename"><Pencil className="h-3.5 w-3.5" /></button>
-                      <button onClick={() => setConfirmDelete(a.id)} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted/60 hover:text-red-500" aria-label="Delete"><Trash2 className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => { setEditingId(a.id); setEditName(a.name); }} className="rounded-full p-2 text-muted-foreground hover:bg-card hover:text-foreground" aria-label="Rename"><Pencil className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => setConfirmDelete(a.id)} className="rounded-full p-2 text-muted-foreground hover:bg-card hover:text-[var(--color-loss)]" aria-label="Delete"><Trash2 className="h-3.5 w-3.5" /></button>
                     </>
                   )}
                 </div>
@@ -100,27 +102,27 @@ export default function ManageAccounts({ open, onClose }: { open: boolean; onClo
             </div>
 
             {/* Create */}
-            <div className="rounded-xl border border-border/60 bg-background/40 p-4">
-              <div className="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">New account</div>
+            <div className="rounded-2xl bg-muted p-4">
+              <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">New account</div>
               <div className="flex flex-col gap-2 sm:flex-row">
                 <input
                   value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Account name"
-                  className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  className={`flex-1 ${inputCls}`}
                 />
                 <div className="relative sm:w-40">
-                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+                  <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
                   <input
                     value={newSeed} onChange={(e) => setNewSeed(e.target.value)} inputMode="decimal" placeholder="10000"
-                    className="w-full rounded-md border border-input bg-background py-2 pl-7 pr-3 text-sm tabular-nums outline-none focus:ring-2 focus:ring-ring"
+                    className={`w-full pl-7 tabular-nums ${inputCls}`}
                   />
                 </div>
-                <button onClick={handleCreate} disabled={busy} className="inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+                <button onClick={handleCreate} disabled={busy} className="inline-flex items-center justify-center gap-1.5 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
                   <Plus className="h-4 w-4" /> Create
                 </button>
               </div>
             </div>
 
-            {error && <p className="mt-3 text-sm text-red-500">{error}</p>}
+            {error && <p className="mt-3 text-sm pt-loss">{error}</p>}
           </motion.div>
         </>
       )}

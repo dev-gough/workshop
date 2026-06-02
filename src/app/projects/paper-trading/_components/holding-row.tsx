@@ -16,7 +16,7 @@ function colorFor(symbol: string): string {
   return MONO_COLORS[h % MONO_COLORS.length];
 }
 
-function Monogram({ symbol }: { symbol: string }) {
+export function Monogram({ symbol }: { symbol: string }) {
   const color = colorFor(symbol);
   return (
     <span

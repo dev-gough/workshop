@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { useAccounts } from '../_lib/account-context';
 import { fmtMoney, fmtDateTime } from '../_lib/format';
+import { Monogram } from '../_components/holding-row';
 
 interface OpenOrder {
   id: number; symbol: string; side: 'buy' | 'sell'; type: 'market' | 'limit';
@@ -36,62 +37,56 @@ export default function OrdersPage() {
     } finally { setBusyId(null); }
   }
 
-  if (loading) return <div className="py-20 text-center text-muted-foreground">Loading…</div>;
-  if (!selected) return <EmptyState />;
+  if (loading) return <div className="py-24 text-center text-muted-foreground">Loading…</div>;
+  if (!selected) return <EmptyState text="Select or create an account to view its orders." />;
 
   return (
-    <div className="rounded-xl border border-border bg-card">
-      <div className="border-b border-border px-4 py-3 text-sm font-semibold">Open orders</div>
+    <section>
+      <div className="mb-1 flex items-baseline justify-between">
+        <h2 className="ws-serif text-xl font-semibold tracking-tight">Open orders</h2>
+        {orders.length > 0 && <span className="text-xs text-muted-foreground">{orders.length} resting</span>}
+      </div>
+
       {orders.length === 0 ? (
-        <p className="px-4 py-12 text-center text-sm text-muted-foreground">No resting orders. Limit orders and orders placed while the market is closed appear here.</p>
+        <p className="rounded-2xl border border-dashed border-border px-4 py-12 text-center text-sm text-muted-foreground">
+          No resting orders. Limit orders — and orders placed while the market is closed — appear here.
+        </p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground">
-                <th className="px-4 py-2 font-medium">Placed</th>
-                <th className="px-4 py-2 font-medium">Symbol</th>
-                <th className="px-4 py-2 font-medium">Side</th>
-                <th className="px-4 py-2 font-medium">Type</th>
-                <th className="px-4 py-2 text-right font-medium">Qty</th>
-                <th className="px-4 py-2 text-right font-medium">Limit</th>
-                <th className="px-4 py-2 text-right font-medium"></th>
-              </tr>
-            </thead>
-            <tbody className="tabular-nums">
-              {orders.map((o) => (
-                <tr key={o.id} className="border-t border-border/60">
-                  <td className="px-4 py-2.5 text-muted-foreground">{fmtDateTime(o.createdAt)}</td>
-                  <td className="px-4 py-2.5 font-medium">{o.symbol}</td>
-                  <td className="px-4 py-2.5">
-                    <span className={o.side === 'buy' ? 'text-emerald-500' : 'text-red-500'}>{o.side.toUpperCase()}</span>
-                  </td>
-                  <td className="px-4 py-2.5 capitalize">
-                    {o.type}
-                    {o.type === 'market' && <span className="ml-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-500">queued</span>}
-                  </td>
-                  <td className="px-4 py-2.5 text-right">{o.qty}</td>
-                  <td className="px-4 py-2.5 text-right">{o.limitPriceCents != null ? fmtMoney(o.limitPriceCents) : '—'}</td>
-                  <td className="px-4 py-2.5 text-right">
-                    <button onClick={() => cancel(o.id)} disabled={busyId === o.id}
-                      className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted/60 disabled:opacity-50">
-                      <X className="h-3 w-3" /> Cancel
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="-mx-3">
+          {orders.map((o) => (
+            <div key={o.id} className="flex items-center gap-3 rounded-2xl px-3 py-3 transition-colors hover:bg-muted">
+              <Monogram symbol={o.symbol} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 font-semibold leading-tight">
+                  {o.symbol}
+                  <span className={`text-[11px] font-bold tracking-wide ${o.side === 'buy' ? 'pt-gain' : 'pt-loss'}`}>{o.side.toUpperCase()}</span>
+                </div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
+                  <span className="capitalize">{o.type}</span>
+                  {o.type === 'market' && (
+                    <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">queued</span>
+                  )}
+                  <span>· {o.qty} {o.qty === 1 ? 'share' : 'shares'}</span>
+                  {o.limitPriceCents != null && <span>· limit {fmtMoney(o.limitPriceCents)}</span>}
+                  <span>· {fmtDateTime(o.createdAt)}</span>
+                </div>
+              </div>
+              <button onClick={() => cancel(o.id)} disabled={busyId === o.id}
+                className="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground disabled:opacity-50">
+                <X className="h-3 w-3" /> Cancel
+              </button>
+            </div>
+          ))}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
-function EmptyState() {
+function EmptyState({ text }: { text: string }) {
   return (
-    <div className="rounded-xl border border-dashed border-border bg-card/40 py-20 text-center text-sm text-muted-foreground">
-      Select or create an account to view its orders.
+    <div className="rounded-3xl border border-dashed border-border py-24 text-center text-sm text-muted-foreground">
+      {text}
     </div>
   );
 }
