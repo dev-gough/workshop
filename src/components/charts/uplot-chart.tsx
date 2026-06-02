@@ -84,7 +84,13 @@ export default function UplotChart({
         points: { show: !spark },
         ...(onHover ? {
           bind: {
-            mouseleave: () => () => { onHover(null); return null; },
+            // Wrap (don't replace) uPlot's default mouseleave handler, so its
+            // own cursor-hiding still runs — otherwise the crosshair line
+            // freezes at the edge when the mouse exits left/right.
+            mouseleave: (_u: unknown, _targ: unknown, handler: (e: Event) => null) => (e: Event) => {
+              onHover(null);
+              return handler(e);
+            },
           },
         } : {}),
       } as Cursor,
