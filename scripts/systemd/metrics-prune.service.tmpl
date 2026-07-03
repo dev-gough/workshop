@@ -1,0 +1,10 @@
+[Unit]
+Description=Workshop Metrics Retention (prune typed metric_* tables, daily)
+After=postgresql.service network.target
+
+[Service]
+Type=oneshot
+User=$SERVER_USER
+WorkingDirectory=$WORKSHOP_DIR
+ExecStart=/usr/bin/env npx tsx scripts/prune-metrics.ts
+TimeoutStartSec=120

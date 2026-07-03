@@ -23,7 +23,7 @@ async function rpc<T = unknown>(method: string, args: Record<string, unknown> = 
   if (_sessionId) headers['X-Transmission-Session-Id'] = _sessionId;
 
   const body = JSON.stringify({ method, arguments: args });
-  let res = await fetch(config.rpcUrl, { method: 'POST', headers, body });
+  let res = await fetch(config.rpcUrl, { method: 'POST', headers, body, signal: AbortSignal.timeout(8000) });
 
   // Transmission's CSRF dance: first call returns 409 with the session id
   if (res.status === 409) {
@@ -31,7 +31,7 @@ async function rpc<T = unknown>(method: string, args: Record<string, unknown> = 
     if (id) {
       _sessionId = id;
       headers['X-Transmission-Session-Id'] = id;
-      res = await fetch(config.rpcUrl, { method: 'POST', headers, body });
+      res = await fetch(config.rpcUrl, { method: 'POST', headers, body, signal: AbortSignal.timeout(8000) });
     }
   }
 

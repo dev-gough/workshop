@@ -11,6 +11,7 @@ async function slskdFetch(urlPath: string, options: RequestInit = {}): Promise<R
   const url = `${config.baseUrl}${urlPath}`;
   const res = await fetch(url, {
     ...options,
+    signal: AbortSignal.timeout(8000),
     headers: {
       'X-API-Key': config.apiKey,
       'Content-Type': 'application/json',

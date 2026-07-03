@@ -35,17 +35,18 @@ const rateLimiter = {
   shortWindow: [] as number[],   // timestamps for 1s window
   longWindow: [] as number[],    // timestamps for 120s window
   async wait() {
-    const now = Date.now();
+    let now = Date.now();
     // Prune old entries
     this.shortWindow = this.shortWindow.filter(t => now - t < 1000);
     this.longWindow = this.longWindow.filter(t => now - t < 120000);
 
     // Wait if either limit is hit
     while (this.shortWindow.length >= 19 || this.longWindow.length >= 95) {
+      now = Date.now();
       const shortWait = this.shortWindow.length >= 19
         ? 1000 - (now - this.shortWindow[0]) : 0;
       const longWait = this.longWindow.length >= 95
-        ? 120000 - (Date.now() - this.longWindow[0]) : 0;
+        ? 120000 - (now - this.longWindow[0]) : 0;
       await new Promise(r => setTimeout(r, Math.max(shortWait, longWait, 50)));
       const updated = Date.now();
       this.shortWindow = this.shortWindow.filter(t => updated - t < 1000);
@@ -62,6 +63,7 @@ async function riotFetch(url: string, apiKey: string) {
   await rateLimiter.wait();
   const res = await fetch(url, {
     headers: { 'X-Riot-Token': apiKey },
+    signal: AbortSignal.timeout(10000),
   });
   if (!res.ok) {
     const text = await res.text();

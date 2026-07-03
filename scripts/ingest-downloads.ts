@@ -42,6 +42,7 @@ async function slskdGet<T>(urlPath: string): Promise<T> {
   const config = getSlskdConfig();
   const res = await fetch(`${config.baseUrl}${urlPath}`, {
     headers: { 'X-API-Key': config.apiKey },
+    signal: AbortSignal.timeout(8000),
   });
   if (!res.ok) throw new Error(`slskd GET ${urlPath}: ${res.status}`);
   return res.json() as Promise<T>;
