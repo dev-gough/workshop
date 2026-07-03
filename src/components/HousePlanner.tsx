@@ -95,14 +95,7 @@ function gridMajorInterval(unit: DisplayUnit): number {
 }
 
 // Snap increment in inches
-function snapIncrement(unit: DisplayUnit): number {
-  switch (unit) {
-    case 'in': return 1;
-    case 'ft': return 1;
-    case 'cm': return 1;
-    case 'm': return 1;
-  }
-}
+const SNAP_INCREMENT = 1;
 
 // ── Furniture Presets ──
 
@@ -465,7 +458,7 @@ export default function HousePlanner() {
     if (!rect) return;
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
-    const snap = snapIncrement(unit);
+    const snap = SNAP_INCREMENT;
     let newX = Math.round((mouseX - d.offsetX) / pxPerInch / snap) * snap;
     let newY = Math.round((mouseY - d.offsetY) / pxPerInch / snap) * snap;
 
@@ -485,7 +478,7 @@ export default function HousePlanner() {
       el.style.left = `${newX * pxPerInch}px`;
       el.style.top = `${newY * pxPerInch}px`;
     }
-  }, [items, pxPerInch, roomWidthIn, roomHeightIn, unit]);
+  }, [items, pxPerInch, roomWidthIn, roomHeightIn]);
 
   const handlePointerUp = useCallback(() => {
     const d = draggingRef.current;

@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
+import { fmtMoney } from './_lib/fmt';
 
 // ── Types ──
 
@@ -40,12 +41,6 @@ const PALETTE = [
   '#fbbf24', '#22d3ee', '#a78bfa', '#f472b6',
   '#4ade80', '#38bdf8', '#fb7185', '#facc15',
 ];
-
-function fmtMoney(cents: number | string): string {
-  const n = typeof cents === 'string' ? parseInt(cents, 10) : cents;
-  const sign = n < 0 ? '-' : '';
-  return `${sign}$${(Math.abs(n) / 100).toFixed(2)}`;
-}
 
 // ── Bootstrap / signup landing (unauth) ──
 
