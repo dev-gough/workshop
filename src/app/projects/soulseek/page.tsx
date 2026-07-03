@@ -6,7 +6,7 @@ import {
   Search, Download, Upload, FolderOpen, BarChart3,
   ChevronRight, ChevronDown, Clock, User, Zap,
   CheckCircle, XCircle, Loader, Music, ArrowDown,
-  ArrowUp, Wifi, WifiOff, RefreshCw, Trash2,
+  ArrowUp, RefreshCw, Trash2,
   Check, X, Edit3, Play, File, Folder,
   HardDrive, Users, TrendingUp, Activity, ExternalLink,
 } from 'lucide-react';
@@ -14,6 +14,9 @@ import Link from 'next/link';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
 import { useAudio } from '@/components/AudioProvider';
+import { fmtBytes as fmtBytesShared, fmtSpeed, fmtTime } from '@/lib/format';
+import { ProgressBar } from '@/components/ui/ProgressBar';
+import { ConnectionBadge } from '@/components/ui/ConnectionBadge';
 
 // ── Types ──
 
@@ -123,34 +126,17 @@ interface SearchHistoryItem {
 
 // ── Helpers ──
 
+// Soulseek shows '0 B' (not the shared '–') for empty/zero sizes.
 function fmtBytes(bytes: number): string {
-  if (!bytes || bytes <= 0) return '0 B';
-  if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-  if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-  return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+  return fmtBytesShared(bytes, '0 B');
 }
 
-function fmtSpeed(bytesPerSec: number): string {
-  if (!bytesPerSec || bytesPerSec <= 0) return '0 KB/s';
-  if (bytesPerSec < 1024) return bytesPerSec.toFixed(0) + ' B/s';
-  if (bytesPerSec < 1024 * 1024) return (bytesPerSec / 1024).toFixed(1) + ' KB/s';
-  return (bytesPerSec / (1024 * 1024)).toFixed(1) + ' MB/s';
-}
-
+// Clock-style m:ss duration (track length) — intentionally local, not in format.ts.
 function fmtDuration(seconds?: number): string {
   if (!seconds || seconds <= 0) return '';
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, '0')}`;
-}
-
-function fmtTime(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' +
-      d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  } catch { return iso; }
 }
 
 function qualityBadge(file: SearchFile): { label: string; color: string } {
@@ -194,26 +180,6 @@ const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
 ];
 
 // ── Components ──
-
-function ConnectionBadge({ connected }: { connected: boolean | null }) {
-  if (connected === null) return <span className="text-xs text-zinc-500 flex items-center gap-1"><Loader className="h-3 w-3 animate-spin" /> Checking...</span>;
-  return connected
-    ? <span className="text-xs text-emerald-400 flex items-center gap-1"><Wifi className="h-3 w-3" /> Connected</span>
-    : <span className="text-xs text-red-400 flex items-center gap-1"><WifiOff className="h-3 w-3" /> Disconnected</span>;
-}
-
-function ProgressBar({ percent, color = 'bg-blue-500' }: { percent: number; color?: string }) {
-  return (
-    <div className="h-1 bg-muted/60 rounded-full overflow-hidden">
-      <motion.div
-        className={`h-full rounded-full ${color}`}
-        initial={{ width: 0 }}
-        animate={{ width: `${Math.min(percent, 100)}%` }}
-        transition={{ duration: 0.3 }}
-      />
-    </div>
-  );
-}
 
 function QualityTag({ file }: { file: SearchFile }) {
   const badge = qualityBadge(file);
@@ -624,33 +590,18 @@ function Pagination({ page, totalPages, pageSize, onPageChange, onPageSizeChange
   );
 }
 
-function DownloadsTab() {
-  const [liveDownloads, setLiveDownloads] = useState<Record<string, Transfer[]>>({});
+function DownloadsTab({ liveDownloads }: { liveDownloads: Record<string, Transfer[]> }) {
   const [staging, setStaging] = useState<StagingItem[]>([]);
   const [completed, setCompleted] = useState<DownloadRecord[]>([]);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editArtist, setEditArtist] = useState('');
   const [editAlbum, setEditAlbum] = useState('');
-  const eventSourceRef = useRef<EventSource | null>(null);
 
   // Pagination state
   const [activePage, setActivePage] = useState(0);
   const [activePageSize, setActivePageSize] = useState(10);
   const [completedPage, setCompletedPage] = useState(0);
   const [completedPageSize, setCompletedPageSize] = useState(10);
-
-  // SSE for live transfers
-  useEffect(() => {
-    const es = new EventSource('/api/soulseek/transfers/stream');
-    eventSourceRef.current = es;
-    es.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.downloads) setLiveDownloads(data.downloads);
-      } catch {}
-    };
-    return () => { es.close(); eventSourceRef.current = null; };
-  }, []);
 
   // Fetch staging and completed
   const fetchData = useCallback(async () => {
@@ -888,22 +839,8 @@ function DownloadsTab() {
 
 // ── Uploads Tab ──
 
-function UploadsTab() {
-  const [liveUploads, setLiveUploads] = useState<Record<string, Transfer[]>>({});
+function UploadsTab({ liveUploads }: { liveUploads: Record<string, Transfer[]> }) {
   const [history, setHistory] = useState<DownloadRecord[]>([]);
-  const eventSourceRef = useRef<EventSource | null>(null);
-
-  useEffect(() => {
-    const es = new EventSource('/api/soulseek/transfers/stream');
-    eventSourceRef.current = es;
-    es.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.uploads) setLiveUploads(data.uploads);
-      } catch {}
-    };
-    return () => { es.close(); eventSourceRef.current = null; };
-  }, []);
 
   useEffect(() => {
     fetch('/api/soulseek/uploads?limit=50').then(r => r.json()).then(d => setHistory(d.uploads || [])).catch(() => {});
@@ -1310,6 +1247,25 @@ export default function SoulseekPage() {
   const [connected, setConnected] = useState<boolean | null>(null);
   const { albums } = useAudio();
 
+  // Single SSE connection for live transfers, shared by the Downloads and Uploads
+  // tabs. Opened only while one of those tabs is active (2s server polling), so we
+  // never run two concurrent EventSources. Auto-reconnect is EventSource's default.
+  const [liveDownloads, setLiveDownloads] = useState<Record<string, Transfer[]>>({});
+  const [liveUploads, setLiveUploads] = useState<Record<string, Transfer[]>>({});
+  const transfersActive = activeTab === 'downloads' || activeTab === 'uploads';
+  useEffect(() => {
+    if (!transfersActive) return;
+    const es = new EventSource('/api/soulseek/transfers/stream');
+    es.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.downloads) setLiveDownloads(data.downloads);
+        if (data.uploads) setLiveUploads(data.uploads);
+      } catch {}
+    };
+    return () => { es.close(); };
+  }, [transfersActive]);
+
   // Build a set of lowercase artist names for "In Library" matching
   const libraryArtists = useMemo(() => {
     const set = new Set<string>();
@@ -1348,7 +1304,7 @@ export default function SoulseekPage() {
                 <h1 className="text-2xl font-bold text-foreground tracking-tight">Soulseek</h1>
                 <p className="text-sm text-muted-foreground mt-0.5">P2P Music Network</p>
               </div>
-              <ConnectionBadge connected={connected} />
+              <ConnectionBadge ok={connected} checkingLabel="Checking..." />
             </div>
           </FadeIn>
 
@@ -1387,8 +1343,8 @@ export default function SoulseekPage() {
                 transition={{ duration: 0.2 }}
               >
                 {activeTab === 'search' && <SearchTab libraryArtists={libraryArtists} initialSearch={initialSearch} />}
-                {activeTab === 'downloads' && <DownloadsTab />}
-                {activeTab === 'uploads' && <UploadsTab />}
+                {activeTab === 'downloads' && <DownloadsTab liveDownloads={liveDownloads} />}
+                {activeTab === 'uploads' && <UploadsTab liveUploads={liveUploads} />}
                 {activeTab === 'browse' && <BrowseTab />}
                 {activeTab === 'stats' && <StatsTab />}
               </motion.div>

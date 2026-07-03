@@ -89,6 +89,11 @@ export async function POST(request: NextRequest) {
     // Create target directory
     await fs.mkdir(targetDir, { recursive: true });
 
+    // Track the source folders the audio files came from, so we can pull any
+    // loose cover-art images sitting alongside them (they live in the source
+    // download folder, not yet in targetDir at this point).
+    const sourceDirs = new Set<string>();
+
     // If a specific download ID is provided, ingest that record
     if (id) {
       const { rows } = await pool.query('SELECT * FROM soulseek_downloads WHERE id = $1', [id]);
@@ -100,6 +105,7 @@ export async function POST(request: NextRequest) {
       // Find the actual file in downloads dir
       const sourceFile = await findDownloadFile(DOWNLOADS_DIR, download.filename);
       if (sourceFile) {
+        sourceDirs.add(path.dirname(sourceFile));
         const destFile = path.join(targetDir, sanitizeFilename(path.basename(sourceFile)));
         await fs.rename(sourceFile, destFile);
       }
@@ -117,6 +123,7 @@ export async function POST(request: NextRequest) {
         if (!fullPath) continue; // skip paths that escape the downloads dir
         try {
           await fs.access(fullPath);
+          sourceDirs.add(path.dirname(fullPath));
           const destFile = path.join(targetDir, sanitizeFilename(path.basename(filePath)));
           await fs.rename(fullPath, destFile);
         } catch {
@@ -134,8 +141,9 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Try to move any cover art from the download directory
-    await moveCoverArt(targetDir);
+    // Bring over any cover art: first any loose image files from the source
+    // download folder(s) the audio came from, else fall back to embedded art.
+    await moveCoverArt(targetDir, sourceDirs, DOWNLOADS_DIR);
 
     // Scan the album into the database
     try {
@@ -218,15 +226,52 @@ async function findDownloadFile(downloadsDir: string, filename: string): Promise
   return match ? path.join(downloadsDir, match) : null;
 }
 
-// Helper: move cover art files from downloads subfolders to target album dir
-async function moveCoverArt(targetDir: string) {
-  // Check if target already has cover art
+// Helper: bring cover art into the target album dir. Prefers loose image files
+// sitting in the source download folder(s) the audio came from (those images are
+// still in the download dir at this point, not in targetDir); falls back to art
+// embedded in an audio file's tags.
+async function moveCoverArt(
+  targetDir: string,
+  sourceDirs: Set<string>,
+  downloadsDir: string,
+) {
   try {
     const existing = await fs.readdir(targetDir);
     const hasArt = existing.some(f => IMAGE_EXTENSIONS.has(path.extname(f).toLowerCase()));
     if (hasArt) return;
 
-    // Try to extract embedded art from an audio file
+    // 1) Look for loose cover images in the source download folder(s).
+    for (const sourceDir of sourceDirs) {
+      // sourceDir is derived from request/source paths — keep it inside downloads.
+      const rel = path.relative(downloadsDir, sourceDir);
+      const safeSourceDir = resolveWithinBase(downloadsDir, rel);
+      if (!safeSourceDir) continue;
+
+      let entries: string[];
+      try {
+        entries = await fs.readdir(safeSourceDir);
+      } catch {
+        continue; // source dir gone (e.g. already cleaned up)
+      }
+
+      const images = entries.filter(f => IMAGE_EXTENSIONS.has(path.extname(f).toLowerCase()));
+      if (images.length === 0) continue;
+
+      // Prefer a file literally named "cover", otherwise take the first image.
+      const chosen = images.find(f => path.basename(f, path.extname(f)).toLowerCase() === 'cover') || images[0];
+      const srcImage = path.join(safeSourceDir, chosen);
+      const destImage = path.join(targetDir, `cover${path.extname(chosen).toLowerCase()}`);
+      try {
+        await fs.rename(srcImage, destImage);
+      } catch {
+        // Cross-device or other rename failure — fall back to copy.
+        await fs.copyFile(srcImage, destImage);
+        await fs.unlink(srcImage).catch(() => {});
+      }
+      return; // done — one cover is enough
+    }
+
+    // 2) Fall back to embedded art from an audio file already in targetDir.
     const audioFile = existing.find(f => AUDIO_EXTENSIONS.has(path.extname(f).toLowerCase()));
     if (audioFile) {
       try {
