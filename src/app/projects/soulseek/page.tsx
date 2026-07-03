@@ -1333,7 +1333,7 @@ export default function SoulseekPage() {
   useEffect(() => {
     fetch('/api/soulseek/status')
       .then(r => r.json())
-      .then(d => setConnected(d.server?.isConnected ?? false))
+      .then(d => setConnected(d.connected ?? false))
       .catch(() => setConnected(false));
   }, []);
 

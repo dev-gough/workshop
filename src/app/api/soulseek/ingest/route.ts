@@ -18,6 +18,16 @@ function getDirs(): { music: string; downloads: string } {
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.flac', '.wav', '.m4a', '.ogg']);
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']);
 
+// Resolve a request-supplied relative path against a base dir, ensuring it does
+// not escape the base (path traversal guard). Returns null if it escapes.
+function resolveWithinBase(baseDir: string, relPath: string): string | null {
+  const safe = path.resolve(baseDir, relPath);
+  if (safe !== path.resolve(baseDir) && !safe.startsWith(path.resolve(baseDir) + path.sep)) {
+    return null;
+  }
+  return safe;
+}
+
 // GET - list staging area (completed downloads pending review)
 export async function GET() {
   try {
@@ -103,7 +113,8 @@ export async function POST(request: NextRequest) {
     // If files array provided, move those files
     if (files && Array.isArray(files)) {
       for (const filePath of files) {
-        const fullPath = path.join(DOWNLOADS_DIR, filePath);
+        const fullPath = resolveWithinBase(DOWNLOADS_DIR, filePath);
+        if (!fullPath) continue; // skip paths that escape the downloads dir
         try {
           await fs.access(fullPath);
           const destFile = path.join(targetDir, sanitizeFilename(path.basename(filePath)));
@@ -170,7 +181,9 @@ export async function DELETE(request: NextRequest) {
 
     if (files && Array.isArray(files)) {
       for (const filePath of files) {
-        await fs.unlink(path.join(DOWNLOADS_DIR, filePath)).catch(() => {});
+        const safePath = resolveWithinBase(DOWNLOADS_DIR, filePath);
+        if (!safePath) continue; // skip paths that escape the downloads dir
+        await fs.unlink(safePath).catch(() => {});
       }
     }
 
