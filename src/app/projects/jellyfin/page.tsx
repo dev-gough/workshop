@@ -3,13 +3,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Film, Tv, Download, Loader, Wifi, WifiOff, Plus, X,
+  Film, Tv, Download, Loader, WifiOff, Plus, X,
   CheckCircle, AlertTriangle, ArrowRight, Clock, Trash2, Eye,
   Upload, HeartHandshake, Share2, ExternalLink, Pause, Play,
   Search, Archive, ListFilter,
 } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
+import { fmtBytes, fmtSpeed, fmtEta, fmtDuration, fmtTime } from '@/lib/format';
+import { ProgressBar } from '@/components/ui/ProgressBar';
+import { ConnectionBadge } from '@/components/ui/ConnectionBadge';
 
 // ── Types ──
 
@@ -103,50 +106,6 @@ interface HistoryRow {
 
 // ── Helpers ──
 
-function fmtBytes(bytes: number | string | null): string {
-  const n = typeof bytes === 'string' ? parseInt(bytes) : bytes;
-  if (!n || n <= 0) return '–';
-  if (n < 1024) return n + ' B';
-  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
-  if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + ' MB';
-  return (n / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
-}
-
-function fmtSpeed(bps: number): string {
-  if (!bps || bps <= 0) return '0';
-  if (bps < 1024 * 1024) return (bps / 1024).toFixed(1) + ' KB/s';
-  return (bps / (1024 * 1024)).toFixed(1) + ' MB/s';
-}
-
-function fmtEta(seconds: number): string {
-  if (!seconds || seconds < 0) return '–';
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
-  return `${Math.floor(seconds / 86400)}d`;
-}
-
-function fmtDuration(seconds: number): string {
-  if (!seconds || seconds <= 0) return '0';
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
-  return `${Math.floor(seconds / 86400)}d`;
-}
-
-function fmtTime(iso: string | null): string {
-  if (!iso) return '';
-  try {
-    const d = new Date(iso);
-    const now = new Date();
-    const sameDay = d.toDateString() === now.toDateString();
-    return sameDay
-      ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      : d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' +
-        d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  } catch { return iso; }
-}
-
 function statusColor(status: string): string {
   if (status === 'Downloading') return 'text-blue-400';
   if (status === 'Seeding') return 'text-emerald-400';
@@ -180,32 +139,6 @@ function modeBadge(mode: Mode) {
   return mode === 'tv'
     ? { label: 'TV', icon: Tv, color: 'text-purple-400 bg-purple-400/10' }
     : { label: 'Movie', icon: Film, color: 'text-amber-400 bg-amber-400/10' };
-}
-
-// ── Components ──
-
-function ProgressBar({ percent, color = 'bg-blue-500' }: { percent: number; color?: string }) {
-  return (
-    <div className="h-1 bg-muted/60 rounded-full overflow-hidden">
-      <motion.div
-        className={`h-full rounded-full ${color}`}
-        initial={{ width: 0 }}
-        animate={{ width: `${Math.min(percent * 100, 100)}%` }}
-        transition={{ duration: 0.3 }}
-      />
-    </div>
-  );
-}
-
-function ConnectionBadge({ ok }: { ok: boolean | null }) {
-  if (ok === null) return (
-    <span className="text-xs text-zinc-500 flex items-center gap-1">
-      <Loader className="h-3 w-3 animate-spin" /> Checking…
-    </span>
-  );
-  return ok
-    ? <span className="text-xs text-emerald-400 flex items-center gap-1"><Wifi className="h-3 w-3" /> Daemon up</span>
-    : <span className="text-xs text-red-400 flex items-center gap-1"><WifiOff className="h-3 w-3" /> Daemon down</span>;
 }
 
 // ── Seeding stats ──
@@ -259,14 +192,14 @@ function SeedingPanel({ stats }: { stats: SeedStats | null }) {
         <StatTile
           label="Uploaded"
           value={fmtBytes(cum.uploadedBytes)}
-          sublabel={`↑ ${fmtSpeed(session.uploadSpeed)} now`}
+          sublabel={`↑ ${fmtSpeed(session.uploadSpeed, '0')} now`}
           icon={Upload}
           accent="text-amber-400"
         />
         <StatTile
           label="Downloaded"
           value={fmtBytes(cum.downloadedBytes)}
-          sublabel={`↓ ${fmtSpeed(session.downloadSpeed)} now`}
+          sublabel={`↓ ${fmtSpeed(session.downloadSpeed, '0')} now`}
           icon={Download}
           accent="text-blue-400"
         />
@@ -522,14 +455,14 @@ function TorrentRow({
             <span>{fmtBytes(t.totalBytes)}</span>
             {!isDone && !paused && (
               <>
-                <span className="text-blue-400">↓ {fmtSpeed(t.downBps)}</span>
-                <span className="text-amber-400">↑ {fmtSpeed(t.upBps)}</span>
+                <span className="text-blue-400">↓ {fmtSpeed(t.downBps, '0')}</span>
+                <span className="text-amber-400">↑ {fmtSpeed(t.upBps, '0')}</span>
                 {t.eta > 0 && <span>ETA {fmtEta(t.eta)}</span>}
               </>
             )}
             {isDone && !paused && (
               <>
-                <span className="text-amber-400">↑ {fmtSpeed(t.upBps)}</span>
+                <span className="text-amber-400">↑ {fmtSpeed(t.upBps, '0')}</span>
                 <span className={`tabular-nums ${ratioColor(t.ratio)}`}>ratio {t.ratio.toFixed(2)}</span>
                 {t.uploadedEver > 0 && <span>shared {fmtBytes(t.uploadedEver)}</span>}
                 {seeding && t.secondsSeeding > 0 && <span>{fmtDuration(t.secondsSeeding)} seeded</span>}
@@ -589,7 +522,7 @@ function TorrentRow({
       </div>
       <div className="flex items-center gap-3">
         <ProgressBar
-          percent={t.percent}
+          percent={t.percent * 100}
           color={paused ? 'bg-zinc-500' : isDone ? 'bg-emerald-500' : 'bg-blue-500'}
         />
         <span className="text-xs text-muted-foreground tabular-nums w-10 text-right">{pct}%</span>
@@ -913,7 +846,7 @@ export default function JellyfinPage() {
                 </p>
               </div>
               <div className="flex items-center gap-3 flex-wrap">
-                <ConnectionBadge ok={daemonOk} />
+                <ConnectionBadge ok={daemonOk} upLabel="Daemon up" downLabel="Daemon down" />
                 {jellyfinBase && (
                   <a
                     href={jellyfinBase}
