@@ -302,18 +302,62 @@ class ImageEvolverEngine {
 
 // ── React Component ──────────────────────────────────────────────────────
 
+// Feature-detect: run the engine in a Web Worker (with OffscreenCanvas for the
+// fitness readbacks) when the environment supports it; otherwise fall back to
+// the main-thread engine above. Both code paths are kept fully usable.
+function supportsWorkerEngine(): boolean {
+  return (
+    typeof Worker !== 'undefined' &&
+    typeof OffscreenCanvas !== 'undefined' &&
+    // Some browsers expose OffscreenCanvas but not a 2d context on it.
+    typeof (OffscreenCanvas.prototype as { getContext?: unknown }).getContext === 'function'
+  );
+}
+
+const LS_PREFIX = 'imageEvolver:best:';
+
+function loadPersistedPolygons(presetKey: string): Polygon[] | undefined {
+  if (!presetKey) return undefined;
+  try {
+    const raw = localStorage.getItem(LS_PREFIX + presetKey);
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) return parsed as Polygon[];
+  } catch { /* ignore malformed / unavailable storage */ }
+  return undefined;
+}
+
+function persistPolygons(presetKey: string, polygons: Polygon[]) {
+  if (!presetKey) return;
+  try {
+    localStorage.setItem(LS_PREFIX + presetKey, JSON.stringify(polygons));
+  } catch { /* quota exceeded or storage unavailable — ignore */ }
+}
+
 const ImageEvolver = () => {
   const { theme } = useTheme();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<ImageEvolverEngine | null>(null);
+  const workerRef = useRef<Worker | null>(null);
+  const useWorkerRef = useRef<boolean>(false);
+  // Latest best polygons for the preview: fed by worker 'progress' messages in
+  // worker mode, or by the main-thread engine in fallback mode.
+  const bestPolygonsRef = useRef<Polygon[]>([]);
+  // Key under which the current target's best result is persisted (preset name,
+  // or '' for uploads which we don't persist).
+  const persistKeyRef = useRef<string>('');
+  const lastPersistRef = useRef<number>(0);
   const targetCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const bestCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number>(0);
-  const lastFrameRef = useRef<number>(0);
   const canvasSizeRef = useRef({ w: 0, h: 0 });
   const themeRef = useRef(theme);
   themeRef.current = theme;
+
+  // Live param refs so worker/engine sync effects and message handlers can read
+  // current values without re-subscribing.
+  const speedRef = useRef(10);
 
   const [running, setRunning] = useState(false);
   const [generation, setGeneration] = useState(0);
@@ -328,29 +372,95 @@ const ImageEvolver = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load target image and initialize engine
-  const initWithTarget = useCallback((targetCanvas: HTMLCanvasElement) => {
+  // Create the worker once (if supported). Progress messages drive the preview
+  // and stats; the engine itself lives entirely inside the worker in this mode.
+  useEffect(() => {
+    if (!supportsWorkerEngine()) return;
+    let worker: Worker;
+    try {
+      worker = new Worker(
+        new URL('../workers/image-evolver.worker.ts', import.meta.url),
+        { type: 'module' },
+      );
+    } catch {
+      // Worker construction failed (e.g. blocked) — stay on the main-thread path.
+      return;
+    }
+    worker.onmessage = (e: MessageEvent) => {
+      const msg = e.data;
+      if (msg?.type === 'progress') {
+        bestPolygonsRef.current = msg.bestPolygons as Polygon[];
+        setGeneration(msg.generation);
+        setFitness(Math.round((1 - msg.fitness) * 10000) / 100);
+        setPolyCount(msg.polyCount);
+        redrawRef.current();
+        // Throttled persistence of the best candidate for this target.
+        const now = performance.now();
+        if (persistKeyRef.current && now - lastPersistRef.current > 2000) {
+          lastPersistRef.current = now;
+          persistPolygons(persistKeyRef.current, msg.bestPolygons as Polygon[]);
+        }
+      }
+    };
+    workerRef.current = worker;
+    useWorkerRef.current = true;
+    return () => {
+      worker.terminate();
+      workerRef.current = null;
+      useWorkerRef.current = false;
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load target image and initialize engine (worker or main-thread).
+  const initWithTarget = useCallback((targetCanvas: HTMLCanvasElement, persistKey: string) => {
     targetCanvasRef.current = targetCanvas;
+    persistKeyRef.current = persistKey;
     const ctx = targetCanvas.getContext('2d', { willReadFrequently: true })!;
     const targetData = ctx.getImageData(0, 0, WORK_SIZE, WORK_SIZE).data;
-    engineRef.current = new ImageEvolverEngine(targetData, popSize, mutationRate, maxPolygons);
+    const seed = loadPersistedPolygons(persistKey);
+    bestPolygonsRef.current = seed ?? [];
+
+    if (useWorkerRef.current && workerRef.current) {
+      engineRef.current = null;
+      workerRef.current.postMessage({
+        type: 'start',
+        targetData,
+        width: WORK_SIZE,
+        height: WORK_SIZE,
+        popSize,
+        mutationRate,
+        maxPolygons,
+        speed: speedRef.current,
+        seedPolygons: seed,
+      });
+    } else {
+      engineRef.current = new ImageEvolverEngine(targetData, popSize, mutationRate, maxPolygons);
+      bestPolygonsRef.current = engineRef.current.best.polygons;
+    }
+
     setGeneration(0);
     setFitness(0);
-    setPolyCount(0);
+    setPolyCount(bestPolygonsRef.current.length);
     setTargetLoaded(true);
   }, [popSize, mutationRate, maxPolygons]);
 
-  // Load preset on mount
+  // Load preset on mount. Defer to a microtask so the worker-init effect (which
+  // runs after this one on mount) has a chance to set up first.
   useEffect(() => {
-    const c = createPresetCanvas(presetName);
-    initWithTarget(c);
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      const c = createPresetCanvas(presetName);
+      initWithTarget(c, presetName);
+    });
+    return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadPreset = useCallback((name: string) => {
     setRunning(false);
     setPresetName(name);
     const c = createPresetCanvas(name);
-    initWithTarget(c);
+    initWithTarget(c, name);
   }, [initWithTarget]);
 
   const handleUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -365,7 +475,7 @@ const ImageEvolver = () => {
       const ctx = c.getContext('2d')!;
       ctx.drawImage(img, 0, 0, WORK_SIZE, WORK_SIZE);
       setPresetName('');
-      initWithTarget(c);
+      initWithTarget(c, ''); // uploads are transient — don't persist
       URL.revokeObjectURL(url);
     };
     img.onerror = () => { URL.revokeObjectURL(url); };
@@ -375,32 +485,49 @@ const ImageEvolver = () => {
 
   const handleReset = useCallback(() => {
     setRunning(false);
-    if (targetCanvasRef.current) {
+    if (!targetCanvasRef.current) return;
+    // Drop any persisted best for this target so the fresh run isn't reseeded.
+    if (persistKeyRef.current) {
+      try { localStorage.removeItem(LS_PREFIX + persistKeyRef.current); } catch { /* ignore */ }
+    }
+    bestPolygonsRef.current = [];
+    if (useWorkerRef.current && workerRef.current) {
+      workerRef.current.postMessage({ type: 'reset' });
+    } else {
       const ctx = targetCanvasRef.current.getContext('2d', { willReadFrequently: true })!;
       const targetData = ctx.getImageData(0, 0, WORK_SIZE, WORK_SIZE).data;
       engineRef.current = new ImageEvolverEngine(targetData, popSize, mutationRate, maxPolygons);
-      setGeneration(0);
-      setFitness(0);
-      setPolyCount(0);
+      bestPolygonsRef.current = engineRef.current.best.polygons;
     }
+    setGeneration(0);
+    setFitness(0);
+    setPolyCount(0);
   }, [popSize, mutationRate, maxPolygons]);
 
-  // Update engine params on the fly
+  // Keep the live speed ref in sync for worker start messages / main-thread loop.
+  useEffect(() => { speedRef.current = speed; }, [speed]);
+
+  // Update engine params on the fly (both engine and worker paths).
   useEffect(() => {
+    if (useWorkerRef.current && workerRef.current) {
+      workerRef.current.postMessage({
+        type: 'setParams', mutationRate, maxPolygons, popSize, speed,
+      });
+    }
     const engine = engineRef.current;
-    if (!engine) return;
-    engine.mutationRate = mutationRate;
-    engine.maxPolygons = maxPolygons;
-    engine.setPopSize(popSize);
-  }, [mutationRate, maxPolygons, popSize]);
+    if (engine) {
+      engine.mutationRate = mutationRate;
+      engine.maxPolygons = maxPolygons;
+      engine.setPopSize(popSize);
+    }
+  }, [mutationRate, maxPolygons, popSize, speed]);
 
   // ── Drawing ──
 
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;
-    const engine = engineRef.current;
     const target = targetCanvasRef.current;
-    if (!canvas || !engine || !target) return;
+    if (!canvas || !target) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
@@ -444,7 +571,9 @@ const ImageEvolver = () => {
       offCanvas.width = WORK_SIZE; offCanvas.height = WORK_SIZE;
     }
     const offCtx = offCanvas.getContext('2d')!;
-    renderCandidate(offCtx, engine.best, WORK_SIZE, WORK_SIZE);
+    // Preview always renders from the latest best polygons — supplied by the
+    // worker's progress messages, or the main-thread engine in fallback mode.
+    renderCandidate(offCtx, { polygons: bestPolygonsRef.current, fitness: 0 }, WORK_SIZE, WORK_SIZE);
     ctx.drawImage(offCanvas, startX + imgSize + gap, startY, imgSize, imgSize);
 
     // Borders
@@ -453,6 +582,11 @@ const ImageEvolver = () => {
     ctx.strokeRect(startX, startY, imgSize, imgSize);
     ctx.strokeRect(startX + imgSize + gap, startY, imgSize, imgSize);
   }, []);
+
+  // Stable ref so the worker's message handler (wired once on mount) can always
+  // call the latest redraw closure.
+  const redrawRef = useRef(redraw);
+  redrawRef.current = redraw;
 
   // ── Resize ──
 
@@ -476,10 +610,23 @@ const ImageEvolver = () => {
     return () => ro.disconnect();
   }, [redraw]);
 
-  // ── Simulation loop (time-based: speed = generations per second) ──
+  // ── Simulation loop ──
+  //
+  // Worker mode: the worker owns the stepping loop; run/pause just toggle it and
+  // progress messages drive redraw. Main-thread fallback: time-based RAF loop
+  // (speed = generations per second) exactly as before.
 
   useEffect(() => {
-    if (!running || !targetLoaded) {
+    if (!targetLoaded) return;
+
+    // Worker path — hand off run/pause to the worker.
+    if (useWorkerRef.current && workerRef.current) {
+      workerRef.current.postMessage({ type: running ? 'run' : 'pause' });
+      return;
+    }
+
+    // Main-thread fallback path.
+    if (!running) {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = 0;
       return;
@@ -501,9 +648,15 @@ const ImageEvolver = () => {
       if (maxSteps > 0) {
         for (let i = 0; i < maxSteps; i++) engine.step();
         accumulator -= maxSteps * interval;
+        bestPolygonsRef.current = engine.best.polygons;
         setGeneration(engine.generation);
         setFitness(Math.round((1 - engine.best.fitness) * 10000) / 100);
         setPolyCount(engine.best.polygons.length);
+        // Throttled persistence of the best candidate for this target.
+        if (persistKeyRef.current && now - lastPersistRef.current > 2000) {
+          lastPersistRef.current = now;
+          persistPolygons(persistKeyRef.current, engine.best.polygons);
+        }
       }
       redraw();
       rafRef.current = requestAnimationFrame(loop);
