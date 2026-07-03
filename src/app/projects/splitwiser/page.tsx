@@ -15,7 +15,6 @@ interface Me {
   id: number;
   name: string;
   color: string;
-  login_token: string | null;
 }
 
 interface Group {

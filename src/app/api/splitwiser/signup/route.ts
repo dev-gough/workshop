@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
-import { generateToken, setAuthCookie } from '@/lib/splitwiser-auth';
+import { generateToken, setAuthCookie, toPublicUser } from '@/lib/splitwiser-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const res = NextResponse.json({ user, group_id: groupId });
+    const res = NextResponse.json({ user: toPublicUser(user), group_id: groupId });
     setAuthCookie(res, loginToken);
     return res;
   } catch (error) {

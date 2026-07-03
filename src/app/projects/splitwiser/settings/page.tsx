@@ -19,7 +19,6 @@ interface Me {
   id: number;
   name: string;
   color: string;
-  login_token: string | null;
 }
 
 export default function SettingsPage() {
@@ -36,6 +35,7 @@ export default function SettingsPage() {
   const [showLink, setShowLink] = useState(false);
   const [copied, setCopied] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [loginUrl, setLoginUrl] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -96,10 +96,6 @@ export default function SettingsPage() {
     );
   }
 
-  const loginUrl = me.login_token
-    ? `${typeof window !== 'undefined' ? window.location.origin : ''}/projects/splitwiser/login/${me.login_token}`
-    : null;
-
   const copyLogin = async () => {
     if (!loginUrl) return;
     await navigator.clipboard.writeText(loginUrl);
@@ -109,9 +105,23 @@ export default function SettingsPage() {
 
   const revealLink = async () => {
     setShowLink(true);
-    if (loginUrl && !qrDataUrl) {
+    // Fetch the login URL on demand so the bearer token stays off the wire
+    // until the user explicitly asks to add another device.
+    let url = loginUrl;
+    if (!url) {
       try {
-        const dataUrl = await QRCode.toDataURL(loginUrl, {
+        const res = await fetch('/api/splitwiser/me/login-url');
+        if (res.ok) {
+          url = (await res.json()).url;
+          setLoginUrl(url);
+        }
+      } catch {
+        // Leave the panel empty; the user can retry.
+      }
+    }
+    if (url && !qrDataUrl) {
+      try {
+        const dataUrl = await QRCode.toDataURL(url, {
           margin: 1,
           width: 220,
           color: { dark: '#0a0a0a', light: '#fbbf24' },
@@ -200,9 +210,8 @@ export default function SettingsPage() {
             </div>
           </FadeIn>
 
-          {loginUrl && (
-            <FadeIn delay={0.1}>
-              <div className="rounded-2xl border border-border/60 bg-card/60 p-5 space-y-3">
+          <FadeIn delay={0.1}>
+            <div className="rounded-2xl border border-border/60 bg-card/60 p-5 space-y-3">
                 <div className="flex items-center gap-2">
                   <Wallet className="h-4 w-4 text-amber-400" />
                   <h2 className="text-sm font-semibold">Add another device</h2>
@@ -234,31 +243,32 @@ export default function SettingsPage() {
                         />
                       </div>
                     )}
-                    <details className="text-xs">
-                      <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">
-                        Or copy the link
-                      </summary>
-                      <div className="space-y-2 mt-2">
-                        <input
-                          value={loginUrl}
-                          readOnly
-                          onFocus={(e) => e.currentTarget.select()}
-                          className="w-full px-2 py-1.5 rounded bg-black/30 border border-border/40 text-xs font-mono"
-                        />
-                        <button
-                          onClick={copyLogin}
-                          className="w-full px-3 py-2 rounded-lg bg-amber-400/15 hover:bg-amber-400/25 text-amber-300 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors"
-                        >
-                          {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                          {copied ? 'Copied' : 'Copy link'}
-                        </button>
-                      </div>
-                    </details>
+                    {loginUrl && (
+                      <details className="text-xs">
+                        <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">
+                          Or copy the link
+                        </summary>
+                        <div className="space-y-2 mt-2">
+                          <input
+                            value={loginUrl}
+                            readOnly
+                            onFocus={(e) => e.currentTarget.select()}
+                            className="w-full px-2 py-1.5 rounded bg-black/30 border border-border/40 text-xs font-mono"
+                          />
+                          <button
+                            onClick={copyLogin}
+                            className="w-full px-3 py-2 rounded-lg bg-amber-400/15 hover:bg-amber-400/25 text-amber-300 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors"
+                          >
+                            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                            {copied ? 'Copied' : 'Copy link'}
+                          </button>
+                        </div>
+                      </details>
+                    )}
                   </div>
                 )}
               </div>
             </FadeIn>
-          )}
 
           <FadeIn delay={0.15}>
             <button

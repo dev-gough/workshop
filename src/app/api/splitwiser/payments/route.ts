@@ -28,6 +28,9 @@ export async function POST(request: NextRequest) {
     if (typeof amount_cents !== 'number' || !Number.isInteger(amount_cents) || amount_cents <= 0) {
       return NextResponse.json({ error: 'amount_cents must be a positive integer' }, { status: 400 });
     }
+    if (amount_cents > 100_000_000) {
+      return NextResponse.json({ error: 'amount_cents exceeds the $1M limit' }, { status: 400 });
+    }
     if (typeof occurred_on !== 'string' || !DATE_RE.test(occurred_on)) {
       return NextResponse.json({ error: 'occurred_on must be YYYY-MM-DD' }, { status: 400 });
     }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
-import { setAuthCookie } from '@/lib/splitwiser-auth';
+import { setAuthCookie, toPublicUser } from '@/lib/splitwiser-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +17,7 @@ export async function POST(
     if (rows.length === 0) {
       return NextResponse.json({ error: 'invalid token' }, { status: 404 });
     }
-    const res = NextResponse.json({ user: rows[0] });
+    const res = NextResponse.json({ user: toPublicUser(rows[0]) });
     setAuthCookie(res, token);
     return res;
   } catch (error) {

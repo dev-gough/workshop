@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
-import { getCurrentUser, unauthorized } from '@/lib/splitwiser-auth';
+import { getCurrentUser, unauthorized, userIsInGroup } from '@/lib/splitwiser-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,11 +18,14 @@ export async function DELETE(
   }
 
   const { rows } = await pool.query(
-    `SELECT created_by FROM splitwiser_payments WHERE id = $1`,
+    `SELECT created_by, group_id FROM splitwiser_payments WHERE id = $1`,
     [paymentId],
   );
   if (rows.length === 0) {
     return NextResponse.json({ error: 'not found' }, { status: 404 });
+  }
+  if (!(await userIsInGroup(me.id, rows[0].group_id))) {
+    return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   }
   if (rows[0].created_by !== me.id) {
     return NextResponse.json({ error: 'only the creator can delete' }, { status: 403 });

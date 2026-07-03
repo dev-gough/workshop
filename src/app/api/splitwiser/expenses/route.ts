@@ -30,6 +30,9 @@ export async function POST(request: NextRequest) {
     if (typeof total_cents !== 'number' || !Number.isInteger(total_cents) || total_cents <= 0) {
       return NextResponse.json({ error: 'total_cents must be a positive integer' }, { status: 400 });
     }
+    if (total_cents > 100_000_000) {
+      return NextResponse.json({ error: 'total_cents exceeds the $1M limit' }, { status: 400 });
+    }
     if (typeof paid_by !== 'number' || !Number.isInteger(paid_by)) {
       return NextResponse.json({ error: 'paid_by required' }, { status: 400 });
     }

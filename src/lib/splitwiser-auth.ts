@@ -16,6 +16,17 @@ export interface SplitwiserUser {
   last_seen_at: string | null;
 }
 
+// Public shape safe to serialize in API responses: the bearer `login_token`
+// (and any future internal-only columns) is stripped.
+export type PublicSplitwiserUser = Omit<SplitwiserUser, 'login_token'>;
+
+// Strip internal-only columns before returning a user row to a client.
+export function toPublicUser(row: SplitwiserUser): PublicSplitwiserUser {
+  // Deliberately omit `login_token` (the permanent bearer credential).
+  const { login_token: _login_token, ...pub } = row;
+  return pub;
+}
+
 export function generateToken(): string {
   return crypto.randomBytes(32).toString('hex');
 }
