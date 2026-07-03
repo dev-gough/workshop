@@ -6,9 +6,10 @@ import { sortedTrackIndices } from '@/lib/songUtils';
 // ── Types ──
 
 export interface Album {
+  id?: number;
   name: string;
   artist: string;
-  coverImage?: string;
+  coverUrl?: string | null;
   songs: string[];
   source?: string;
   addedAt?: string;

@@ -6,7 +6,9 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   try {
     const { rows } = await pool.query(
-      'SELECT artist, name, thumbnail AS "coverImage", songs, source, added_at AS "addedAt" FROM albums ORDER BY artist, name'
+      `SELECT id, artist, name, songs, source, added_at AS "addedAt",
+              CASE WHEN cover_path IS NOT NULL THEN '/api/music/cover/' || id END AS "coverUrl"
+       FROM albums ORDER BY artist, name`
     );
     return NextResponse.json(rows);
   } catch (error) {

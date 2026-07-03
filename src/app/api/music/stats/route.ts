@@ -26,10 +26,11 @@ export async function GET() {
         LIMIT 20
       `),
       pool.query(`
-        SELECT p.artist, p.album, COUNT(*)::int AS play_count, a.thumbnail
+        SELECT p.artist, p.album, COUNT(*)::int AS play_count,
+               CASE WHEN a.cover_path IS NOT NULL THEN '/api/music/cover/' || a.id END AS "coverUrl"
         FROM plays p
         LEFT JOIN albums a ON a.artist = p.artist AND a.name = p.album
-        GROUP BY p.artist, p.album, a.thumbnail
+        GROUP BY p.artist, p.album, a.id, a.cover_path
         ORDER BY play_count DESC
         LIMIT 10
       `),

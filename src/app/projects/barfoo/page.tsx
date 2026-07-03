@@ -25,7 +25,7 @@ interface PlaylistDetail {
 
 interface Stats {
   topSongs: { artist: string; album: string; song: string; play_count: number }[];
-  topAlbums: { artist: string; album: string; play_count: number; thumbnail?: string }[];
+  topAlbums: { artist: string; album: string; play_count: number; coverUrl?: string | null }[];
   topArtists: { artist: string; play_count: number }[];
   topListeners: { username: string; play_count: number }[];
   recentPlays: { artist: string; album: string; song: string; username: string; played_at: string }[];
@@ -297,8 +297,8 @@ function StatsView({ stats }: { stats: Stats }) {
             {stats.topAlbums.map((a, i) => (
               <div key={i} className="flex items-center gap-2 group">
                 <span className="text-xs w-5 text-right text-muted-foreground tabular-nums">{i + 1}</span>
-                {a.thumbnail && (
-                  <img src={a.thumbnail} alt="" className="h-7 w-7 rounded object-cover flex-shrink-0" />
+                {a.coverUrl && (
+                  <img src={a.coverUrl} alt="" className="h-7 w-7 rounded object-cover flex-shrink-0" />
                 )}
                 <div className="flex-1 relative min-w-0">
                   <div className="absolute inset-y-0 left-0 rounded-md bg-primary/10 group-hover:bg-primary/15 transition-colors"
@@ -977,8 +977,8 @@ export default function BarFooPage() {
                           {/* Composite cover: show first 4 album covers in a grid */}
                           <div className="w-20 h-20 rounded-xl overflow-hidden grid grid-cols-2 grid-rows-2 shadow-lg shrink-0">
                             {artistAlbums.slice(0, 4).map(({ album, index }) => (
-                              album.coverImage ? (
-                                <div key={index} className="bg-cover bg-center" style={{ backgroundImage: `url(${album.coverImage})` }} />
+                              album.coverUrl ? (
+                                <div key={index} className="bg-cover bg-center" style={{ backgroundImage: `url(${album.coverUrl})` }} />
                               ) : (
                                 <div key={index} className="bg-muted flex items-center justify-center">
                                   <Music className="h-3 w-3 text-muted-foreground" />
@@ -1056,10 +1056,10 @@ export default function BarFooPage() {
                                 <div className="flex items-center gap-3 p-3">
                                   <div
                                     className="w-12 h-12 rounded-lg bg-cover bg-center shadow-md shrink-0 cursor-pointer hover:ring-2 hover:ring-primary/40 transition-shadow"
-                                    style={album.coverImage ? { backgroundImage: `url(${album.coverImage})` } : undefined}
+                                    style={album.coverUrl ? { backgroundImage: `url(${album.coverUrl})` } : undefined}
                                     onClick={() => { setSelectedAlbum(index); setSidebarOpen(true); }}
                                   >
-                                    {!album.coverImage && (
+                                    {!album.coverUrl && (
                                       <div className="w-full h-full rounded-lg bg-muted flex items-center justify-center">
                                         <Music className="h-4 w-4 text-muted-foreground" />
                                       </div>
@@ -1151,8 +1151,8 @@ export default function BarFooPage() {
                             playAlbum(index);
                           }}
                         >
-                          {album.coverImage ? (
-                            <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url(${album.coverImage})` }} />
+                          {album.coverUrl ? (
+                            <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url(${album.coverUrl})` }} />
                           ) : (
                             <div className="absolute inset-0 bg-gradient-to-br from-muted to-muted/60 flex items-center justify-center">
                               <Music className="h-8 w-8 text-muted-foreground" />
@@ -1202,8 +1202,8 @@ export default function BarFooPage() {
                     {/* Album header */}
                     <div className="p-4 shrink-0">
                       <div className="flex items-start gap-3">
-                        {sel.coverImage ? (
-                          <div className="w-16 h-16 rounded-lg bg-cover bg-center shadow-lg shrink-0" style={{ backgroundImage: `url(${sel.coverImage})` }} />
+                        {sel.coverUrl ? (
+                          <div className="w-16 h-16 rounded-lg bg-cover bg-center shadow-lg shrink-0" style={{ backgroundImage: `url(${sel.coverUrl})` }} />
                         ) : (
                           <div className="w-16 h-16 rounded-lg bg-muted flex items-center justify-center shrink-0">
                             <Music className="h-6 w-6 text-muted-foreground" />
@@ -1337,11 +1337,11 @@ export default function BarFooPage() {
               <div className="container mx-auto flex items-center gap-4 px-4 py-2.5">
                 {/* Track info */}
                 <div className="flex items-center gap-3 w-64 shrink-0">
-                  {currentAlbum?.coverImage && currentSongName ? (
+                  {currentAlbum?.coverUrl && currentSongName ? (
                     <SongContextMenu artist={currentAlbum.artist} album={currentAlbum.name} song={currentSongName}>
                       <div
                         className="w-11 h-11 rounded-lg bg-cover bg-center shadow-md cursor-pointer shrink-0 hover:ring-2 hover:ring-primary/40 transition-shadow"
-                        style={{ backgroundImage: `url(${currentAlbum.coverImage})` }}
+                        style={{ backgroundImage: `url(${currentAlbum.coverUrl})` }}
                         onClick={() => {
                           if (currentTrack) {
                             setSelectedAlbum(currentTrack.albumIndex);

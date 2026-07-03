@@ -134,12 +134,12 @@ export default function FloatingPlayer() {
           <div className="p-3">
             {/* Top row: track info + close */}
             <div className="flex items-center gap-2.5 mb-2.5">
-              {currentAlbum?.coverImage ? (
+              {currentAlbum?.coverUrl ? (
                 <button
                   type="button"
                   onPointerUp={() => currentAlbum && navigate({ artist: currentAlbum.artist, album: currentAlbum.name })}
                   className="w-10 h-10 rounded-lg bg-cover bg-center shadow-md shrink-0 hover:ring-2 hover:ring-primary/60 transition-all cursor-pointer"
-                  style={{ backgroundImage: `url(${currentAlbum.coverImage})` }}
+                  style={{ backgroundImage: `url(${currentAlbum.coverUrl})` }}
                   title="Open album in BarFoo"
                   aria-label="Open album"
                 />

@@ -16,6 +16,11 @@ const AUDIO_EXTENSIONS = new Set(['.mp3', '.flac', '.wav', '.m4a', '.ogg']);
 const PREFERRED_NAMES = ['cover', 'folder', 'front', 'albumart', 'album', 'thumb'];
 const THUMBNAIL_WIDTH = 200;
 
+// Covers live in a hidden dir inside the music root so they travel with the
+// library and are trivially served by /api/music/cover/[id]. scanAllAlbums
+// already skips dot-directories, so this is never mistaken for an artist.
+export const COVERS_DIRNAME = '.covers';
+
 export function findBestImageFile(files: string[]): string | undefined {
   const imageFiles = files.filter(f => IMAGE_EXTENSIONS.has(path.extname(f).toLowerCase()));
   if (imageFiles.length === 0) return undefined;
@@ -31,11 +36,18 @@ export function findBestImageFile(files: string[]): string | undefined {
   return imageFiles[0];
 }
 
-export async function generateThumbnail(imageBuffer: Buffer): Promise<string> {
-  const resized = await sharp(imageBuffer)
+// Resize/crop to a square jpeg. Returns the raw bytes so the scanner can write
+// them to disk; callers that still want a data-URI (e.g. soulseek staging) wrap
+// the result with generateThumbnail().
+export async function resizeCover(imageBuffer: Buffer): Promise<Buffer> {
+  return sharp(imageBuffer)
     .resize(THUMBNAIL_WIDTH, THUMBNAIL_WIDTH, { fit: 'cover' })
     .jpeg({ quality: 70 })
     .toBuffer();
+}
+
+export async function generateThumbnail(imageBuffer: Buffer): Promise<string> {
+  const resized = await resizeCover(imageBuffer);
   return `data:image/jpeg;base64,${resized.toString('base64')}`;
 }
 
@@ -119,30 +131,50 @@ export async function scanSingleAlbum(
     }
   }
 
-  let thumbnail: string | null = null;
+  // Resolve the source image (file-based first, embedded metadata as fallback)
+  // and resize it to the square jpeg we serve. Bytes go to disk, not the DB.
+  let coverJpeg: Buffer | null = null;
 
-  // Try file-based cover art
   const imageFile = findBestImageFile(files);
   if (imageFile) {
     const imageBuffer = await fs.readFile(path.join(albumPath, imageFile));
-    thumbnail = await generateThumbnail(imageBuffer);
+    coverJpeg = await resizeCover(imageBuffer);
   }
 
-  // Fall back to embedded metadata
-  if (!thumbnail && songs.length > 0) {
+  if (!coverJpeg && songs.length > 0) {
     const embeddedBuffer = await extractEmbeddedCover(albumPath, songs);
     if (embeddedBuffer) {
-      thumbnail = await generateThumbnail(embeddedBuffer);
+      coverJpeg = await resizeCover(embeddedBuffer);
     }
   }
 
-  await pool.query(
-    `INSERT INTO albums (artist, name, thumbnail, songs, scanned_at, source)
-     VALUES ($1, $2, $3, $4, NOW(), $5)
+  // Upsert the row first so we have the album id to key the cover file by. This
+  // runs on every scan (INSERT or UPDATE), so a rescan of an EXISTING album still
+  // reaches the cover-writing step below — nothing is skipped just because the
+  // row already exists.
+  const { rows } = await pool.query(
+    `INSERT INTO albums (artist, name, songs, scanned_at, source)
+     VALUES ($1, $2, $3, NOW(), $4)
      ON CONFLICT (artist, name) DO UPDATE
-     SET thumbnail = $3, songs = $4, scanned_at = NOW(), source = $5`,
-    [artist, album, thumbnail, songs, source]
+     SET songs = $3, scanned_at = NOW(), source = $4
+     RETURNING id`,
+    [artist, album, songs, source]
   );
+  const albumId: number = rows[0].id;
+
+  // Write (or refresh) the cover file and record its relative path. A rescan of
+  // an existing album always rewrites the file + cover_path here.
+  if (coverJpeg) {
+    const coversDir = path.join(musicDir, COVERS_DIRNAME);
+    await fs.mkdir(coversDir, { recursive: true });
+    const relPath = path.join(COVERS_DIRNAME, `${albumId}.jpg`);
+    await fs.writeFile(path.join(musicDir, relPath), coverJpeg);
+    await pool.query('UPDATE albums SET cover_path = $1 WHERE id = $2', [relPath, albumId]);
+  } else {
+    // No art found this scan — clear any stale path so the UI shows a placeholder
+    // rather than pointing at a file we no longer wrote.
+    await pool.query('UPDATE albums SET cover_path = NULL WHERE id = $1', [albumId]);
+  }
 }
 
 export async function scanAllAlbums(pool: Pool, musicDir: string): Promise<number> {
