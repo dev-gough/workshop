@@ -27,8 +27,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (to) { args.push(to); where.push(`executed_at <= $${args.length}`); }
     const whereClause = where.join(' AND ');
 
-    const countRes = await pool.query(`SELECT COUNT(*)::int AS total FROM pt_trades WHERE ${whereClause}`, args);
-    const total = countRes.rows[0].total as number;
+    // Count + total realized P&L across the *whole* filtered set (not just this page),
+    // so the summary stat is stable while paging.
+    const aggRes = await pool.query(
+      `SELECT COUNT(*)::int AS total, COALESCE(SUM(realized_pnl_cents), 0)::bigint AS realized_pnl_total
+       FROM pt_trades WHERE ${whereClause}`,
+      args,
+    );
+    const total = aggRes.rows[0].total as number;
+    const realizedPnlTotalCents = Number(aggRes.rows[0].realized_pnl_total);
 
     const dataRes = await pool.query(
       `SELECT id, order_id, symbol, side, qty, price_cents, total_cents, realized_pnl_cents, executed_at
@@ -51,7 +58,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       executedAt: r.executed_at,
     }));
 
-    return NextResponse.json({ trades, total, limit, offset });
+    return NextResponse.json({ trades, total, realizedPnlTotalCents, limit, offset });
   } catch (error) {
     console.error('paper-trading trades GET error:', error);
     return NextResponse.json({ error: 'Failed to load transaction log' }, { status: 500 });

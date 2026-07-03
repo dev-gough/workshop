@@ -7,9 +7,14 @@ import { fmtMoney, fmtDateTime } from '../_lib/format';
 import { Monogram } from '../_components/holding-row';
 
 interface OpenOrder {
-  id: number; symbol: string; side: 'buy' | 'sell'; type: 'market' | 'limit';
-  qty: number; limitPriceCents: number | null; status: string; createdAt: string;
+  id: number; symbol: string; side: 'buy' | 'sell'; type: 'market' | 'limit' | 'stop' | 'stop_limit';
+  qty: number; limitPriceCents: number | null; triggerPriceCents: number | null;
+  tif: 'day' | 'gtc'; status: string; createdAt: string;
 }
+
+const TYPE_LABEL: Record<OpenOrder['type'], string> = {
+  market: 'Market', limit: 'Limit', stop: 'Stop', stop_limit: 'Stop-limit',
+};
 
 export default function OrdersPage() {
   const { selected, loading } = useAccounts();
@@ -59,7 +64,7 @@ export default function OrdersPage() {
 
       {orders.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-border px-4 py-12 text-center text-sm text-muted-foreground">
-          No resting orders. Limit orders — and orders placed while the market is closed — appear here.
+          No resting orders. Limit, stop, and stop-limit orders — and orders placed while the market is closed — appear here.
         </p>
       ) : (
         <div className="-mx-3">
@@ -73,11 +78,13 @@ export default function OrdersPage() {
                   <span className={`text-[11px] font-bold tracking-wide ${o.side === 'buy' ? 'pt-gain' : 'pt-loss'}`}>{o.side.toUpperCase()}</span>
                 </div>
                 <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
-                  <span className="capitalize">{o.type}</span>
+                  <span>{TYPE_LABEL[o.type]}</span>
                   {o.type === 'market' && (
                     <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">queued</span>
                   )}
+                  <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide">{o.tif === 'day' ? 'Day' : 'GTC'}</span>
                   <span>· {o.qty} {o.qty === 1 ? 'share' : 'shares'}</span>
+                  {o.triggerPriceCents != null && <span>· trigger {fmtMoney(o.triggerPriceCents)}</span>}
                   {o.limitPriceCents != null && <span>· limit {fmtMoney(o.limitPriceCents)}</span>}
                   <span>· {fmtDateTime(o.createdAt)}</span>
                 </div>

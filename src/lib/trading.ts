@@ -7,6 +7,14 @@
  *   - Market order, market closed → queued (status 'open'), fills at the next open.
  *   - Limit order                → stays 'open' until the price crosses (buy: quote
  *                                   <= limit, sell: quote >= limit) during a session.
+ *   - Stop order                 → stays 'open' until the quote crosses the trigger
+ *                                   (buy-stop: quote >= trigger, sell-stop: quote <=
+ *                                   trigger), then fills at market that same sweep.
+ *   - Stop-limit order           → on trigger it becomes a resting limit (type flips
+ *                                   to 'limit'); a later sweep fills it like any limit.
+ *
+ * Time-in-force: 'gtc' orders rest indefinitely; 'day' orders expire (status
+ * 'expired') if still open at the next session open.
  *
  * Cash/shares are validated at fill time (we don't reserve buying power for resting
  * orders) — a fill that can no longer be afforded is marked 'rejected' rather than
@@ -19,7 +27,8 @@ import { isMarketOpen, nextMarketOpen, todaysMarketOpen } from './market';
 import { getQuote } from './quotes';
 
 export type Side = 'buy' | 'sell';
-export type OrderType = 'market' | 'limit';
+export type OrderType = 'market' | 'limit' | 'stop' | 'stop_limit';
+export type Tif = 'day' | 'gtc';
 
 export interface PlaceOrderInput {
   symbol: string;
@@ -28,8 +37,12 @@ export interface PlaceOrderInput {
   /** Either qty or dollars must be supplied. qty wins if both are present. */
   qty?: number;
   dollars?: number;
-  /** Required for limit orders, in dollars. */
+  /** Required for limit and stop_limit orders, in dollars. */
   limitPrice?: number;
+  /** Required for stop and stop_limit orders, in dollars. */
+  triggerPrice?: number;
+  /** Time-in-force; defaults to 'gtc'. */
+  tif?: Tif;
 }
 
 export interface PlaceOrderResult {
@@ -49,15 +62,29 @@ interface OpenOrderRow {
   type: OrderType;
   qty: number;
   limit_price_cents: number | null;
+  trigger_price_cents: number | null;
 }
 
 function dollarsToCents(d: number): number {
   return Math.round(d * 100);
 }
 
+/**
+ * Has a stop / stop-limit order's trigger been crossed by the latest price?
+ * Buy-stop triggers when the price rises to/through the trigger; sell-stop when it
+ * falls to/through it. Non-stop orders are never "triggered" in this sense.
+ */
+function isTriggered(order: OpenOrderRow, priceCents: number): boolean {
+  if (order.type !== 'stop' && order.type !== 'stop_limit') return false;
+  if (order.trigger_price_cents == null) return false;
+  return order.side === 'buy' ? priceCents >= order.trigger_price_cents : priceCents <= order.trigger_price_cents;
+}
+
 /** Does the latest price satisfy a limit order's trigger? Market orders always do. */
 function isFillable(order: OpenOrderRow, priceCents: number): boolean {
   if (order.type === 'market') return true;
+  if (order.type === 'stop') return isTriggered(order, priceCents);
+  // limit and (post-trigger) stop_limit rest on the limit price.
   if (order.limit_price_cents == null) return false;
   return order.side === 'buy' ? priceCents <= order.limit_price_cents : priceCents >= order.limit_price_cents;
 }
@@ -159,12 +186,30 @@ export async function placeOrder(accountId: number, input: PlaceOrderInput): Pro
   const symbol = input.symbol?.trim().toUpperCase();
   if (!symbol) return { ok: false, status: 'rejected', message: 'symbol is required' };
   if (input.side !== 'buy' && input.side !== 'sell') return { ok: false, status: 'rejected', message: 'side must be buy or sell' };
-  if (input.type !== 'market' && input.type !== 'limit') return { ok: false, status: 'rejected', message: 'type must be market or limit' };
+  const VALID_TYPES: OrderType[] = ['market', 'limit', 'stop', 'stop_limit'];
+  if (!VALID_TYPES.includes(input.type)) return { ok: false, status: 'rejected', message: 'type must be market, limit, stop, or stop_limit' };
 
+  const tif: Tif = input.tif === 'day' ? 'day' : 'gtc';
+  if (input.tif != null && input.tif !== 'day' && input.tif !== 'gtc') return { ok: false, status: 'rejected', message: "tif must be 'day' or 'gtc'" };
+
+  // A limit price backs both limit and stop_limit orders.
+  const needsLimit = input.type === 'limit' || input.type === 'stop_limit';
   let limitCents: number | null = null;
-  if (input.type === 'limit') {
-    if (input.limitPrice == null || !(input.limitPrice > 0)) return { ok: false, status: 'rejected', message: 'limit orders need a positive limit price' };
+  if (needsLimit) {
+    if (input.limitPrice == null || !Number.isFinite(input.limitPrice) || !(input.limitPrice > 0)) {
+      return { ok: false, status: 'rejected', message: 'this order type needs a positive limit price' };
+    }
     limitCents = dollarsToCents(input.limitPrice);
+  }
+
+  // A trigger price backs both stop and stop_limit orders.
+  const needsTrigger = input.type === 'stop' || input.type === 'stop_limit';
+  let triggerCents: number | null = null;
+  if (needsTrigger) {
+    if (input.triggerPrice == null || !Number.isFinite(input.triggerPrice) || !(input.triggerPrice > 0)) {
+      return { ok: false, status: 'rejected', message: 'stop orders need a positive trigger price' };
+    }
+    triggerCents = dollarsToCents(input.triggerPrice);
   }
 
   // Fresh quote for fill / dollar conversion. May be null (e.g. typo, or yahoo down).
@@ -178,7 +223,9 @@ export async function placeOrder(accountId: number, input: PlaceOrderInput): Pro
     qty = Math.floor(input.qty);
     if (qty < 1) return { ok: false, status: 'rejected', message: 'quantity must be at least 1 share' };
   } else if (input.dollars != null && input.dollars > 0) {
-    const refPriceCents = input.type === 'limit' ? limitCents! : quote?.priceCents;
+    // Size against the price this order would transact near: a limit/stop-limit's
+    // limit, a plain stop's trigger, else the live quote for a market order.
+    const refPriceCents = limitCents ?? triggerCents ?? quote?.priceCents;
     if (!refPriceCents) return { ok: false, status: 'rejected', message: 'no quote available to size a dollar order' };
     qty = Math.floor(dollarsToCents(input.dollars) / refPriceCents);
     if (qty < 1) return { ok: false, status: 'rejected', message: 'amount is too small for even one share' };
@@ -201,12 +248,12 @@ export async function placeOrder(accountId: number, input: PlaceOrderInput): Pro
     }
 
     const inserted = await client.query(
-      `INSERT INTO pt_orders (account_id, symbol, side, type, qty, limit_price_cents)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-      [accountId, symbol, input.side, input.type, qty, limitCents],
+      `INSERT INTO pt_orders (account_id, symbol, side, type, qty, limit_price_cents, trigger_price_cents, tif)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+      [accountId, symbol, input.side, input.type, qty, limitCents, triggerCents, tif],
     );
     const orderId = Number(inserted.rows[0].id);
-    const order: OpenOrderRow = { id: orderId, account_id: accountId, symbol, side: input.side, type: input.type, qty, limit_price_cents: limitCents };
+    const order: OpenOrderRow = { id: orderId, account_id: accountId, symbol, side: input.side, type: input.type, qty, limit_price_cents: limitCents, trigger_price_cents: triggerCents };
 
     // Market order while the market is closed → leave queued for the next open.
     if (input.type === 'market' && !marketOpen) {
@@ -220,7 +267,14 @@ export async function placeOrder(accountId: number, input: PlaceOrderInput): Pro
       };
     }
 
-    // Eligible to fill right now?
+    // A stop_limit whose stop is already crossed at placement becomes a working limit
+    // right away — mirror what the sweep does so both paths converge.
+    if (input.type === 'stop_limit' && quote && marketOpen && isTriggered(order, quote.priceCents)) {
+      order.type = 'limit';
+      await client.query(`UPDATE pt_orders SET type = 'limit' WHERE id = $1`, [orderId]);
+    }
+
+    // Eligible to fill right now? (market always; limit/stop when their trigger is met.)
     if (quote && marketOpen && isFillable(order, quote.priceCents)) {
       const res = await fillOrderTx(client, order, quote.priceCents);
       await client.query('COMMIT');
@@ -230,10 +284,13 @@ export async function placeOrder(accountId: number, input: PlaceOrderInput): Pro
       return { ok: false, status: 'rejected', orderId, message: `Order rejected: ${res.reason}.` };
     }
 
-    // Limit order resting (or market order we couldn't price yet).
+    // Resting (limit, stop, stop-limit — or a market order we couldn't price yet).
     await client.query('COMMIT');
-    if (input.type === 'limit') {
-      return { ok: true, status: 'open', orderId, message: `Limit ${input.side} placed for ${qty} ${symbol} @ $${(limitCents! / 100).toFixed(2)} — resting until it crosses.` };
+    if (needsLimit) {
+      return { ok: true, status: 'open', orderId, message: `${input.type === 'stop_limit' ? 'Stop-limit' : 'Limit'} ${input.side} placed for ${qty} ${symbol} @ $${(limitCents! / 100).toFixed(2)} — resting until it crosses.` };
+    }
+    if (input.type === 'stop') {
+      return { ok: true, status: 'open', orderId, message: `Stop ${input.side} placed for ${qty} ${symbol}, trigger $${(triggerCents! / 100).toFixed(2)} — resting until triggered.` };
     }
     return { ok: true, status: 'open', orderId, message: `Order placed for ${qty} ${symbol} — awaiting a quote to fill.` };
   } catch (e) {
@@ -264,8 +321,21 @@ export async function processOpenOrders(): Promise<number> {
   // Reject quotes captured before today's session began — on the first sweep after the
   // open the cache may still hold yesterday's close, and we don't want to fill on it.
   const sessionOpen = todaysMarketOpen();
+
+  // Expire 'day' orders left open from a previous session before we try to fill. An
+  // order created before today's open never got a fill during its own session, so it
+  // dies now. (On a non-trading day sessionOpen is null and the market is closed, so
+  // we've already returned above — expiry only runs during a live session.)
+  if (sessionOpen) {
+    await pool.query(
+      `UPDATE pt_orders SET status = 'expired'
+       WHERE status = 'open' AND tif = 'day' AND created_at < $1`,
+      [sessionOpen],
+    );
+  }
+
   const { rows } = await pool.query<OpenOrderRow & { price_cents: string | null; quote_updated_at: Date | null }>(
-    `SELECT o.id, o.account_id, o.symbol, o.side, o.type, o.qty, o.limit_price_cents, q.price_cents, q.updated_at AS quote_updated_at
+    `SELECT o.id, o.account_id, o.symbol, o.side, o.type, o.qty, o.limit_price_cents, o.trigger_price_cents, q.price_cents, q.updated_at AS quote_updated_at
      FROM pt_orders o
      LEFT JOIN pt_quotes q ON q.symbol = o.symbol
      WHERE o.status = 'open'
@@ -280,8 +350,23 @@ export async function processOpenOrders(): Promise<number> {
     const priceCents = Number(r.price_cents);
     const order: OpenOrderRow = {
       id: Number(r.id), account_id: Number(r.account_id), symbol: r.symbol,
-      side: r.side, type: r.type, qty: Number(r.qty), limit_price_cents: r.limit_price_cents == null ? null : Number(r.limit_price_cents),
+      side: r.side, type: r.type, qty: Number(r.qty),
+      limit_price_cents: r.limit_price_cents == null ? null : Number(r.limit_price_cents),
+      trigger_price_cents: r.trigger_price_cents == null ? null : Number(r.trigger_price_cents),
     };
+
+    // A triggered stop_limit converts into a resting limit; it fills on a later sweep
+    // (or this one, if the limit already crosses too).
+    if (order.type === 'stop_limit' && isTriggered(order, priceCents)) {
+      try {
+        await pool.query(`UPDATE pt_orders SET type = 'limit' WHERE id = $1 AND status = 'open'`, [order.id]);
+        order.type = 'limit';
+      } catch (e) {
+        console.error(`stop_limit trigger update failed for order ${order.id}:`, e);
+        continue;
+      }
+    }
+
     if (!isFillable(order, priceCents)) continue;
     try {
       const res = await attemptFill(order, priceCents);

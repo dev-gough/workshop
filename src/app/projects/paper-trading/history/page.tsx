@@ -17,6 +17,7 @@ export default function HistoryPage() {
   const { selected, loading } = useAccounts();
   const [trades, setTrades] = useState<Trade[]>([]);
   const [total, setTotal] = useState(0);
+  const [realizedPnlTotal, setRealizedPnlTotal] = useState(0);
   const [offset, setOffset] = useState(0);
 
   // Filters
@@ -35,6 +36,7 @@ export default function HistoryPage() {
     const data = await res.json();
     setTrades(data.trades ?? []);
     setTotal(data.total ?? 0);
+    setRealizedPnlTotal(data.realizedPnlTotalCents ?? 0);
   }, [symbol, side, from, to]);
 
   useEffect(() => {
@@ -57,6 +59,14 @@ export default function HistoryPage() {
       <div className="mb-3 flex items-baseline justify-between">
         <h2 className="ws-serif text-xl font-semibold tracking-tight">Activity</h2>
         <span className="text-xs text-muted-foreground">{total} trade{total !== 1 ? 's' : ''}</span>
+      </div>
+
+      {/* Realized P&L summary (across the current filter set). */}
+      <div className="mb-5 rounded-2xl bg-muted px-4 py-3">
+        <div className="text-xs font-medium text-muted-foreground">Realized P&L</div>
+        <div className={`mt-0.5 text-xl font-semibold tabular-nums ${pnlColor(realizedPnlTotal)}`}>
+          {fmtMoney(realizedPnlTotal, { sign: true })}
+        </div>
       </div>
 
       {/* Filters */}
@@ -104,10 +114,14 @@ export default function HistoryPage() {
                 <div className="font-semibold leading-tight">
                   {t.side === 'buy' ? '−' : '+'}{fmtMoney(t.totalCents)}
                 </div>
-                {t.realizedPnlCents != null && (
-                  <div className={`text-xs ${pnlColor(t.realizedPnlCents)}`}>
-                    {fmtMoney(t.realizedPnlCents, { sign: true })} P&L
-                  </div>
+                {t.side === 'sell' && (
+                  t.realizedPnlCents != null ? (
+                    <div className={`text-xs ${pnlColor(t.realizedPnlCents)}`}>
+                      {fmtMoney(t.realizedPnlCents, { sign: true })} P&L
+                    </div>
+                  ) : (
+                    <div className="text-xs text-muted-foreground">— P&L</div>
+                  )
                 )}
               </div>
             </div>

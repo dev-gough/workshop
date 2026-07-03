@@ -11,7 +11,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     if (!Number.isFinite(id)) return NextResponse.json({ error: 'invalid account id' }, { status: 400 });
 
     const { rows } = await pool.query(
-      `SELECT id, symbol, side, type, qty, limit_price_cents, status, created_at
+      `SELECT id, symbol, side, type, qty, limit_price_cents, trigger_price_cents, tif, status, created_at
        FROM pt_orders
        WHERE account_id = $1 AND status = 'open'
        ORDER BY created_at DESC`,
@@ -24,6 +24,8 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
       type: r.type,
       qty: Number(r.qty),
       limitPriceCents: r.limit_price_cents == null ? null : Number(r.limit_price_cents),
+      triggerPriceCents: r.trigger_price_cents == null ? null : Number(r.trigger_price_cents),
+      tif: r.tif,
       status: r.status,
       createdAt: r.created_at,
     }));
@@ -48,6 +50,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       qty: body.qty != null ? Number(body.qty) : undefined,
       dollars: body.dollars != null ? Number(body.dollars) : undefined,
       limitPrice: body.limitPrice != null ? Number(body.limitPrice) : undefined,
+      triggerPrice: body.triggerPrice != null ? Number(body.triggerPrice) : undefined,
+      tif: body.tif,
     };
 
     const result = await placeOrder(id, input);

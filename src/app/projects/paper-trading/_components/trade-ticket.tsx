@@ -8,8 +8,12 @@ interface Quote { symbol: string; priceCents: number; prevCloseCents: number | n
 interface SearchResult { symbol: string; name: string; exchange: string | null }
 
 type Side = 'buy' | 'sell';
-type OrderType = 'market' | 'limit';
+type OrderType = 'market' | 'limit' | 'stop' | 'stop_limit';
+type Tif = 'day' | 'gtc';
 type EntryMode = 'shares' | 'dollars';
+
+const NEEDS_LIMIT = (t: OrderType) => t === 'limit' || t === 'stop_limit';
+const NEEDS_TRIGGER = (t: OrderType) => t === 'stop' || t === 'stop_limit';
 
 export default function TradeTicket({
   accountId, cashCents, onDone, initialSymbol, initialSide,
@@ -31,9 +35,11 @@ export default function TradeTicket({
 
   const [side, setSide] = useState<Side>(initialSide ?? 'buy');
   const [type, setType] = useState<OrderType>('market');
+  const [tif, setTif] = useState<Tif>('gtc');
   const [entryMode, setEntryMode] = useState<EntryMode>('shares');
   const [amount, setAmount] = useState('');
   const [limitPrice, setLimitPrice] = useState('');
+  const [triggerPrice, setTriggerPrice] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -74,8 +80,11 @@ export default function TradeTicket({
       const res = await fetch(`/api/paper-trading/quote?symbol=${encodeURIComponent(sym)}`);
       const data = await res.json();
       setQuote(data.quote ?? null);
-      if (data.quote?.priceCents && type === 'limit' && !limitPrice) {
+      if (data.quote?.priceCents && NEEDS_LIMIT(type) && !limitPrice) {
         setLimitPrice((data.quote.priceCents / 100).toFixed(2));
+      }
+      if (data.quote?.priceCents && NEEDS_TRIGGER(type) && !triggerPrice) {
+        setTriggerPrice((data.quote.priceCents / 100).toFixed(2));
       }
     } finally { setQuoteLoading(false); }
   }
@@ -89,7 +98,13 @@ export default function TradeTicket({
     loadQuote(sym);
   }
 
-  const refPriceCents = type === 'limit' ? Math.round(Number(limitPrice) * 100) : quote?.priceCents ?? 0;
+  // Size the preview against the price this order transacts near: limit for
+  // limit/stop-limit, trigger for a plain stop, else the live quote.
+  const refPriceCents = NEEDS_LIMIT(type)
+    ? Math.round(Number(limitPrice) * 100)
+    : type === 'stop'
+      ? Math.round(Number(triggerPrice) * 100)
+      : quote?.priceCents ?? 0;
   const preview = useMemo(() => {
     const amt = Number(amount);
     if (!refPriceCents || !Number.isFinite(amt) || amt <= 0) return null;
@@ -112,11 +127,13 @@ export default function TradeTicket({
     setMessage(null);
     const amt = Number(amount);
     if (!Number.isFinite(amt) || amt <= 0) { setMessage({ ok: false, text: 'Enter an amount' }); return; }
-    if (type === 'limit' && !(Number(limitPrice) > 0)) { setMessage({ ok: false, text: 'Enter a limit price' }); return; }
+    if (NEEDS_LIMIT(type) && !(Number(limitPrice) > 0)) { setMessage({ ok: false, text: 'Enter a limit price' }); return; }
+    if (NEEDS_TRIGGER(type) && !(Number(triggerPrice) > 0)) { setMessage({ ok: false, text: 'Enter a trigger price' }); return; }
 
-    const body: Record<string, unknown> = { symbol, side, type };
+    const body: Record<string, unknown> = { symbol, side, type, tif };
     if (entryMode === 'shares') body.qty = Math.floor(amt); else body.dollars = amt;
-    if (type === 'limit') body.limitPrice = Number(limitPrice);
+    if (NEEDS_LIMIT(type)) body.limitPrice = Number(limitPrice);
+    if (NEEDS_TRIGGER(type)) body.triggerPrice = Number(triggerPrice);
 
     setSubmitting(true);
     try {
@@ -181,16 +198,36 @@ export default function TradeTicket({
         </div>
       )}
 
-      {/* Side + type toggles */}
-      <div className="mb-4 grid grid-cols-2 gap-2">
+      {/* Side toggle */}
+      <div className="mb-3">
         <Segmented value={side} onChange={(v) => setSide(v as Side)} options={[{ v: 'buy', l: 'Buy' }, { v: 'sell', l: 'Sell' }]}
           activeClass={side === 'buy' ? 'pt-bg-gain text-white' : 'pt-bg-loss text-white'} />
-        <Segmented value={type} onChange={(v) => setType(v as OrderType)} options={[{ v: 'market', l: 'Market' }, { v: 'limit', l: 'Limit' }]}
+      </div>
+
+      {/* Order type */}
+      <div className="mb-4">
+        <Segmented small value={type} onChange={(v) => setType(v as OrderType)}
+          options={[{ v: 'market', l: 'Market' }, { v: 'limit', l: 'Limit' }, { v: 'stop', l: 'Stop' }, { v: 'stop_limit', l: 'Stop-limit' }]}
           activeClass="bg-primary text-primary-foreground" />
       </div>
 
-      {/* Limit price */}
-      {type === 'limit' && (
+      {/* Trigger price (stop / stop-limit) */}
+      {NEEDS_TRIGGER(type) && (
+        <div className="mb-4">
+          <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Trigger price</label>
+          <div className="relative">
+            <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[15px] text-muted-foreground">$</span>
+            <input value={triggerPrice} onChange={(e) => setTriggerPrice(e.target.value)} inputMode="decimal"
+              className={`${inputCls} pl-7 pr-3.5`} />
+          </div>
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            {side === 'buy' ? 'Triggers when the price rises to or above this.' : 'Triggers when the price falls to or below this.'}
+          </p>
+        </div>
+      )}
+
+      {/* Limit price (limit / stop-limit) */}
+      {NEEDS_LIMIT(type) && (
         <div className="mb-4">
           <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Limit price</label>
           <div className="relative">
@@ -200,6 +237,15 @@ export default function TradeTicket({
           </div>
         </div>
       )}
+
+      {/* Time in force */}
+      <div className="mb-4">
+        <div className="mb-1.5 flex items-center justify-between">
+          <label className="text-xs font-medium text-muted-foreground">Time in force</label>
+          <Segmented small value={tif} onChange={(v) => setTif(v as Tif)}
+            options={[{ v: 'day', l: 'Day' }, { v: 'gtc', l: 'GTC' }]} activeClass="bg-secondary text-secondary-foreground" />
+        </div>
+      </div>
 
       {/* Entry mode + amount */}
       <div className="mb-4">
