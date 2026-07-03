@@ -710,7 +710,7 @@ export default function BarFooPage() {
       {/* Audio element lives in AudioProvider */}
 
       {/* Full-viewport app shell — header is already 56px (h-14) */}
-      <div className="flex flex-col" style={{ height: 'calc(100vh - 56px)' }}>
+      <div className="flex flex-col" style={{ height: 'calc(100vh - 57px)' }}>
 
         {/* Top bar */}
         <div className="flex items-center justify-between px-5 py-3 border-b border-border/60 shrink-0">
