@@ -2,7 +2,14 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { Pool } from 'pg';
 import sharp from 'sharp';
-import { parseFile } from 'music-metadata';
+
+// music-metadata is ESM-only; a static import breaks the tsx-run scripts
+// (ingest-downloads, scan-music), which are transpiled to CJS. A dynamic
+// import stays native and can load ESM from both Next.js and tsx contexts.
+let musicMetadata: Promise<typeof import('music-metadata')> | null = null;
+export function loadMusicMetadata() {
+  return (musicMetadata ??= import('music-metadata'));
+}
 
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']);
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.flac', '.wav', '.m4a', '.ogg']);
@@ -35,6 +42,7 @@ export async function generateThumbnail(imageBuffer: Buffer): Promise<string> {
 export async function extractEmbeddedCover(albumPath: string, audioFiles: string[]): Promise<Buffer | undefined> {
   for (const file of audioFiles) {
     try {
+      const { parseFile } = await loadMusicMetadata();
       const metadata = await parseFile(path.join(albumPath, file));
       const picture = metadata.common.picture?.[0];
       if (picture) return Buffer.from(picture.data);
