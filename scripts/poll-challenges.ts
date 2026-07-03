@@ -6,6 +6,7 @@ import {
   getMatchIds,
   getMatch,
 } from '../src/lib/riot';
+import { upsertChallengeProgress } from '../src/lib/challenges-sync';
 
 const pool = makePool('challenge_poller');
 
@@ -179,15 +180,7 @@ async function poll() {
   );
 
   // Also update challenge_progress table
-  for (const ch of playerData.challenges) {
-    await pool.query(
-      `INSERT INTO challenge_progress (challenge_id, level, value, percentile, achieved_time, position, players_in_level, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, now())
-       ON CONFLICT (challenge_id) DO UPDATE SET
-         level = $2, value = $3, percentile = $4, achieved_time = $5, position = $6, players_in_level = $7, updated_at = now()`,
-      [ch.challengeId, ch.level, ch.value, ch.percentile, ch.achievedTime || null, ch.position || null, ch.playersInLevel || null]
-    );
-  }
+  await upsertChallengeProgress(pool, playerData.challenges);
 
   console.log(`  Snapshot updated.`);
 }

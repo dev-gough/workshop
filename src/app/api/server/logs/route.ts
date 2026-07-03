@@ -1,25 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { execSync } from 'child_process';
+import { ALLOWED_SERVICES } from '@/lib/server-services';
 
 export const dynamic = 'force-dynamic';
-
-const ALLOWED_SERVICES = [
-  'workshop',
-  'challenge-poller',
-  'nginx',
-  'postgresql@16-main',
-  'jellyfin',
-  'plexmediaserver',
-  'tailscaled',
-  'ssh',
-  'minecraft-atm6',
-  'minecraft-atm10',
-  'minecraft-stoneblock3',
-  'minecraft-meatballcraft',
-  'minecraft-atm9sky',
-  'minecraft-above-beyond',
-  'minecraft-star-technology',
-];
 
 export async function GET(request: NextRequest) {
   try {

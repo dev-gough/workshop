@@ -3,6 +3,7 @@ import { execSync } from 'child_process';
 import { getConfig } from '@/lib/config';
 import { requireSetupToken } from '@/lib/admin-auth';
 import { sendRconCommand } from '@/lib/rcon';
+import { TRACKED_SERVICES } from '@/lib/server-services';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,25 +12,6 @@ function jellyfinPort(): number {
   if (!j) return 8096;
   try { return Number(new URL(j.baseUrl).port) || 8096; } catch { return 8096; }
 }
-
-// Services to show on the dashboard
-const TRACKED_SERVICES = [
-  'workshop',
-  'challenge-poller',
-  'nginx',
-  'postgresql@16-main',
-  'jellyfin',
-  'plexmediaserver',
-  'tailscaled',
-  'ssh',
-  'minecraft-atm6',
-  'minecraft-atm10',
-  'minecraft-stoneblock3',
-  'minecraft-meatballcraft',
-  'minecraft-atm9sky',
-  'minecraft-above-beyond',
-  'minecraft-star-technology',
-];
 
 interface ServiceEndpoint {
   port: number;

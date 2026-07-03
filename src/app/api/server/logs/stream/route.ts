@@ -1,25 +1,8 @@
 import { NextRequest } from 'next/server';
 import { spawn } from 'child_process';
+import { ALLOWED_SERVICES } from '@/lib/server-services';
 
 export const dynamic = 'force-dynamic';
-
-const ALLOWED_SERVICES = [
-  'workshop',
-  'challenge-poller',
-  'nginx',
-  'postgresql@16-main',
-  'jellyfin',
-  'plexmediaserver',
-  'tailscaled',
-  'ssh',
-  'minecraft-atm6',
-  'minecraft-atm10',
-  'minecraft-stoneblock3',
-  'minecraft-meatballcraft',
-  'minecraft-atm9sky',
-  'minecraft-above-beyond',
-  'minecraft-star-technology',
-];
 
 function parseLine(line: string) {
   const match = line.match(/^(\S+)\s+(\S+)\s+(\S+?)(?:\[\d+\])?:\s*(.*)/);
