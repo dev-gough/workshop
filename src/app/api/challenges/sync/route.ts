@@ -1,7 +1,6 @@
-import { promises as fs } from 'fs';
-import path from 'path';
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db';
+import { getConfig } from '@/lib/config';
 import {
   getAccountByRiotId,
   getChallengeConfigs,
@@ -35,12 +34,13 @@ export async function POST() {
       }
     }
 
-    const config = JSON.parse(await fs.readFile(path.join(process.cwd(), 'config.json'), 'utf-8'));
-    const { riotApiKey, riotGameName, riotTagLine, riotRegion } = config;
+    const riot = getConfig().riot;
 
-    if (!riotApiKey || !riotGameName || !riotTagLine) {
+    if (!riot?.apiKey || !riot?.gameName || !riot?.tagLine) {
       return NextResponse.json({ error: 'Riot API not configured' }, { status: 500 });
     }
+
+    const { apiKey: riotApiKey, gameName: riotGameName, tagLine: riotTagLine, region: riotRegion } = riot;
 
     const account = await getAccountByRiotId(riotApiKey, riotGameName, riotTagLine);
 
