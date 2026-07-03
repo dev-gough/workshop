@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { slskdPost, slskdGet } from '@/lib/slskd';
+import { slskdPost, slskdGet, flattenTransfers } from '@/lib/slskd';
 import pool from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
@@ -31,16 +31,8 @@ export async function GET(request: NextRequest) {
     // Get live transfers from slskd (returns nested format, flatten it)
     let liveTransfers: Record<string, SlskdTransfer[]> = {};
     try {
-      const raw = await slskdGet<{ username: string; directories: { files: SlskdTransfer[] }[] }[]>('/api/v0/transfers/downloads');
-      if (Array.isArray(raw)) {
-        for (const group of raw) {
-          const files: SlskdTransfer[] = [];
-          for (const dir of group.directories || []) {
-            if (dir.files) files.push(...dir.files);
-          }
-          if (files.length > 0) liveTransfers[group.username] = files;
-        }
-      }
+      const raw = await slskdGet('/api/v0/transfers/downloads');
+      liveTransfers = flattenTransfers<SlskdTransfer>(raw);
     } catch { /* slskd may be down */ }
 
     // Get DB records

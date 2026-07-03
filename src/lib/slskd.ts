@@ -53,3 +53,24 @@ export async function slskdDelete(urlPath: string): Promise<void> {
   const res = await slskdFetch(urlPath, { method: 'DELETE' });
   if (!res.ok) throw new Error(`slskd DELETE ${urlPath}: ${res.status} ${res.statusText}`);
 }
+
+/**
+ * slskd's transfer endpoints return a nested shape:
+ *   [{ username, directories: [{ files: [...] }] }]
+ * Flatten it to { username: File[] }, dropping users with no files. The file
+ * type is a generic so each caller can keep its own transfer interface.
+ */
+export function flattenTransfers<T = unknown>(
+  raw: unknown,
+): Record<string, T[]> {
+  const result: Record<string, T[]> = {};
+  if (!Array.isArray(raw)) return result;
+  for (const group of raw as { username: string; directories?: { files?: T[] }[] }[]) {
+    const files: T[] = [];
+    for (const dir of group.directories || []) {
+      if (dir.files) files.push(...dir.files);
+    }
+    if (files.length > 0) result[group.username] = files;
+  }
+  return result;
+}

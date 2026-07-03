@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { slskdGet } from '@/lib/slskd';
+import { slskdGet, flattenTransfers } from '@/lib/slskd';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,30 +19,6 @@ interface SlskdTransferFile {
   endedAt?: string;
 }
 
-interface SlskdTransferGroup {
-  username: string;
-  directories: { directory: string; fileCount: number; files: SlskdTransferFile[] }[];
-}
-
-// slskd returns [{ username, directories: [{ files: [...] }] }]
-// Flatten to { username: Transfer[] } for the frontend
-function flattenTransfers(raw: unknown): Record<string, SlskdTransferFile[]> {
-  const result: Record<string, SlskdTransferFile[]> = {};
-  if (!Array.isArray(raw)) return result;
-  for (const group of raw as SlskdTransferGroup[]) {
-    const files: SlskdTransferFile[] = [];
-    if (group.directories) {
-      for (const dir of group.directories) {
-        if (dir.files) files.push(...dir.files);
-      }
-    }
-    if (files.length > 0) {
-      result[group.username] = files;
-    }
-  }
-  return result;
-}
-
 export async function GET(request: NextRequest) {
   const encoder = new TextEncoder();
 
@@ -54,8 +30,8 @@ export async function GET(request: NextRequest) {
             slskdGet('/api/v0/transfers/downloads').catch(() => []),
             slskdGet('/api/v0/transfers/uploads').catch(() => []),
           ]);
-          const downloads = flattenTransfers(rawDownloads);
-          const uploads = flattenTransfers(rawUploads);
+          const downloads = flattenTransfers<SlskdTransferFile>(rawDownloads);
+          const uploads = flattenTransfers<SlskdTransferFile>(rawUploads);
           const data = `data: ${JSON.stringify({ downloads, uploads })}\n\n`;
           controller.enqueue(encoder.encode(data));
         } catch {

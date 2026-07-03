@@ -1,9 +1,9 @@
 import { promises as fs } from 'fs';
 import path from 'path';
-import { parseFile } from 'music-metadata';
 import { cleanDownloadPath, sanitizeFilename } from '../src/lib/songUtils';
-import { scanSingleAlbum } from '../src/lib/musicScanner';
+import { scanSingleAlbum, loadMusicMetadata } from '../src/lib/musicScanner';
 import { getConfig, resetConfigCache } from '../src/lib/config';
+import { slskdGet, flattenTransfers } from '../src/lib/slskd';
 import { makePool } from '../src/lib/db';
 
 function getDirs() {
@@ -32,22 +32,6 @@ interface SlskdTransfer {
   endedAt?: string;
 }
 
-function getSlskdConfig() {
-  const cfg = getConfig().services.slskd;
-  if (!cfg) throw new Error('services.slskd is not configured in config.json');
-  return cfg;
-}
-
-async function slskdGet<T>(urlPath: string): Promise<T> {
-  const config = getSlskdConfig();
-  const res = await fetch(`${config.baseUrl}${urlPath}`, {
-    headers: { 'X-API-Key': config.apiKey },
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!res.ok) throw new Error(`slskd GET ${urlPath}: ${res.status}`);
-  return res.json() as Promise<T>;
-}
-
 async function walkDir(dir: string): Promise<string[]> {
   const results: string[] = [];
   try {
@@ -66,6 +50,7 @@ async function walkDir(dir: string): Promise<string[]> {
 
 async function extractMetadata(filePath: string): Promise<{ artist?: string; album?: string; title?: string; track?: number }> {
   try {
+    const { parseFile } = await loadMusicMetadata();
     const metadata = await parseFile(filePath);
     return {
       artist: metadata.common.artist || metadata.common.albumartist || undefined,
@@ -81,22 +66,13 @@ async function extractMetadata(filePath: string): Promise<{ artist?: string; alb
 async function processCompletedDownloads() {
   try {
     // Get all download transfers from slskd (nested format: [{ username, directories: [{ files }] }])
-    const raw = await slskdGet<{ username: string; directories: { files: SlskdTransfer[] }[] }[]>('/api/v0/transfers/downloads');
-    const transfers: Record<string, SlskdTransfer[]> = {};
-    if (Array.isArray(raw)) {
-      for (const group of raw) {
-        const files: SlskdTransfer[] = [];
-        for (const dir of group.directories || []) {
-          if (dir.files) files.push(...dir.files);
-        }
-        if (files.length > 0) transfers[group.username] = files;
-      }
-    }
+    const raw = await slskdGet('/api/v0/transfers/downloads');
+    const transfers = flattenTransfers<SlskdTransfer>(raw);
 
     for (const [username, userTransfers] of Object.entries(transfers)) {
       for (const transfer of userTransfers) {
         // Only process completed transfers
-        if (transfer.state !== 'Completed, Succeeded') continue;
+        if (!(transfer.state.includes('Completed') && transfer.state.includes('Succeeded'))) continue;
 
         // Check if already tracked in DB
         const { rows: existing } = await pool.query(
@@ -146,20 +122,11 @@ async function processCompletedDownloads() {
 
     // Also track active uploads (record who's downloading from us)
     try {
-      const rawUl = await slskdGet<{ username: string; directories: { files: SlskdTransfer[] }[] }[]>('/api/v0/transfers/uploads');
-      const uploads: Record<string, SlskdTransfer[]> = {};
-      if (Array.isArray(rawUl)) {
-        for (const group of rawUl) {
-          const files: SlskdTransfer[] = [];
-          for (const dir of group.directories || []) {
-            if (dir.files) files.push(...dir.files);
-          }
-          if (files.length > 0) uploads[group.username] = files;
-        }
-      }
+      const rawUl = await slskdGet('/api/v0/transfers/uploads');
+      const uploads = flattenTransfers<SlskdTransfer>(rawUl);
       for (const [username, userTransfers] of Object.entries(uploads)) {
         for (const transfer of userTransfers) {
-          if (transfer.state !== 'Completed, Succeeded') continue;
+          if (!(transfer.state.includes('Completed') && transfer.state.includes('Succeeded'))) continue;
 
           const { rows: existing } = await pool.query(
             "SELECT id FROM soulseek_uploads WHERE username = $1 AND filename = $2 AND created_at > NOW() - INTERVAL '1 hour'",
