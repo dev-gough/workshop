@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useTheme } from './ThemeProvider';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import {
-  Play, Pause, RotateCcw, Gauge, Leaf, Skull,
+  Play, Pause, RotateCcw, Gauge, Leaf, Skull, LineChart,
 } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 
@@ -32,12 +32,23 @@ interface Agent {
 
 interface Food {
   x: number; y: number;
+  eaten?: boolean;
 }
 
 interface PopSnapshot {
   tick: number;
   prey: number;
   predators: number;
+}
+
+interface TraitSnapshot {
+  tick: number;
+  preySpeed: number;
+  preyVision: number;
+  preySize: number;
+  predSpeed: number;
+  predVision: number;
+  predSize: number;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -77,9 +88,11 @@ class EcosystemEngine {
   tick: number;
   nextId: number;
   history: PopSnapshot[];
+  traitHistory: TraitSnapshot[];
   mutationRate: number;
   foodSpawnRate: number;
   grid: Map<number, Agent[]>;
+  foodGrid: Map<number, Food[]>;
   gridCols: number;
 
   constructor(worldW: number, worldH: number, initialPrey: number, initialPredators: number, foodSpawnRate: number, mutationRate: number) {
@@ -88,9 +101,11 @@ class EcosystemEngine {
     this.tick = 0;
     this.nextId = 0;
     this.history = [];
+    this.traitHistory = [];
     this.mutationRate = mutationRate;
     this.foodSpawnRate = foodSpawnRate;
     this.grid = new Map();
+    this.foodGrid = new Map();
     this.gridCols = Math.ceil(worldW / CELL_SIZE);
     this.agents = [];
     this.food = [];
@@ -150,6 +165,18 @@ class EcosystemEngine {
     }
   }
 
+  buildFoodGrid() {
+    this.foodGrid.clear();
+    for (const f of this.food) {
+      const cx = Math.floor(f.x / CELL_SIZE);
+      const cy = Math.floor(f.y / CELL_SIZE);
+      const key = cy * this.gridCols + cx;
+      let arr = this.foodGrid.get(key);
+      if (!arr) { arr = []; this.foodGrid.set(key, arr); }
+      arr.push(f);
+    }
+  }
+
   getNearby(x: number, y: number, radius: number): Agent[] {
     const r = Math.ceil(radius / CELL_SIZE);
     const cx = Math.floor(x / CELL_SIZE);
@@ -165,9 +192,22 @@ class EcosystemEngine {
     return result;
   }
 
-  step() {
-    this.buildGrid();
+  getNearbyFood(x: number, y: number, radius: number): Food[] {
+    const r = Math.ceil(radius / CELL_SIZE);
+    const cx = Math.floor(x / CELL_SIZE);
+    const cy = Math.floor(y / CELL_SIZE);
+    const result: Food[] = [];
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const key = (cy + dy) * this.gridCols + (cx + dx);
+        const cell = this.foodGrid.get(key);
+        if (cell) result.push(...cell);
+      }
+    }
+    return result;
+  }
 
+  step() {
     // Spawn food
     for (let i = 0; i < this.foodSpawnRate; i++) {
       if (this.food.length < 500) {
@@ -175,7 +215,11 @@ class EcosystemEngine {
       }
     }
 
+    this.buildGrid();
+    this.buildFoodGrid();
+
     const newAgents: Agent[] = [];
+    let foodEaten = false;
 
     for (const a of this.agents) {
       if (!a.alive) continue;
@@ -208,7 +252,9 @@ class EcosystemEngine {
         } else {
           // Seek food
           let closestDist = Infinity;
-          for (const f of this.food) {
+          const nearbyFood = this.getNearbyFood(a.x, a.y, g.visionRange);
+          for (const f of nearbyFood) {
+            if (f.eaten) continue;
             const [dx, dy, d] = wrapDist(a.x, a.y, f.x, f.y, this.worldW, this.worldH);
             if (d < g.visionRange && d < closestDist) {
               closestDist = d; targetDx = dx; targetDy = dy; hasTarget = true;
@@ -247,11 +293,14 @@ class EcosystemEngine {
 
       // Eat
       if (a.type === 'prey') {
-        for (let i = this.food.length - 1; i >= 0; i--) {
-          const [, , d] = wrapDist(a.x, a.y, this.food[i].x, this.food[i].y, this.worldW, this.worldH);
+        const nearbyFood = this.getNearbyFood(a.x, a.y, g.size + 3);
+        for (const f of nearbyFood) {
+          if (f.eaten) continue;
+          const [, , d] = wrapDist(a.x, a.y, f.x, f.y, this.worldW, this.worldH);
           if (d < g.size + 3) {
             a.energy += 25;
-            this.food.splice(i, 1);
+            f.eaten = true;
+            foodEaten = true;
             break;
           }
         }
@@ -286,33 +335,58 @@ class EcosystemEngine {
       }
     }
 
+    // Remove eaten food (only rebuild the array if anything was consumed)
+    if (foodEaten) this.food = this.food.filter(f => !f.eaten);
+
     // Remove dead
     this.agents = this.agents.filter(a => a.alive);
     this.agents.push(...newAgents);
 
+    // Single-pass stats: counts + trait sums for both species
+    let preyCount = 0, predCount = 0;
+    let preySpeed = 0, preyVision = 0, preySize = 0;
+    let predSpeed = 0, predVision = 0, predSize = 0;
+    for (const a of this.agents) {
+      const g = a.genome;
+      if (a.type === 'prey') {
+        preyCount++;
+        preySpeed += g.speed; preyVision += g.visionRange; preySize += g.size;
+      } else {
+        predCount++;
+        predSpeed += g.speed; predVision += g.visionRange; predSize += g.size;
+      }
+    }
+
     // Population cap to prevent meltdown
-    if (this.agents.filter(a => a.type === 'prey').length > 400) {
+    if (preyCount > 400) {
       const prey = this.agents.filter(a => a.type === 'prey');
       prey.sort((a, b) => a.energy - b.energy);
       for (let i = 0; i < prey.length - 350; i++) prey[i].alive = false;
       this.agents = this.agents.filter(a => a.alive);
+      preyCount = 350;
     }
 
     this.tick++;
     if (this.tick % 5 === 0) {
-      this.history.push({
-        tick: this.tick,
-        prey: this.agents.filter(a => a.type === 'prey').length,
-        predators: this.agents.filter(a => a.type === 'predator').length,
-      });
+      this.history.push({ tick: this.tick, prey: preyCount, predators: predCount });
       if (this.history.length > 600) this.history.shift();
+      this.traitHistory.push({
+        tick: this.tick,
+        preySpeed: preyCount > 0 ? preySpeed / preyCount : 0,
+        preyVision: preyCount > 0 ? preyVision / preyCount : 0,
+        preySize: preyCount > 0 ? preySize / preyCount : 0,
+        predSpeed: predCount > 0 ? predSpeed / predCount : 0,
+        predVision: predCount > 0 ? predVision / predCount : 0,
+        predSize: predCount > 0 ? predSize / predCount : 0,
+      });
+      if (this.traitHistory.length > 600) this.traitHistory.shift();
     }
 
     // Respawn if extinct
-    if (this.agents.filter(a => a.type === 'prey').length === 0) {
+    if (preyCount === 0) {
       for (let i = 0; i < 20; i++) this.spawnAgent('prey');
     }
-    if (this.agents.filter(a => a.type === 'predator').length === 0) {
+    if (predCount === 0) {
       for (let i = 0; i < 5; i++) this.spawnAgent('predator');
     }
   }
@@ -326,9 +400,11 @@ function drawEcosystem(
   canvasW: number,
   canvasH: number,
   isDark: boolean,
+  showTraits: boolean,
 ) {
   const graphH = 100;
-  const worldH = canvasH - graphH - 4;
+  const traitH = showTraits ? 100 : 0;
+  const worldH = canvasH - graphH - traitH - (showTraits ? 8 : 4);
   const scaleX = canvasW / engine.worldW;
   const scaleY = worldH / engine.worldH;
 
@@ -385,6 +461,10 @@ function drawEcosystem(
   ctx.moveTo(0, graphY); ctx.lineTo(canvasW, graphY);
   ctx.stroke();
 
+  const preyColor = isDark ? '#4ade80' : '#16a34a';
+  const predColor = isDark ? '#f87171' : '#dc2626';
+  const labelColor = isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)';
+
   const history = engine.history;
   if (history.length < 2) return;
 
@@ -397,7 +477,7 @@ function drawEcosystem(
   const gy = (val: number) => graphY + graphH - (val / maxPop) * (graphH - 10) - 5;
 
   // Prey line
-  ctx.strokeStyle = isDark ? '#4ade80' : '#16a34a';
+  ctx.strokeStyle = preyColor;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
   for (let i = 0; i < history.length; i++) {
@@ -407,7 +487,7 @@ function drawEcosystem(
   ctx.stroke();
 
   // Predator line
-  ctx.strokeStyle = isDark ? '#f87171' : '#dc2626';
+  ctx.strokeStyle = predColor;
   ctx.beginPath();
   for (let i = 0; i < history.length; i++) {
     const x = gx(i), y = gy(history[i].predators);
@@ -416,9 +496,83 @@ function drawEcosystem(
   ctx.stroke();
 
   // Labels
-  ctx.fillStyle = isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)';
+  ctx.fillStyle = labelColor;
   ctx.font = '9px system-ui, sans-serif';
-  ctx.fillText(`max: ${maxPop}`, 4, graphY + 12);
+  ctx.fillText(`population  ·  max: ${maxPop}`, 4, graphY + 12);
+
+  // ── Trait-drift strip ────────────────────────────────────────────────────
+  if (!showTraits) return;
+
+  const traitHistory = engine.traitHistory;
+  const traitY = graphY + graphH + 4;
+
+  // Panel background
+  ctx.fillStyle = isDark ? 'hsl(224,35%,8%)' : 'hsl(0,0%,93%)';
+  ctx.fillRect(0, traitY, canvasW, traitH);
+
+  // Border between population and trait strips
+  ctx.strokeStyle = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, traitY); ctx.lineTo(canvasW, traitY);
+  ctx.stroke();
+
+  if (traitHistory.length < 2) return;
+
+  // Each trait is normalised to its own genome clamp range so all three fit
+  // one axis; species share a hue (green prey / red pred), traits differ by
+  // dash pattern: speed solid, vision dashed, size dotted.
+  const RANGES = {
+    speed: [0.5, 5] as const,
+    vision: [15, 200] as const,
+    size: [2, 15] as const,
+  };
+  const norm = (val: number, [lo, hi]: readonly [number, number]) => (val - lo) / (hi - lo);
+
+  const tx = (i: number) => (i / (traitHistory.length - 1)) * canvasW;
+  const ty = (n: number) => traitY + traitH - clamp(n, 0, 1) * (traitH - 10) - 5;
+
+  const drawTrait = (
+    pick: (s: TraitSnapshot) => number,
+    range: readonly [number, number],
+    color: string,
+    dash: number[],
+  ) => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash(dash);
+    ctx.beginPath();
+    for (let i = 0; i < traitHistory.length; i++) {
+      const x = tx(i), y = ty(norm(pick(traitHistory[i]), range));
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  };
+
+  drawTrait(s => s.preySpeed, RANGES.speed, preyColor, []);
+  drawTrait(s => s.preyVision, RANGES.vision, preyColor, [4, 3]);
+  drawTrait(s => s.preySize, RANGES.size, preyColor, [1, 3]);
+  drawTrait(s => s.predSpeed, RANGES.speed, predColor, []);
+  drawTrait(s => s.predVision, RANGES.vision, predColor, [4, 3]);
+  drawTrait(s => s.predSize, RANGES.size, predColor, [1, 3]);
+  ctx.setLineDash([]);
+
+  // Legend + current values (latest sample)
+  const last = traitHistory[traitHistory.length - 1];
+  ctx.fillStyle = labelColor;
+  ctx.font = '9px system-ui, sans-serif';
+  ctx.fillText(
+    `trait drift  ·  ─ speed  ┄ vision  ┈ size`,
+    4, traitY + 12,
+  );
+  ctx.fillText(
+    `prey  spd ${last.preySpeed.toFixed(1)}  vis ${last.preyVision.toFixed(0)}  sz ${last.preySize.toFixed(1)}`,
+    4, traitY + traitH - 14,
+  );
+  ctx.fillText(
+    `pred  spd ${last.predSpeed.toFixed(1)}  vis ${last.predVision.toFixed(0)}  sz ${last.predSize.toFixed(1)}`,
+    4, traitY + traitH - 3,
+  );
 }
 
 // ── React Component ──────────────────────────────────────────────────────
@@ -434,6 +588,9 @@ const EcosystemSim = () => {
   themeRef.current = theme;
 
   const [running, setRunning] = useState(false);
+  const [showTraits, setShowTraits] = useState(true);
+  const showTraitsRef = useRef(showTraits);
+  showTraitsRef.current = showTraits;
   const [tick, setTick] = useState(0);
   const [preyCount, setPreyCount] = useState(0);
   const [predCount, setPredCount] = useState(0);
@@ -456,7 +613,7 @@ const EcosystemSim = () => {
     if (!canvas || !engine) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    drawEcosystem(ctx, engine, canvas.width, canvas.height, themeRef.current === 'dark');
+    drawEcosystem(ctx, engine, canvas.width, canvas.height, themeRef.current === 'dark', showTraitsRef.current);
   }, []);
 
   // Resize
@@ -519,7 +676,7 @@ const EcosystemSim = () => {
     return () => { cancelAnimationFrame(rafRef.current); rafRef.current = 0; };
   }, [running, speed, redraw]);
 
-  useEffect(() => { redraw(); }, [theme, redraw]);
+  useEffect(() => { redraw(); }, [theme, showTraits, redraw]);
 
   const handleReset = useCallback(() => {
     setRunning(false);
@@ -528,12 +685,22 @@ const EcosystemSim = () => {
     redraw();
   }, [foodRate, mutRate, redraw]);
 
-  // Compute avg traits
-  const engine = engineRef.current;
-  const prey = engine ? engine.agents.filter(a => a.type === 'prey') : [];
-  const preds = engine ? engine.agents.filter(a => a.type === 'predator') : [];
-  const avgPreySpeed = prey.length > 0 ? (prey.reduce((s, a) => s + a.genome.speed, 0) / prey.length).toFixed(1) : '-';
-  const avgPredSpeed = preds.length > 0 ? (preds.reduce((s, a) => s + a.genome.speed, 0) / preds.length).toFixed(1) : '-';
+  // Compute avg traits (single pass, memoised per tick so it only recomputes
+  // when the sim actually advances, not on every unrelated re-render)
+  const { avgPreySpeed, avgPredSpeed } = useMemo(() => {
+    const engine = engineRef.current;
+    let preyN = 0, preySpeedSum = 0, predN = 0, predSpeedSum = 0;
+    if (engine) {
+      for (const a of engine.agents) {
+        if (a.type === 'prey') { preyN++; preySpeedSum += a.genome.speed; }
+        else { predN++; predSpeedSum += a.genome.speed; }
+      }
+    }
+    return {
+      avgPreySpeed: preyN > 0 ? (preySpeedSum / preyN).toFixed(1) : '-',
+      avgPredSpeed: predN > 0 ? (predSpeedSum / predN).toFixed(1) : '-',
+    };
+  }, [tick]);
 
   return (
     <div className="flex flex-col gap-2 flex-1 min-h-0">
@@ -589,6 +756,20 @@ const EcosystemSim = () => {
         <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 px-2" onClick={handleReset}>
           <RotateCcw className="h-3 w-3" /> Reset
         </Button>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant={showTraits ? 'secondary' : 'ghost'}
+              size="sm"
+              className="h-7 text-xs gap-1 px-2"
+              onClick={() => setShowTraits(v => !v)}
+            >
+              <LineChart className="h-3 w-3" /> Traits
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Trait drift &mdash; show/hide the average speed/vision/size chart to watch traits evolve under selection.</TooltipContent>
+        </Tooltip>
 
         {/* Stats */}
         <div className="flex items-center gap-3 ml-auto">
