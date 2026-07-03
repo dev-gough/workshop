@@ -127,14 +127,141 @@ function raySegmentIntersect(
   return Infinity;
 }
 
-function castRay(ox: number, oy: number, angle: number, walls: Segment[]): number {
-  const dx = Math.cos(angle), dy = Math.sin(angle);
-  let minDist = Infinity;
+// ── Spatial grid for wall segments ───────────────────────────────────────
+// Bins wall segments into a coarse uniform grid so ray/collision queries only
+// test segments in the cells they actually touch instead of all ~480.
+
+const GRID_CELL = 60; // px; slightly larger than trackWidth so a car+ray stay local
+
+interface WallGrid {
+  cell: number;
+  minX: number;
+  minY: number;
+  cols: number;
+  rows: number;
+  bins: number[][]; // cell index -> segment indices
+  walls: Segment[];
+}
+
+function buildWallGrid(walls: Segment[], cell: number = GRID_CELL): WallGrid {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const [x1, y1, x2, y2] of walls) {
-    const d = raySegmentIntersect(ox, oy, dx, dy, x1, y1, x2, y2);
-    if (d < minDist) minDist = d;
+    if (x1 < minX) minX = x1; if (x2 < minX) minX = x2;
+    if (y1 < minY) minY = y1; if (y2 < minY) minY = y2;
+    if (x1 > maxX) maxX = x1; if (x2 > maxX) maxX = x2;
+    if (y1 > maxY) maxY = y1; if (y2 > maxY) maxY = y2;
   }
-  return minDist;
+  if (!isFinite(minX)) { minX = 0; minY = 0; maxX = 0; maxY = 0; }
+  const cols = Math.max(1, Math.ceil((maxX - minX) / cell) + 1);
+  const rows = Math.max(1, Math.ceil((maxY - minY) / cell) + 1);
+  const bins: number[][] = new Array(cols * rows);
+
+  const push = (cx: number, cy: number, idx: number) => {
+    if (cx < 0 || cy < 0 || cx >= cols || cy >= rows) return;
+    const key = cy * cols + cx;
+    (bins[key] ??= []).push(idx);
+  };
+
+  // Rasterize each segment across the cells it crosses (walk the two endpoints'
+  // bounding cells; segments are short — ~one track step — so a bbox fill is exact
+  // enough and cheap). Include a 1-cell margin so radius queries never miss.
+  for (let s = 0; s < walls.length; s++) {
+    const [x1, y1, x2, y2] = walls[s];
+    let cx1 = Math.floor((Math.min(x1, x2) - minX) / cell) - 1;
+    let cy1 = Math.floor((Math.min(y1, y2) - minY) / cell) - 1;
+    let cx2 = Math.floor((Math.max(x1, x2) - minX) / cell) + 1;
+    let cy2 = Math.floor((Math.max(y1, y2) - minY) / cell) + 1;
+    for (let cy = cy1; cy <= cy2; cy++) {
+      for (let cx = cx1; cx <= cx2; cx++) push(cx, cy, s);
+    }
+  }
+
+  return { cell, minX, minY, cols, rows, bins, walls };
+}
+
+// Cast a ray but only against segments in the cells the ray traverses (DDA grid
+// walk). Bounded to MAX_SENSOR_DIST so we stop stepping once past sensor range.
+function castRayGrid(
+  ox: number, oy: number, angle: number, grid: WallGrid, maxDist: number,
+): number {
+  const dx = Math.cos(angle), dy = Math.sin(angle);
+  const { cell, minX, minY, cols, rows, bins, walls } = grid;
+
+  let cx = Math.floor((ox - minX) / cell);
+  let cy = Math.floor((oy - minY) / cell);
+
+  const stepX = dx > 0 ? 1 : -1;
+  const stepY = dy > 0 ? 1 : -1;
+  const tDeltaX = dx !== 0 ? Math.abs(cell / dx) : Infinity;
+  const tDeltaY = dy !== 0 ? Math.abs(cell / dy) : Infinity;
+
+  // distance (in ray-t) to first vertical / horizontal grid line
+  const nextBoundX = minX + (dx > 0 ? (cx + 1) * cell : cx * cell);
+  const nextBoundY = minY + (dy > 0 ? (cy + 1) * cell : cy * cell);
+  let tMaxX = dx !== 0 ? (nextBoundX - ox) / dx : Infinity;
+  let tMaxY = dy !== 0 ? (nextBoundY - oy) / dy : Infinity;
+
+  let minHit = Infinity;
+  const seen = new Set<number>();
+
+  // Walk cells until we pass the closest hit found, exceed maxDist, or leave grid.
+  while (true) {
+    if (cx >= 0 && cy >= 0 && cx < cols && cy < rows) {
+      const bin = bins[cy * cols + cx];
+      if (bin) {
+        for (let k = 0; k < bin.length; k++) {
+          const s = bin[k];
+          if (seen.has(s)) continue;
+          seen.add(s);
+          const [x1, y1, x2, y2] = walls[s];
+          const d = raySegmentIntersect(ox, oy, dx, dy, x1, y1, x2, y2);
+          if (d < minHit) minHit = d;
+        }
+      }
+    }
+    // advance to next cell
+    const tNext = tMaxX < tMaxY ? tMaxX : tMaxY;
+    // If the closest confirmed hit is nearer than the entry into the next cell,
+    // no closer intersection can exist in later cells.
+    if (minHit <= tNext) break;
+    if (tNext > maxDist) break;
+    if (tMaxX < tMaxY) { cx += stepX; tMaxX += tDeltaX; }
+    else { cy += stepY; tMaxY += tDeltaY; }
+    if (cx < 0 || cy < 0 || cx >= cols || cy >= rows) break;
+  }
+
+  return minHit;
+}
+
+// Nearest wall distance to a point, testing only the local 3x3 cell neighborhood.
+// Returns the smallest point-to-segment distance among nearby walls.
+function nearestWallDist(px: number, py: number, grid: WallGrid): number {
+  const { cell, minX, minY, cols, rows, bins, walls } = grid;
+  const bx = Math.floor((px - minX) / cell);
+  const by = Math.floor((py - minY) / cell);
+  let minDist = Infinity;
+  const seen = new Set<number>();
+  for (let oy = -1; oy <= 1; oy++) {
+    for (let ox = -1; ox <= 1; ox++) {
+      const cx = bx + ox, cy = by + oy;
+      if (cx < 0 || cy < 0 || cx >= cols || cy >= rows) continue;
+      const bin = bins[cy * cols + cx];
+      if (!bin) continue;
+      for (let k = 0; k < bin.length; k++) {
+        const s = bin[k];
+        if (seen.has(s)) continue;
+        seen.add(s);
+        const [x1, y1, x2, y2] = walls[s];
+        const dx = x2 - x1, dy = y2 - y1;
+        const len2 = dx * dx + dy * dy || 1;
+        const t = clamp(((px - x1) * dx + (py - y1) * dy) / len2, 0, 1);
+        const qx = x1 + t * dx, qy = y1 + t * dy;
+        const dd = (px - qx) * (px - qx) + (py - qy) * (py - qy);
+        if (dd < minDist) minDist = dd;
+      }
+    }
+  }
+  return Math.sqrt(minDist);
 }
 
 // ── Neural Network ───────────────────────────────────────────────────────
@@ -217,14 +344,17 @@ function createCar(track: Track, genome: number[]): Car {
   };
 }
 
-function updateCar(car: Car, track: Track, allWalls: Segment[]) {
+function updateCar(car: Car, track: Track, grid: WallGrid) {
   if (!car.alive) return;
 
-  // Sensor readings
+  // Sensor readings (grid-accelerated raycast).
   const sensorSpread = Math.PI * 0.7;
+  let frontalDist = Infinity;
   for (let i = 0; i < SENSOR_COUNT; i++) {
     const angle = car.heading + (-sensorSpread / 2 + (sensorSpread / (SENSOR_COUNT - 1)) * i);
-    const d = castRay(car.x, car.y, angle, allWalls);
+    const d = castRayGrid(car.x, car.y, angle, grid, MAX_SENSOR_DIST);
+    // Middle sensor (index 3 of 7) points straight along the heading.
+    if (i === (SENSOR_COUNT - 1) / 2) frontalDist = d;
     car.sensors[i] = clamp(d / MAX_SENSOR_DIST, 0, 1);
   }
 
@@ -241,15 +371,15 @@ function updateCar(car: Car, track: Track, allWalls: Segment[]) {
   car.x += Math.cos(car.heading) * car.speed;
   car.y += Math.sin(car.heading) * car.speed;
 
-  // Collision check
-  for (const [x1, y1, x2, y2] of allWalls) {
-    const dx = x2 - x1, dy = y2 - y1;
-    const len2 = dx * dx + dy * dy;
-    const t = clamp(((car.x - x1) * dx + (car.y - y1) * dy) / len2, 0, 1);
-    const cx = x1 + t * dx, cy = y1 + t * dy;
-    const dist = Math.sqrt((car.x - cx) * (car.x - cx) + (car.y - cy) * (car.y - cy));
-    if (dist < CAR_RADIUS) { car.alive = false; return; }
-  }
+  // Collision check.
+  // Cheap fold: the frontal sensor already measured the wall straight ahead this
+  // step — if that leading-edge distance is inside the car radius, it's a crash,
+  // no further test needed. This catches head-on impacts (the common case) for free.
+  if (frontalDist < CAR_RADIUS) { car.alive = false; return; }
+  // Corrected pass: the frontal ray only covers the heading direction, so a car
+  // can still clip a wall with its side/corner. Point-to-segment distance over the
+  // local 3x3 grid neighborhood preserves the old accuracy at a fraction of the cost.
+  if (nearestWallDist(car.x, car.y, grid) < CAR_RADIUS) { car.alive = false; return; }
 
   // Update fitness (track progress)
   const cl = track.centerline;
@@ -293,9 +423,13 @@ function tournamentSelect(cars: Car[], k: number = 3): Car {
   return best!;
 }
 
+function eliteCountFor(popSize: number): number {
+  return Math.max(2, Math.floor(popSize * 0.1));
+}
+
 function evolve(cars: Car[], mutRate: number, mutStrength: number): number[][] {
   cars.sort((a, b) => b.fitness - a.fitness);
-  const eliteCount = Math.max(2, Math.floor(cars.length * 0.1));
+  const eliteCount = eliteCountFor(cars.length);
   const genomes: number[][] = [];
 
   // Elites
@@ -458,13 +592,14 @@ const Neuroevolution = () => {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<Track | null>(null);
   const carsRef = useRef<Car[]>([]);
-  const allWallsRef = useRef<Segment[]>([]);
+  const wallGridRef = useRef<WallGrid | null>(null);
   const rafRef = useRef<number>(0);
   const canvasSizeRef = useRef({ w: 0, h: 0 });
   const themeRef = useRef(theme);
   themeRef.current = theme;
   const camRef = useRef({ x: 0, y: 0, scale: 1 });
   const tickRef = useRef(0);
+  const aliveCountThrottleRef = useRef(0);
 
   const [running, setRunning] = useState(false);
   const [generation, setGeneration] = useState(0);
@@ -475,6 +610,7 @@ const Neuroevolution = () => {
   const [mutRate, setMutRate] = useState(0.15);
   const [mutStrength, setMutStrength] = useState(0.4);
   const [showSensors, setShowSensors] = useState(true);
+  const [carriedElites, setCarriedElites] = useState(0);
 
   const generationRef = useRef(0);
 
@@ -488,7 +624,7 @@ const Neuroevolution = () => {
       trackRef.current = generateTrack(cx, cy);
     }
     const track = trackRef.current;
-    allWallsRef.current = [...track.innerWalls, ...track.outerWalls];
+    wallGridRef.current = buildWallGrid([...track.innerWalls, ...track.outerWalls]);
 
     const cars: Car[] = [];
     for (let i = 0; i < popSize; i++) {
@@ -508,18 +644,34 @@ const Neuroevolution = () => {
 
   const newTrack = useCallback(() => {
     setRunning(false);
+
+    // Elite transfer: carry the top-N genomes onto the fresh track (same network
+    // weights, fresh fitness) to demonstrate transfer learning, instead of
+    // discarding everything and restarting from scratch.
+    const cars = carsRef.current;
+    let elites: number[][] | undefined;
+    if (cars.length > 0) {
+      const n = Math.min(eliteCountFor(popSize), cars.length);
+      elites = [...cars]
+        .sort((a, b) => b.fitness - a.fitness)
+        .slice(0, n)
+        .map(c => [...c.genome]);
+    }
+    setCarriedElites(elites ? elites.length : 0);
+
     trackRef.current = null;
     generationRef.current = 0;
     setGeneration(0);
     setBestFitness(0);
-    initSim();
-  }, [initSim]);
+    initSim(elites);
+  }, [initSim, popSize]);
 
   const handleReset = useCallback(() => {
     setRunning(false);
     generationRef.current = 0;
     setGeneration(0);
     setBestFitness(0);
+    setCarriedElites(0);
     initSim();
   }, [initSim]);
 
@@ -580,8 +732,8 @@ const Neuroevolution = () => {
     const loop = (now: number) => {
       const track = trackRef.current;
       const cars = carsRef.current;
-      const allWalls = allWallsRef.current;
-      if (!track || cars.length === 0) { rafRef.current = requestAnimationFrame(loop); return; }
+      const grid = wallGridRef.current;
+      if (!track || !grid || cars.length === 0) { rafRef.current = requestAnimationFrame(loop); return; }
 
       const dt = now - lastTime;
       lastTime = now;
@@ -610,10 +762,12 @@ const Neuroevolution = () => {
           carsRef.current = cars;
           tickRef.current = 0;
           accumulator = 0;
+          // Force the alive count to refresh immediately on a new generation.
+          aliveCountThrottleRef.current = 10;
           break;
         }
 
-        for (const car of cars) updateCar(car, track, allWalls);
+        for (const car of cars) updateCar(car, track, grid);
         tickRef.current++;
       }
       if (maxSteps > 0) accumulator -= maxSteps * interval;
@@ -627,7 +781,13 @@ const Neuroevolution = () => {
         cam.y = lerp(cam.y, best.y, 0.05);
       }
 
-      setAliveCount(cars.filter(c => c.alive).length);
+      // Throttle the React state update — the exact count only matters visually,
+      // so refresh it roughly every 10th frame instead of every frame.
+      aliveCountThrottleRef.current++;
+      if (aliveCountThrottleRef.current >= 10) {
+        aliveCountThrottleRef.current = 0;
+        setAliveCount(aliveCars.length);
+      }
       redraw();
       rafRef.current = requestAnimationFrame(loop);
     };
@@ -700,6 +860,17 @@ const Neuroevolution = () => {
             {showSensors ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
           </Button>
         </div>
+
+        {carriedElites > 0 && generation === 0 && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="text-[10px] text-muted-foreground tabular-nums px-1.5 py-0.5 rounded border border-border/60">
+                carried {carriedElites} elite{carriedElites === 1 ? '' : 's'}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>Transfer learning &mdash; the top {carriedElites} network{carriedElites === 1 ? '' : 's'} from the previous track were carried over with fresh fitness.</TooltipContent>
+          </Tooltip>
+        )}
 
         {/* Stats */}
         <div className="flex items-center gap-3 ml-auto">
