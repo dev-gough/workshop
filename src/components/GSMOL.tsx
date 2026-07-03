@@ -12,70 +12,36 @@ interface GameOfLifeProps {
   minimal?: boolean;
 }
 
+// Decorative Game of Life. The simulation grid lives in a ref and the canvas is
+// driven directly from the interval — no per-tick React state clone/reconcile.
+// Visuals are identical to the previous setState-driven version.
+
 const GSMOL = ({ width, height, cellSize = 10, minimal = false }: GameOfLifeProps) => {
   const { theme } = useTheme();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [grid, setGrid] = useState<boolean[][]>([]);
-  const [running, setRunning] = useState(minimal);
-  const [generation, setGeneration] = useState(0);
-  const [isDragging, setIsDragging] = useState(false);
-  const [draggedCells, setDraggedCells] = useState<Set<string>>(new Set());
   const rows = Math.floor(height / cellSize);
   const cols = Math.floor(width / cellSize);
 
-  const initGrid = useCallback(() => {
-    const newGrid = Array(rows).fill(null).map(() =>
-      Array(cols).fill(null).map(() => Math.random() > 0.7)
-    );
-    setGrid(newGrid);
-    setGeneration(0);
-  }, [rows, cols]);
+  // Grid is a ref: mutated in place each tick, never triggers a re-render.
+  const gridRef = useRef<boolean[][]>([]);
+  const isDraggingRef = useRef(false);
+  const draggedCellsRef = useRef<Set<string>>(new Set());
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
 
-  const clearGrid = useCallback(() => {
-    const newGrid = Array(rows).fill(null).map(() =>
-      Array(cols).fill(null).map(() => false)
-    );
-    setGrid(newGrid);
-    setGeneration(0);
-  }, [rows, cols]);
+  const [running, setRunning] = useState(minimal);
+  const [generation, setGeneration] = useState(0);
 
-  const nextGeneration = useCallback(() => {
-    setGrid(currentGrid => {
-      if (currentGrid.length === 0) return currentGrid;
-      const newGrid = currentGrid.map(arr => [...arr]);
-      for (let i = 0; i < rows; i++) {
-        for (let j = 0; j < cols; j++) {
-          let neighbors = 0;
-          for (let di = -1; di <= 1; di++) {
-            for (let dj = -1; dj <= 1; dj++) {
-              if (di === 0 && dj === 0) continue;
-              const ni = i + di;
-              const nj = j + dj;
-              if (ni >= 0 && ni < rows && nj >= 0 && nj < cols && currentGrid[ni] && currentGrid[ni][nj]) {
-                neighbors += 1;
-              }
-            }
-          }
-          if (currentGrid[i] && currentGrid[i][j]) {
-            newGrid[i][j] = neighbors === 2 || neighbors === 3;
-          } else {
-            newGrid[i][j] = neighbors === 3;
-          }
-        }
-      }
-      return newGrid;
-    });
-    setGeneration(gen => gen + 1);
-  }, [rows, cols]);
-
+  // ── Imperative draw straight from the ref ──
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
+    const grid = gridRef.current;
     if (!ctx || grid.length === 0) return;
 
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = theme === 'dark' ? '#e2e8f0' : '#0f172a';
+    ctx.fillStyle = themeRef.current === 'dark' ? '#e2e8f0' : '#0f172a';
     for (let i = 0; i < rows; i++) {
       for (let j = 0; j < cols; j++) {
         if (grid[i] && grid[i][j]) {
@@ -83,7 +49,52 @@ const GSMOL = ({ width, height, cellSize = 10, minimal = false }: GameOfLifeProp
         }
       }
     }
-  }, [grid, width, height, cellSize, rows, cols, theme]);
+  }, [width, height, cellSize, rows, cols]);
+
+  const initGrid = useCallback(() => {
+    gridRef.current = Array(rows).fill(null).map(() =>
+      Array(cols).fill(null).map(() => Math.random() > 0.7)
+    );
+    setGeneration(0);
+    draw();
+  }, [rows, cols, draw]);
+
+  const clearGrid = useCallback(() => {
+    gridRef.current = Array(rows).fill(null).map(() =>
+      Array(cols).fill(null).map(() => false)
+    );
+    setGeneration(0);
+    draw();
+  }, [rows, cols, draw]);
+
+  const nextGeneration = useCallback(() => {
+    const currentGrid = gridRef.current;
+    if (currentGrid.length === 0) return;
+    const newGrid = currentGrid.map(arr => [...arr]);
+    for (let i = 0; i < rows; i++) {
+      for (let j = 0; j < cols; j++) {
+        let neighbors = 0;
+        for (let di = -1; di <= 1; di++) {
+          for (let dj = -1; dj <= 1; dj++) {
+            if (di === 0 && dj === 0) continue;
+            const ni = i + di;
+            const nj = j + dj;
+            if (ni >= 0 && ni < rows && nj >= 0 && nj < cols && currentGrid[ni] && currentGrid[ni][nj]) {
+              neighbors += 1;
+            }
+          }
+        }
+        if (currentGrid[i] && currentGrid[i][j]) {
+          newGrid[i][j] = neighbors === 2 || neighbors === 3;
+        } else {
+          newGrid[i][j] = neighbors === 3;
+        }
+      }
+    }
+    gridRef.current = newGrid;
+    setGeneration(gen => gen + 1);
+    draw();
+  }, [rows, cols, draw]);
 
   const getCellPosition = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -100,39 +111,40 @@ const GSMOL = ({ width, height, cellSize = 10, minimal = false }: GameOfLifeProp
   };
 
   const toggleCell = (i: number, j: number) => {
-    setGrid(currentGrid => {
-      const newGrid = currentGrid.map(arr => [...arr]);
-      newGrid[i][j] = !newGrid[i][j];
-      return newGrid;
-    });
+    const grid = gridRef.current;
+    if (!grid[i]) return;
+    grid[i][j] = !grid[i][j];
+    draw();
   };
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const pos = getCellPosition(e);
     if (pos) {
-      setIsDragging(true);
-      setDraggedCells(new Set([`${pos.i}-${pos.j}`]));
+      isDraggingRef.current = true;
+      draggedCellsRef.current = new Set([`${pos.i}-${pos.j}`]);
       toggleCell(pos.i, pos.j);
     }
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDragging) return;
+    if (!isDraggingRef.current) return;
     const pos = getCellPosition(e);
     if (pos) {
       const key = `${pos.i}-${pos.j}`;
-      if (!draggedCells.has(key)) {
-        setDraggedCells(prev => new Set([...prev, key]));
+      if (!draggedCellsRef.current.has(key)) {
+        draggedCellsRef.current.add(key);
         toggleCell(pos.i, pos.j);
       }
     }
   };
 
-  const handleMouseUp = () => setIsDragging(false);
-  const handleMouseLeave = () => setIsDragging(false);
+  const handleMouseUp = () => { isDraggingRef.current = false; };
+  const handleMouseLeave = () => { isDraggingRef.current = false; };
 
   useEffect(() => { initGrid(); }, [initGrid]);
-  useEffect(() => { draw(); }, [draw]);
+
+  // Redraw on theme change (grid unchanged, colours differ).
+  useEffect(() => { draw(); }, [theme, draw]);
 
   useEffect(() => {
     if (!running) return;

@@ -449,6 +449,17 @@ const GameOfLife = () => {
     return () => el.removeEventListener('contextmenu', handler);
   }, []);
 
+  // ── Clear drag/interaction on window-level mouseup ──
+  // A drag released outside the canvas never fires the canvas mouseup, leaving
+  // the interaction mode set so drawing resumes when the pointer re-enters.
+  // Listening on the window guarantees the mode is always cleared on release.
+
+  useEffect(() => {
+    const handler = () => { interactionRef.current.mode = null; };
+    window.addEventListener('mouseup', handler);
+    return () => window.removeEventListener('mouseup', handler);
+  }, []);
+
   // ── Simulation loop ──
 
   useEffect(() => {
@@ -774,7 +785,6 @@ const GameOfLife = () => {
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
           className="cursor-crosshair block w-full h-full"
         />
       </div>
