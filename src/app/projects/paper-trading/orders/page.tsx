@@ -15,6 +15,7 @@ export default function OrdersPage() {
   const { selected, loading } = useAccounts();
   const [orders, setOrders] = useState<OpenOrder[]>([]);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [cancelError, setCancelError] = useState<{ id: number; message: string } | null>(null);
 
   const load = useCallback(async (id: number) => {
     const res = await fetch(`/api/paper-trading/accounts/${id}/orders`);
@@ -31,9 +32,18 @@ export default function OrdersPage() {
 
   async function cancel(orderId: number) {
     setBusyId(orderId);
+    setCancelError(null);
     try {
-      await fetch(`/api/paper-trading/orders/${orderId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/paper-trading/orders/${orderId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        setCancelError({ id: orderId, message: data?.error || data?.message || 'Could not cancel this order.' });
+        if (selected) await load(selected.id);
+        return;
+      }
       if (selected) await load(selected.id);
+    } catch {
+      setCancelError({ id: orderId, message: 'Could not cancel this order.' });
     } finally { setBusyId(null); }
   }
 
@@ -54,7 +64,8 @@ export default function OrdersPage() {
       ) : (
         <div className="-mx-3">
           {orders.map((o) => (
-            <div key={o.id} className="flex items-center gap-3 rounded-2xl px-3 py-3 transition-colors hover:bg-muted">
+            <div key={o.id}>
+            <div className="flex items-center gap-3 rounded-2xl px-3 py-3 transition-colors hover:bg-muted">
               <Monogram symbol={o.symbol} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 font-semibold leading-tight">
@@ -75,6 +86,10 @@ export default function OrdersPage() {
                 className="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground disabled:opacity-50">
                 <X className="h-3 w-3" /> Cancel
               </button>
+            </div>
+            {cancelError?.id === o.id && (
+              <p className="px-3 pb-2 text-xs pt-loss">{cancelError.message}</p>
+            )}
             </div>
           ))}
         </div>

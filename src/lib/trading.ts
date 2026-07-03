@@ -15,7 +15,7 @@
  */
 import type { PoolClient } from 'pg';
 import pool from './db';
-import { isMarketOpen, nextMarketOpen } from './market';
+import { isMarketOpen, nextMarketOpen, todaysMarketOpen } from './market';
 import { getQuote } from './quotes';
 
 export type Side = 'buy' | 'sell';
@@ -167,11 +167,8 @@ export async function placeOrder(accountId: number, input: PlaceOrderInput): Pro
     limitCents = dollarsToCents(input.limitPrice);
   }
 
-  // Confirm the account exists.
-  const acct = await pool.query(`SELECT id FROM pt_accounts WHERE id = $1`, [accountId]);
-  if (acct.rows.length === 0) return { ok: false, status: 'rejected', message: 'account not found' };
-
   // Fresh quote for fill / dollar conversion. May be null (e.g. typo, or yahoo down).
+  // Fetched before the transaction — it's an external call and shouldn't hold a tx open.
   const quote = await getQuote(symbol);
   const marketOpen = isMarketOpen();
 
@@ -189,40 +186,62 @@ export async function placeOrder(accountId: number, input: PlaceOrderInput): Pro
     return { ok: false, status: 'rejected', message: 'provide either a share quantity or a dollar amount' };
   }
 
-  // Insert the order as open, then decide whether to fill it now.
-  const inserted = await pool.query(
-    `INSERT INTO pt_orders (account_id, symbol, side, type, qty, limit_price_cents)
-     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-    [accountId, symbol, input.side, input.type, qty, limitCents],
-  );
-  const orderId = Number(inserted.rows[0].id);
-  const order: OpenOrderRow = { id: orderId, account_id: accountId, symbol, side: input.side, type: input.type, qty, limit_price_cents: limitCents };
+  // One transaction: confirm the account exists, insert the order as 'open', then decide
+  // whether to fill it now — so an order is never observable in a half-processed state.
+  // Non-fill paths (market-closed, limit resting) still commit the insert as 'open'; a
+  // rejected fill commits the order in 'rejected' state (fillOrderTx marks it).
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
 
-  // Market order while the market is closed → leave queued for the next open.
-  if (input.type === 'market' && !marketOpen) {
-    const open = nextMarketOpen();
-    return {
-      ok: true,
-      status: 'queued',
-      orderId,
-      message: open ? `Market closed — queued to fill at next open (${open.toLocaleString('en-US', { timeZone: 'America/New_York' })} ET).` : 'Market closed — order queued.',
-    };
-  }
-
-  // Eligible to fill right now?
-  if (quote && marketOpen && isFillable(order, quote.priceCents)) {
-    const res = await attemptFill(order, quote.priceCents);
-    if (res.ok) {
-      return { ok: true, status: 'filled', orderId, filledQty: qty, fillPriceCents: quote.priceCents, message: `Filled ${qty} ${symbol} @ $${(quote.priceCents / 100).toFixed(2)}.` };
+    const acct = await client.query(`SELECT id FROM pt_accounts WHERE id = $1`, [accountId]);
+    if (acct.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { ok: false, status: 'rejected', message: 'account not found' };
     }
-    return { ok: false, status: 'rejected', orderId, message: `Order rejected: ${res.reason}.` };
-  }
 
-  // Limit order resting (or market order we couldn't price yet).
-  if (input.type === 'limit') {
-    return { ok: true, status: 'open', orderId, message: `Limit ${input.side} placed for ${qty} ${symbol} @ $${(limitCents! / 100).toFixed(2)} — resting until it crosses.` };
+    const inserted = await client.query(
+      `INSERT INTO pt_orders (account_id, symbol, side, type, qty, limit_price_cents)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [accountId, symbol, input.side, input.type, qty, limitCents],
+    );
+    const orderId = Number(inserted.rows[0].id);
+    const order: OpenOrderRow = { id: orderId, account_id: accountId, symbol, side: input.side, type: input.type, qty, limit_price_cents: limitCents };
+
+    // Market order while the market is closed → leave queued for the next open.
+    if (input.type === 'market' && !marketOpen) {
+      await client.query('COMMIT');
+      const open = nextMarketOpen();
+      return {
+        ok: true,
+        status: 'queued',
+        orderId,
+        message: open ? `Market closed — queued to fill at next open (${open.toLocaleString('en-US', { timeZone: 'America/New_York' })} ET).` : 'Market closed — order queued.',
+      };
+    }
+
+    // Eligible to fill right now?
+    if (quote && marketOpen && isFillable(order, quote.priceCents)) {
+      const res = await fillOrderTx(client, order, quote.priceCents);
+      await client.query('COMMIT');
+      if (res.ok) {
+        return { ok: true, status: 'filled', orderId, filledQty: qty, fillPriceCents: quote.priceCents, message: `Filled ${qty} ${symbol} @ $${(quote.priceCents / 100).toFixed(2)}.` };
+      }
+      return { ok: false, status: 'rejected', orderId, message: `Order rejected: ${res.reason}.` };
+    }
+
+    // Limit order resting (or market order we couldn't price yet).
+    await client.query('COMMIT');
+    if (input.type === 'limit') {
+      return { ok: true, status: 'open', orderId, message: `Limit ${input.side} placed for ${qty} ${symbol} @ $${(limitCents! / 100).toFixed(2)} — resting until it crosses.` };
+    }
+    return { ok: true, status: 'open', orderId, message: `Order placed for ${qty} ${symbol} — awaiting a quote to fill.` };
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
   }
-  return { ok: true, status: 'open', orderId, message: `Order placed for ${qty} ${symbol} — awaiting a quote to fill.` };
 }
 
 /** Cancel a resting order. Only 'open' orders can be cancelled. */
@@ -242,8 +261,11 @@ export async function cancelOrder(orderId: number): Promise<{ ok: boolean; messa
  */
 export async function processOpenOrders(): Promise<number> {
   if (!isMarketOpen()) return 0;
-  const { rows } = await pool.query<OpenOrderRow & { price_cents: string | null }>(
-    `SELECT o.id, o.account_id, o.symbol, o.side, o.type, o.qty, o.limit_price_cents, q.price_cents
+  // Reject quotes captured before today's session began — on the first sweep after the
+  // open the cache may still hold yesterday's close, and we don't want to fill on it.
+  const sessionOpen = todaysMarketOpen();
+  const { rows } = await pool.query<OpenOrderRow & { price_cents: string | null; quote_updated_at: Date | null }>(
+    `SELECT o.id, o.account_id, o.symbol, o.side, o.type, o.qty, o.limit_price_cents, q.price_cents, q.updated_at AS quote_updated_at
      FROM pt_orders o
      LEFT JOIN pt_quotes q ON q.symbol = o.symbol
      WHERE o.status = 'open'
@@ -253,6 +275,8 @@ export async function processOpenOrders(): Promise<number> {
   let filled = 0;
   for (const r of rows) {
     if (r.price_cents == null) continue; // no quote yet; try next sweep
+    // Stale quote (from before today's open) → leave the order resting for a later sweep.
+    if (sessionOpen && (r.quote_updated_at == null || new Date(r.quote_updated_at) < sessionOpen)) continue;
     const priceCents = Number(r.price_cents);
     const order: OpenOrderRow = {
       id: Number(r.id), account_id: Number(r.account_id), symbol: r.symbol,

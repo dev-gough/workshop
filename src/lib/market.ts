@@ -92,6 +92,28 @@ export function isMarketOpen(date: Date = new Date()): boolean {
 }
 
 /**
+ * The instant the regular session opens (09:30 ET) on `date`'s trading day, or null
+ * when `date` falls on a non-trading day (weekend/holiday). Used to detect quotes
+ * captured before today's session began. Computed by walking back from a fixed 09:30
+ * ET wall-clock guess until its ET parts land on the same calendar day at 09:30.
+ */
+export function todaysMarketOpen(date: Date = new Date()): Date | null {
+  const p = etParts(date);
+  if (!isTradingDay(p)) return null;
+  // Minute-by-minute is overkill; instead, binary-free: probe candidate UTC instants
+  // for the same ET calendar day at 09:30. ET is UTC-5 (EST) or UTC-4 (EDT), so the
+  // open lands at 13:30 or 14:30 UTC. Try both and pick the one whose ET parts match.
+  for (const utcHour of [13, 14]) {
+    const candidate = new Date(Date.UTC(p.year, p.month - 1, p.day, utcHour, 30, 0, 0));
+    const cp = etParts(candidate);
+    if (cp.year === p.year && cp.month === p.month && cp.day === p.day && cp.hour === 9 && cp.minute === 30) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+/**
  * The next instant the market opens at or after `date`. Used for display
  * ("queued — fills at next open"). Steps forward minute-by-minute and snaps to the
  * first open minute; bounded so a long stretch of closures can't loop forever.

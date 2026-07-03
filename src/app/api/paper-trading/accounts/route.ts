@@ -49,6 +49,7 @@ export async function POST(request: NextRequest) {
     if (!trimmed) return NextResponse.json({ error: 'Account name is required' }, { status: 400 });
     const seed = Number(seedDollars);
     if (!Number.isFinite(seed) || seed <= 0) return NextResponse.json({ error: 'Seed amount must be positive' }, { status: 400 });
+    if (seed > 10_000_000) return NextResponse.json({ error: 'Seed amount cannot exceed $10,000,000' }, { status: 400 });
 
     const seedCents = Math.round(seed * 100);
     const { rows } = await pool.query(
