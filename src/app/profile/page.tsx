@@ -10,6 +10,7 @@ import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
 import { useAudio } from '@/components/AudioProvider';
 import { useTheme } from '@/components/ThemeProvider';
+import { adminFetch } from '@/lib/admin-client';
 
 // ── Helpers ──
 
@@ -132,13 +133,15 @@ export default function ProfilePage() {
   const saveServerSettings = useCallback(async () => {
     setSaving(true);
     try {
-      await fetch('/api/settings', {
+      const res = await adminFetch('/api/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ autoIngest, riotGameName, riotTagLine, riotRegion }),
       });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      if (res.ok) {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+      }
     } catch {}
     setSaving(false);
   }, [autoIngest, riotGameName, riotTagLine, riotRegion]);

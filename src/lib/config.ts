@@ -13,6 +13,7 @@
  * page after writing changes.
  */
 import { existsSync, readFileSync } from 'node:fs';
+import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 
 export interface PostgresRole {
@@ -248,6 +249,42 @@ export function getConfig(): Config {
 
 export function resetConfigCache(): void {
   cached = null;
+}
+
+/**
+ * Merge `mutate` into the raw config.json, write atomically, reset the cache,
+ * and re-validate by reloading. Shared by every route that persists config
+ * changes (/api/config PATCH, /api/settings PATCH) so there is a single writer.
+ *
+ * `mutate` receives the parsed raw object (which preserves keys we don't model,
+ * like `_doc`/`_comment`) and edits it in place.
+ *
+ * Resolves `{ ok: true }` on success, or a `{ ok: false, error, ... }` shape the
+ * caller can turn into a NextResponse. A 422-style `written: true` flag is set
+ * when the file was written but the reloaded config failed validation.
+ */
+export async function writeConfigPatch(
+  mutate: (raw: Record<string, unknown>) => void,
+): Promise<{ ok: true } | { ok: false; error: string; written?: boolean; status: number }> {
+  const configPath = path.join(process.cwd(), 'config.json');
+  const raw = JSON.parse(await fsp.readFile(configPath, 'utf-8')) as Record<string, unknown>;
+  mutate(raw);
+
+  // Atomic write
+  const tmp = configPath + '.tmp';
+  await fsp.writeFile(tmp, JSON.stringify(raw, null, 2) + '\n', { mode: 0o600 });
+  await fsp.rename(tmp, configPath);
+
+  // Reset cache so the next getConfig() picks up the new values, and re-validate
+  // immediately. If validation fails, surface the error (the file is already
+  // written, but the in-memory cache will be invalid).
+  resetConfigCache();
+  try {
+    getConfig();
+  } catch (e) {
+    return { ok: false, error: `validation failed after write: ${(e as Error).message}`, written: true, status: 422 };
+  }
+  return { ok: true };
 }
 
 /** Build a `pg`-compatible connection config for one of the three roles. */

@@ -303,7 +303,13 @@ function ProbeButton({ service }: { service: string }) {
   async function run() {
     setState({ status: 'loading' });
     try {
-      const r = await fetch(`/api/setup/probe/${service}`, { method: 'POST' });
+      // Probes are token-gated. Reuse the token this page already holds in
+      // localStorage (set via the Setup Token field) rather than prompting.
+      const setupToken = localStorage.getItem(TOKEN_KEY) ?? '';
+      const r = await fetch(`/api/setup/probe/${service}`, {
+        method: 'POST',
+        headers: setupToken ? { 'X-Setup-Token': setupToken } : undefined,
+      });
       const j = await r.json();
       setState(j.ok
         ? { status: 'ok', msg: j.detail ?? 'OK' }

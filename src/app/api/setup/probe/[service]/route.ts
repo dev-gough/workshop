@@ -7,6 +7,7 @@ import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { Client } from 'pg';
 import { getConfig, pgClientConfig } from '@/lib/config';
+import { requireSetupToken } from '@/lib/admin-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -136,7 +137,10 @@ const PROBES: Record<string, () => Promise<Result>> = {
   riot:         probeRiot,
 };
 
-export async function POST(_req: NextRequest, ctx: { params: Promise<{ service: string }> }) {
+export async function POST(req: NextRequest, ctx: { params: Promise<{ service: string }> }) {
+  const denied = requireSetupToken(req);
+  if (denied) return denied;
+
   const { service } = await ctx.params;
   const probe = PROBES[service];
   if (!probe) return NextResponse.json({ ok: false, error: `unknown service: ${service}` }, { status: 404 });

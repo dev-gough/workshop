@@ -8,9 +8,8 @@
  *       Gated by the X-Setup-Token header matching `setupToken` in config.
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
-import { getConfig, resetConfigCache, type Config } from '@/lib/config';
+import { getConfig, writeConfigPatch, type Config } from '@/lib/config';
+import { requireSetupToken } from '@/lib/admin-auth';
 import { getAllProjectStatuses } from '@/lib/config-status';
 
 export const dynamic = 'force-dynamic';
@@ -79,23 +78,8 @@ const PATCH_ALLOWED = new Set([
 ]);
 
 export async function PATCH(req: NextRequest) {
-  let cfg: Config;
-  try {
-    cfg = getConfig();
-  } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 });
-  }
-
-  const token = req.headers.get('x-setup-token');
-  if (!cfg.setupToken) {
-    return NextResponse.json(
-      { error: 'config.json has no setupToken — cannot accept writes from /setup. Edit config.json directly to set one.' },
-      { status: 403 },
-    );
-  }
-  if (token !== cfg.setupToken) {
-    return NextResponse.json({ error: 'invalid setup token' }, { status: 401 });
-  }
+  const denied = requireSetupToken(req);
+  if (denied) return denied;
 
   let body: Record<string, unknown>;
   try {
@@ -111,26 +95,11 @@ export async function PATCH(req: NextRequest) {
 
   // Read raw file (preserves any keys we don't model, like _doc/_comment),
   // shallow-merge top-level allowed keys, validate by re-loading.
-  const configPath = path.join(process.cwd(), 'config.json');
-  const raw = JSON.parse(await fs.readFile(configPath, 'utf-8'));
-  for (const k of Object.keys(body)) raw[k] = body[k];
-
-  // Atomic write
-  const tmp = configPath + '.tmp';
-  await fs.writeFile(tmp, JSON.stringify(raw, null, 2) + '\n', { mode: 0o600 });
-  await fs.rename(tmp, configPath);
-
-  // Reset cache so the next getConfig() picks up the new values; also re-validate
-  // by reading immediately. If validation fails, surface the error (the file is
-  // already written, but the in-memory cache will be invalid).
-  resetConfigCache();
-  try {
-    getConfig();
-  } catch (e) {
-    return NextResponse.json(
-      { error: `validation failed after write: ${(e as Error).message}`, written: true },
-      { status: 422 },
-    );
+  const result = await writeConfigPatch((raw) => {
+    for (const k of Object.keys(body)) raw[k] = body[k];
+  });
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error, written: result.written }, { status: result.status });
   }
 
   return NextResponse.json({ ok: true });

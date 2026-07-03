@@ -11,6 +11,7 @@ import {
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
 import Sparkline from '@/components/charts/sparkline';
+import { adminFetch } from '@/lib/admin-client';
 
 // ── Types ──
 
@@ -458,7 +459,7 @@ function RconInput({ serviceName }: { serviceName: string }) {
     setCommand('');
 
     try {
-      const res = await fetch('/api/server/rcon', {
+      const res = await adminFetch('/api/server/rcon', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ service: serviceName, command: cmd }),
@@ -632,7 +633,7 @@ export default function ServerDashboard() {
     actionIdRef.current = id;
     setActionLoading(id);
     try {
-      const res = await fetch('/api/server/services', {
+      const res = await adminFetch('/api/server/services', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ service: name, action }),

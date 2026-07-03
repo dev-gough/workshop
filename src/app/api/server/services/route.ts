@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { execSync } from 'child_process';
 import { getConfig } from '@/lib/config';
+import { requireSetupToken } from '@/lib/admin-auth';
 import { sendRconCommand } from '@/lib/rcon';
 
 export const dynamic = 'force-dynamic';
@@ -164,6 +165,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const denied = requireSetupToken(request);
+  if (denied) return denied;
+
   try {
     const { service, action } = await request.json();
 
