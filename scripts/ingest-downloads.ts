@@ -120,7 +120,10 @@ async function processCompletedDownloads() {
       }
     }
 
-    // Also track active uploads (record who's downloading from us)
+    // Also track completed uploads (record who's downloading from us). Keyed
+    // on slskd's transfer id, like downloads — completed transfers linger in
+    // slskd's list for hours, so a time-window dedup re-inserts them on every
+    // poll past the window (the "7 TB uploaded" bug fixed by migration 015).
     try {
       const rawUl = await slskdGet('/api/v0/transfers/uploads');
       const uploads = flattenTransfers<SlskdTransfer>(rawUl);
@@ -128,19 +131,27 @@ async function processCompletedDownloads() {
         for (const transfer of userTransfers) {
           if (!(transfer.state.includes('Completed') && transfer.state.includes('Succeeded'))) continue;
 
+          const basename = path.basename(transfer.filename.replace(/\\/g, '/'));
+          // Legacy rows predate slskd_id, so also match on the transfer's
+          // natural key — otherwise the first poll after deploy would
+          // re-insert everything still sitting in slskd's list.
           const { rows: existing } = await pool.query(
-            "SELECT id FROM soulseek_uploads WHERE username = $1 AND filename = $2 AND created_at > NOW() - INTERVAL '1 hour'",
-            [username, path.basename(transfer.filename.replace(/\\/g, '/'))]
+            `SELECT id FROM soulseek_uploads
+             WHERE slskd_id = $1
+                OR (username = $2 AND filename = $3 AND started_at IS NOT DISTINCT FROM $4)`,
+            [transfer.id, username, basename, transfer.startedAt || null]
           );
           if (existing.length > 0) continue;
 
           const parsed = cleanDownloadPath(transfer.filename);
           await pool.query(
-            `INSERT INTO soulseek_uploads (username, filename, artist, album, size_bytes, speed_bytes_per_sec, status, started_at, completed_at)
-             VALUES ($1, $2, $3, $4, $5, $6, 'completed', $7, NOW())`,
+            `INSERT INTO soulseek_uploads (slskd_id, username, filename, artist, album, size_bytes, speed_bytes_per_sec, status, started_at, completed_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, 'completed', $8, NOW())
+             ON CONFLICT (slskd_id) DO NOTHING`,
             [
+              transfer.id,
               username,
-              path.basename(transfer.filename.replace(/\\/g, '/')),
+              basename,
               parsed.artist,
               parsed.album,
               transfer.size,
@@ -148,7 +159,7 @@ async function processCompletedDownloads() {
               transfer.startedAt || null,
             ]
           );
-          console.log(`[upload tracked] ${username} downloaded: ${parsed.artist} - ${parsed.album} / ${path.basename(transfer.filename)}`);
+          console.log(`[upload tracked] ${username} downloaded: ${parsed.artist} - ${parsed.album} / ${basename}`);
         }
       }
     } catch (err) {
