@@ -195,8 +195,11 @@ function parseLif(content: string): { x: number; y: number }[] {
       cy++;
     }
   }
-  const minX = Math.min(...pattern.map(p => p.x));
-  const minY = Math.min(...pattern.map(p => p.y));
+  let minX = Infinity, minY = Infinity;
+  for (const p of pattern) {
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+  }
   return pattern.map(p => ({ x: p.x - minX, y: p.y - minY }));
 }
 

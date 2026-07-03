@@ -197,6 +197,22 @@ class ImageEvolverEngine {
     this.best = cloneCandidate(this.population[0]);
   }
 
+  setPopSize(n: number) {
+    if (n === this.popSize) return;
+    if (n > this.population.length) {
+      // Grow: clone random existing candidates to fill the gap
+      while (this.population.length < n) {
+        const src = this.population[Math.floor(Math.random() * this.population.length)];
+        this.population.push(cloneCandidate(src));
+      }
+    } else if (n < this.population.length) {
+      // Shrink: keep the fittest, drop the worst
+      this.population.sort((a, b) => a.fitness - b.fitness);
+      this.population.length = n;
+    }
+    this.popSize = n;
+  }
+
   tournamentSelect(k: number = 3): Candidate {
     let best: Candidate | null = null;
     for (let i = 0; i < k; i++) {
@@ -292,6 +308,7 @@ const ImageEvolver = () => {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<ImageEvolverEngine | null>(null);
   const targetCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const bestCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number>(0);
   const lastFrameRef = useRef<number>(0);
   const canvasSizeRef = useRef({ w: 0, h: 0 });
@@ -341,6 +358,7 @@ const ImageEvolver = () => {
     if (!file) return;
     setRunning(false);
     const img = new window.Image();
+    const url = URL.createObjectURL(file);
     img.onload = () => {
       const c = document.createElement('canvas');
       c.width = WORK_SIZE; c.height = WORK_SIZE;
@@ -348,8 +366,10 @@ const ImageEvolver = () => {
       ctx.drawImage(img, 0, 0, WORK_SIZE, WORK_SIZE);
       setPresetName('');
       initWithTarget(c);
+      URL.revokeObjectURL(url);
     };
-    img.src = URL.createObjectURL(file);
+    img.onerror = () => { URL.revokeObjectURL(url); };
+    img.src = url;
     e.target.value = '';
   }, [initWithTarget]);
 
@@ -371,7 +391,8 @@ const ImageEvolver = () => {
     if (!engine) return;
     engine.mutationRate = mutationRate;
     engine.maxPolygons = maxPolygons;
-  }, [mutationRate, maxPolygons]);
+    engine.setPopSize(popSize);
+  }, [mutationRate, maxPolygons, popSize]);
 
   // ── Drawing ──
 
@@ -413,9 +434,15 @@ const ImageEvolver = () => {
     ctx.imageSmoothingEnabled = true;
     ctx.drawImage(target, startX, startY, imgSize, imgSize);
 
-    // Best candidate
-    const offCanvas = document.createElement('canvas');
-    offCanvas.width = WORK_SIZE; offCanvas.height = WORK_SIZE;
+    // Best candidate — reuse a persistent offscreen canvas across frames
+    let offCanvas = bestCanvasRef.current;
+    if (!offCanvas) {
+      offCanvas = document.createElement('canvas');
+      bestCanvasRef.current = offCanvas;
+    }
+    if (offCanvas.width !== WORK_SIZE || offCanvas.height !== WORK_SIZE) {
+      offCanvas.width = WORK_SIZE; offCanvas.height = WORK_SIZE;
+    }
     const offCtx = offCanvas.getContext('2d')!;
     renderCandidate(offCtx, engine.best, WORK_SIZE, WORK_SIZE);
     ctx.drawImage(offCanvas, startX + imgSize + gap, startY, imgSize, imgSize);
