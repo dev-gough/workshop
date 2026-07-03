@@ -1,5 +1,6 @@
-import { promises as fs } from 'fs';
+import fs, { promises as fsp } from 'fs';
 import path from 'path';
+import { Readable } from 'stream';
 import { NextRequest, NextResponse } from 'next/server';
 
 const MIME_TYPES: Record<string, string> = {
@@ -19,7 +20,7 @@ export async function GET(request: NextRequest) {
 		return NextResponse.json({ error: 'Missing artist, album, or song parameter' }, { status: 400 });
 	}
 
-	const config = JSON.parse(await fs.readFile(path.join(process.cwd(), 'config.json'), 'utf-8'));
+	const config = JSON.parse(await fsp.readFile(path.join(process.cwd(), 'config.json'), 'utf-8'));
 	const musicDir = config.paths?.musicDirectory;
 	if (!musicDir) {
 		return NextResponse.json({ error: 'paths.musicDirectory is not configured' }, { status: 500 });
@@ -34,7 +35,7 @@ export async function GET(request: NextRequest) {
 
 	// If file doesn't exist and song has a virtual disc prefix, try stripping it
 	try {
-		await fs.stat(resolved);
+		await fsp.stat(resolved);
 	} catch {
 		const discMatch = song.match(/^Disc \d+\/(.+)$/);
 		if (discMatch) {
@@ -46,42 +47,82 @@ export async function GET(request: NextRequest) {
 		}
 	}
 
+	let stat;
 	try {
-		const stat = await fs.stat(resolved);
-		const ext = path.extname(song).toLowerCase();
-		const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+		stat = await fsp.stat(resolved);
+	} catch {
+		return NextResponse.json({ error: 'File not found' }, { status: 404 });
+	}
 
-		const rangeHeader = request.headers.get('range');
+	const ext = path.extname(song).toLowerCase();
+	const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+	const size = stat.size;
 
-		if (rangeHeader) {
-			const match = rangeHeader.match(/bytes=(\d+)-(\d*)/);
-			if (match) {
-				const start = parseInt(match[1], 10);
-				const end = match[2] ? parseInt(match[2], 10) : stat.size - 1;
-				const chunk = await fs.readFile(resolved);
-				const sliced = chunk.slice(start, end + 1);
+	// Convert a Node read stream into a web ReadableStream, destroying the
+	// underlying stream if the client aborts the request.
+	const toWebStream = (start: number, end: number): ReadableStream => {
+		const nodeStream = fs.createReadStream(resolved, { start, end });
+		const abort = () => nodeStream.destroy();
+		if (request.signal.aborted) {
+			nodeStream.destroy();
+		} else {
+			request.signal.addEventListener('abort', abort, { once: true });
+			nodeStream.once('close', () => request.signal.removeEventListener('abort', abort));
+		}
+		return Readable.toWeb(nodeStream) as ReadableStream;
+	};
 
-				return new NextResponse(new Uint8Array(sliced), {
-					status: 206,
+	const rangeHeader = request.headers.get('range');
+
+	if (rangeHeader) {
+		const match = rangeHeader.match(/bytes=(\d*)-(\d*)/);
+		// Malformed range header → fall through to a full 200 response.
+		if (match && (match[1] || match[2])) {
+			let start: number;
+			let end: number;
+			if (match[1]) {
+				// bytes=start- or bytes=start-end
+				start = parseInt(match[1], 10);
+				end = match[2] ? parseInt(match[2], 10) : size - 1;
+			} else {
+				// bytes=-suffix (last N bytes)
+				const suffix = parseInt(match[2], 10);
+				start = Math.max(size - suffix, 0);
+				end = size - 1;
+			}
+
+			// Unsatisfiable range.
+			if (Number.isNaN(start) || Number.isNaN(end) || start > end || start >= size) {
+				return new NextResponse(null, {
+					status: 416,
 					headers: {
-						'Content-Type': contentType,
-						'Content-Range': `bytes ${start}-${end}/${stat.size}`,
-						'Content-Length': sliced.length.toString(),
+						'Content-Range': `bytes */${size}`,
 						'Accept-Ranges': 'bytes',
 					},
 				});
 			}
-		}
 
-		const fileBuffer = await fs.readFile(resolved);
-		return new NextResponse(new Uint8Array(fileBuffer), {
-			headers: {
-				'Content-Type': contentType,
-				'Content-Length': stat.size.toString(),
-				'Accept-Ranges': 'bytes',
-			},
-		});
-	} catch {
-		return NextResponse.json({ error: 'File not found' }, { status: 404 });
+			// Clamp end to the last byte.
+			if (end >= size) end = size - 1;
+
+			return new NextResponse(toWebStream(start, end), {
+				status: 206,
+				headers: {
+					'Content-Type': contentType,
+					'Content-Range': `bytes ${start}-${end}/${size}`,
+					'Content-Length': (end - start + 1).toString(),
+					'Accept-Ranges': 'bytes',
+				},
+			});
+		}
 	}
+
+	return new NextResponse(size > 0 ? toWebStream(0, size - 1) : new Uint8Array(0), {
+		status: 200,
+		headers: {
+			'Content-Type': contentType,
+			'Content-Length': size.toString(),
+			'Accept-Ranges': 'bytes',
+		},
+	});
 }

@@ -601,9 +601,6 @@ export default function BarFooPage() {
     setActivePlaylist(await res.json());
   };
 
-  const cleanSongName = cleanSongDisplay;
-  const displaySongName = cleanSongDisplay;
-  const sortedIndices = sortedTrackIndices;
   const sel = selectedAlbum !== null ? albums[selectedAlbum] : null;
 
   const VolumeIcon = muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
@@ -647,7 +644,7 @@ export default function BarFooPage() {
 
     const SongRow = ({ song, globalIdx, num }: { song: string; globalIdx: number; num: number }) => {
       const isCurrent = currentTrack?.albumIndex === albumIdx && currentTrack?.songIndex === globalIdx;
-      const cleaned = cleanSongName(song, alb.artist, alb.name);
+      const cleaned = cleanSongDisplay(song, alb.artist, alb.name);
       return (
         <SongContextMenu artist={alb.artist} album={alb.name} song={songs[globalIdx]}>
           <div
@@ -695,7 +692,7 @@ export default function BarFooPage() {
       });
     }
 
-    const sorted = sortedIndices(songs);
+    const sorted = sortedTrackIndices(songs);
     return sorted.map((origIdx, displayIdx) => (
       <SongRow key={origIdx} song={songs[origIdx]} globalIdx={origIdx} num={displayIdx + 1} />
     ));
@@ -946,7 +943,7 @@ export default function BarFooPage() {
                             >
                               <span className="text-xs w-5 text-right text-muted-foreground tabular-nums">{idx + 1}</span>
                               <div className="min-w-0 flex-1">
-                                <p className="text-sm truncate">{cleanSongName(s.song, s.artist, s.album)}</p>
+                                <p className="text-sm truncate">{cleanSongDisplay(s.song, s.artist, s.album)}</p>
                                 <p className="text-xs text-muted-foreground truncate">{s.artist} — {s.album}</p>
                               </div>
                               <Button
@@ -1002,10 +999,13 @@ export default function BarFooPage() {
                               variant="outline"
                               className="h-8 text-xs"
                               onClick={() => {
-                                const allSongs = artistAlbums.flatMap(({ album, index }) =>
+                                const shuffled = artistAlbums.flatMap(({ album, index }) =>
                                   album.songs.map((_, si) => ({ albumIndex: index, songIndex: si }))
                                 );
-                                const shuffled = allSongs.sort(() => Math.random() - 0.5);
+                                for (let i = shuffled.length - 1; i > 0; i--) {
+                                  const j = Math.floor(Math.random() * (i + 1));
+                                  [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+                                }
                                 if (shuffled.length > 0) {
                                   setQueue(shuffled);
                                   setQueueIndex(0);
@@ -1281,7 +1281,7 @@ export default function BarFooPage() {
                                       >
                                         <span className="text-[10px] w-5 text-right tabular-nums text-muted-foreground">{idx + 1}</span>
                                         <div className="min-w-0 flex-1">
-                                          <p className="text-xs truncate font-medium">{displaySongName(song, alb.artist, alb.name)}</p>
+                                          <p className="text-xs truncate font-medium">{cleanSongDisplay(song, alb.artist, alb.name)}</p>
                                           <p className={`text-[10px] truncate ${isCurrent ? 'text-primary/60' : 'text-muted-foreground'}`}>
                                             {alb.artist}
                                           </p>
@@ -1359,7 +1359,7 @@ export default function BarFooPage() {
                     </div>
                   )}
                   <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{currentSongName ? displaySongName(currentSongName, currentAlbum?.artist, currentAlbum?.name) : ''}</p>
+                    <p className="text-sm font-medium truncate">{currentSongName ? cleanSongDisplay(currentSongName, currentAlbum?.artist, currentAlbum?.name) : ''}</p>
                     <p className="text-xs text-muted-foreground truncate cursor-pointer hover:text-foreground transition-colors" onClick={() => { if (currentAlbum) { setActiveArtist(currentAlbum.artist); setShowStats(false); setShowPlaylists(false); } }}>{currentAlbum?.artist}</p>
                   </div>
                 </div>
