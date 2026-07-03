@@ -44,7 +44,15 @@ export class BFInterpreter {
   done = false;
   truncated = false;
   lastWritten = -1;
+  // Undo history as a bounded LIFO. To avoid the O(n) shift that `splice(0,…)`
+  // incurs on every overflow, we keep a head index: entries before `histHead`
+  // are logically discarded (the oldest). push() appends to the tail; pop()
+  // takes from the tail but never below histHead. The dead prefix is reclaimed
+  // by a rare compaction (slice) only once it grows past the live window, so
+  // the amortized cost per push stays O(1). Observable behavior — max live
+  // entries = historyCap, LIFO semantics — is unchanged.
   private history: UndoEntry[] = [];
+  private histHead = 0;
   private readonly historyCap = 200_000;
 
   constructor(source: string, calcCap: number = DEFAULT_CALC_CAP) {
@@ -63,6 +71,7 @@ export class BFInterpreter {
     this.truncated = false;
     this.lastWritten = -1;
     this.history.length = 0;
+    this.histHead = 0;
   }
 
   // Execute one BF instruction. Returns false when the program halts (done or truncated).
@@ -200,8 +209,9 @@ export class BFInterpreter {
 
   // Undo the most recent step. Returns false if there's nothing to undo.
   stepBack(): boolean {
-    const e = this.history.pop();
-    if (!e) return false;
+    // Nothing live once the tail has drained back down to the discarded prefix.
+    if (this.history.length <= this.histHead) return false;
+    const e = this.history.pop()!;
     this.ip = e.ip;
     this.dataPtr = e.dataPtr;
     this.calcs = e.calcs;
@@ -215,9 +225,16 @@ export class BFInterpreter {
 
   private pushHistory(entry: UndoEntry): void {
     this.history.push(entry);
-    if (this.history.length > this.historyCap) {
-      // Drop the oldest 25% to amortize the shift cost.
-      this.history.splice(0, Math.floor(this.historyCap / 4));
+    // Live entry count = length - histHead. Once it exceeds the cap, advance the
+    // head (O(1)) instead of shifting the array. When the discarded prefix grows
+    // as large as the live window, reclaim it with a single slice — amortized
+    // O(1) per push, no per-overflow O(n) shift.
+    if (this.history.length - this.histHead > this.historyCap) {
+      this.histHead++;
+      if (this.histHead >= this.historyCap) {
+        this.history = this.history.slice(this.histHead);
+        this.histHead = 0;
+      }
     }
   }
 

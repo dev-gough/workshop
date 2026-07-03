@@ -21,10 +21,29 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     if (!rows.length) {
       return NextResponse.json({ error: 'not found' }, { status: 404 });
     }
+    // Bounded progress trail. A long run accumulates tens of thousands of
+    // progress points; shipping the whole thing every poll is wasteful and
+    // the sparkline can't resolve it anyway. Keep the newest ~250 rows at full
+    // resolution (the part the user is actively watching) plus an evenly
+    // spaced downsample of the older rows so the early shape is preserved.
+    // Total is capped at ~500 points regardless of run length.
+    const RECENT = 250;
+    const OLDER = 250;
     const { rows: trail } = await pool.query(
-      `SELECT gen, best_fitness FROM brainfuck_progress
-       WHERE run_id = $1 ORDER BY gen ASC`,
-      [runId],
+      `WITH ranked AS (
+         SELECT gen, best_fitness,
+                row_number() OVER (ORDER BY gen DESC) AS rn_desc,
+                row_number() OVER (ORDER BY gen ASC)  AS rn_asc,
+                count(*)     OVER ()                  AS total
+         FROM brainfuck_progress
+         WHERE run_id = $1
+       )
+       SELECT gen, best_fitness FROM ranked
+       WHERE rn_desc <= $2
+          OR (rn_desc > $2
+              AND (rn_asc - 1) % GREATEST(1, CEIL((total - $2)::numeric / $3)) = 0)
+       ORDER BY gen ASC`,
+      [runId, RECENT, OLDER],
     );
     return NextResponse.json({ run: rows[0], progress: trail, activeId: getActiveRunId() });
   } catch (error) {

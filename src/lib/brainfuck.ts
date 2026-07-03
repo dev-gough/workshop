@@ -1,4 +1,5 @@
 import { spawn, ChildProcess, execFileSync } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import readline from 'node:readline';
 import pool from '@/lib/db';
 import { brainfuckRepoPath, pythonBinPath } from '@/lib/config';
@@ -157,6 +158,10 @@ type BenchmarkEvent = {
   found: boolean;
 };
 type ErrorEvent = { type: 'error'; message: string };
+// Diversity-mechanism events emitted by runner.py. Previously dropped on the
+// floor; now surfaced as lightweight activity entries in the run panel.
+type RestartEvent = { type: 'restart'; gen: number; kept: number; best_fitness: number };
+type MigrationEvent = { type: 'migration'; gen: number; K: number; best_fitness: number };
 export interface SolutionStats {
   gene_length: number;
   loop_count: number;
@@ -176,7 +181,39 @@ type SolutionEvent = {
   best_output: string;
   stats: SolutionStats;
 };
-type Event = ProgressEvent | FoundEvent | DoneEvent | StartEvent | BenchmarkEvent | ErrorEvent | SolutionEvent;
+type Event =
+  | ProgressEvent
+  | FoundEvent
+  | DoneEvent
+  | StartEvent
+  | BenchmarkEvent
+  | ErrorEvent
+  | SolutionEvent
+  | RestartEvent
+  | MigrationEvent;
+
+// ── Live event fan-out ──────────────────────────────────────────────────────
+// The SSE route (api/brainfuck/runs/stream) subscribes here to push runner
+// events to browsers in real time, replacing 1s polling. This emitter is part
+// of the same module singleton as the child-process manager, so a route
+// handler that imports from '@/lib/brainfuck' shares this exact instance and
+// sees events for the currently-running child(ren). Events carry the run id so
+// a client watching a specific run can filter.
+export type StreamEvent = { runId: number } & Event;
+
+const streamBus = new EventEmitter();
+// SSE clients per active run can pile up; lift the default 10-listener cap so
+// Node doesn't warn on legitimate fan-out.
+streamBus.setMaxListeners(0);
+
+export function subscribeRunEvents(listener: (evt: StreamEvent) => void): () => void {
+  streamBus.on('event', listener);
+  return () => streamBus.off('event', listener);
+}
+
+function emitStreamEvent(runId: number, evt: Event): void {
+  streamBus.emit('event', { runId, ...evt } as StreamEvent);
+}
 
 // Each currently-running runner subprocess (1..N for parallel races, always 1
 // for solo runs). The race_id groups siblings together so a 'found' event on
@@ -307,6 +344,10 @@ async function spawnLane(
     } catch {
       return;
     }
+    // Fan out to any live SSE subscribers immediately — no need to wait for the
+    // DB-write chain to drain, since the stream carries the event payload
+    // directly. The persisted row is still the source of truth on reconnect.
+    emitStreamEvent(id, evt);
     chain = chain
       .then(() => handleEvent(id, evt, runContext))
       .catch((e) => console.error('[brainfuck] event handler', e));

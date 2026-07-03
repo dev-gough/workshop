@@ -275,6 +275,17 @@ interface Run {
 
 interface ProgressPoint { gen: number; best_fitness: number; }
 
+// Diversity-mechanism activity surfaced live from the SSE stream. `kind`
+// distinguishes a population restart from an island migration; `detail` is a
+// short human-readable note (elites kept / island count).
+interface ActivityEntry {
+  key: string;
+  kind: 'restart' | 'migration';
+  gen: number;
+  best_fitness: number;
+  detail: string;
+}
+
 interface Benchmark {
   id: number;
   version_hash: string | null;
@@ -407,6 +418,10 @@ export default function BrainfuckPage() {
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [activeProgress, setActiveProgress] = useState<ProgressPoint[]>([]);
+  // Lightweight diversity-event log for the active run — restart/migration
+  // events from runner.py that used to be silently dropped. Newest first,
+  // capped so a long run can't grow it without bound.
+  const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [historyPage, setHistoryPage] = useState(0);
   const [historyPerPage, setHistoryPerPage] = useState(10);
   const [benchPage, setBenchPage] = useState(0);
@@ -582,6 +597,7 @@ export default function BrainfuckPage() {
   useEffect(() => {
     lastBestFitnessRef.current = null;
     lastForcedSwapAtRef.current = 0;
+    setActivity([]); // activity is per-run; drop the previous run's entries
     if (effectiveActiveId == null) {
       setDisplayedGene(null);
       latestGeneRef.current = null;
@@ -591,7 +607,15 @@ export default function BrainfuckPage() {
     setDisplayedGene(null); // force re-seed from next refreshActive
   }, [effectiveActiveId]);
 
-  // Poll while *something* is on display — server-active or local pin.
+  // Live updates while *something* is on display — server-active or local pin.
+  //
+  // Primary path is the SSE stream (/api/brainfuck/runs/stream): the runner's
+  // events arrive push-style and trigger a coalesced re-fetch of the run row +
+  // progress trail, so the UI tracks the child in real time instead of on a
+  // fixed 1s tick. restart/migration events are folded straight into the
+  // activity log. A slow 10s poll always runs as a floor (covers the terminal
+  // 'done' status that lands after the stream event and the pinned-run window),
+  // and if the stream errors we drop to a faster 2s fallback poll.
   useEffect(() => {
     if (effectiveActiveId == null) {
       if (pollRef.current) {
@@ -600,13 +624,76 @@ export default function BrainfuckPage() {
       }
       return;
     }
-    if (pollRef.current) return;
-    refreshActive(effectiveActiveId);
-    pollRef.current = window.setInterval(() => {
-      refresh();
-      refreshActive(effectiveActiveId);
-    }, 1000);
+
+    const displayedId = effectiveActiveId;
+    let cancelled = false;
+
+    // Initial paint.
+    refreshActive(displayedId);
+
+    // Coalesce bursts of stream events into at most one refresh per ~400ms so
+    // a high-frequency progress cadence doesn't hammer the two fetch endpoints.
+    let pending = false;
+    let refreshTimer: number | null = null;
+    const scheduleRefresh = () => {
+      if (cancelled || pending) return;
+      pending = true;
+      refreshTimer = window.setTimeout(() => {
+        pending = false;
+        refreshTimer = null;
+        refresh();
+        refreshActive(displayedId);
+      }, 400);
+    };
+
+    // Slow backstop poll. Bumped to a faster cadence only while the stream is
+    // known-broken (see onStreamError). Starts at 10s.
+    let slowMs = 10_000;
+    const startSlowPoll = () => {
+      if (pollRef.current) window.clearInterval(pollRef.current);
+      pollRef.current = window.setInterval(() => {
+        refresh();
+        refreshActive(displayedId);
+      }, slowMs);
+    };
+    startSlowPoll();
+
+    const es = new EventSource('/api/brainfuck/runs/stream');
+    es.onmessage = (e) => {
+      let evt: { type?: string; runId?: number; gen?: number; best_fitness?: number; kept?: number; K?: number };
+      try {
+        evt = JSON.parse(e.data);
+      } catch {
+        return;
+      }
+      if (evt.type === 'hello' || evt.type == null) return;
+      // Fold diversity events into the activity log (only for the displayed run).
+      if ((evt.type === 'restart' || evt.type === 'migration') && evt.runId === displayedId) {
+        const gen = evt.gen ?? 0;
+        const best = evt.best_fitness ?? 0;
+        const entry: ActivityEntry =
+          evt.type === 'restart'
+            ? { key: `r-${gen}-${best}`, kind: 'restart', gen, best_fitness: best,
+                detail: `${evt.kept ?? 0} elites kept` }
+            : { key: `m-${gen}-${best}`, kind: 'migration', gen, best_fitness: best,
+                detail: `${evt.K ?? 0} islands` };
+        setActivity((cur) => (cur[0]?.key === entry.key ? cur : [entry, ...cur].slice(0, 30)));
+      }
+      // Any run event is a cue to re-pull the authoritative row + trail.
+      scheduleRefresh();
+    };
+    es.onerror = () => {
+      // Stream broke — fall back to a faster poll so the UI still tracks.
+      if (slowMs !== 2_000) {
+        slowMs = 2_000;
+        startSlowPoll();
+      }
+    };
+
     return () => {
+      cancelled = true;
+      es.close();
+      if (refreshTimer) window.clearTimeout(refreshTimer);
       if (pollRef.current) {
         window.clearInterval(pollRef.current);
         pollRef.current = null;
@@ -950,6 +1037,8 @@ export default function BrainfuckPage() {
                   Waiting for first program…
                 </div>
               )}
+
+              <ActivityLog entries={activity} />
             </motion.div>
           )}
         </AnimatePresence>
@@ -1782,6 +1871,38 @@ function Stat({ label, value, icon }: { label: string; value: string; icon?: Rea
         {icon}{label}
       </div>
       <div className="text-lg font-semibold tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+// Subtle live-activity strip for the active run. Surfaces the diversity events
+// (restart / migration) the runner emits, which used to be dropped. Newest
+// first; renders nothing until the first event lands so it stays out of the
+// way on quiet runs. Kept in the page's fuchsia / mono visual language.
+function ActivityLog({ entries }: { entries: ActivityEntry[] }) {
+  if (entries.length === 0) return null;
+  return (
+    <div className="rounded-lg bg-background/40 border border-border/40 px-2.5 py-2 space-y-1">
+      <div className="flex items-center gap-1.5 text-[9px] uppercase tracking-[0.15em] text-muted-foreground/80 font-mono">
+        <span className="text-fuchsia-400/60">,</span> diversity events
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {entries.slice(0, 8).map((e) => (
+          <span
+            key={e.key}
+            title={`gen ${e.gen.toLocaleString()} · best ${e.best_fitness} · ${e.detail}`}
+            className="inline-flex items-center gap-1 rounded-sm border border-fuchsia-400/25 bg-fuchsia-400/[0.05] px-1.5 py-0.5 text-[10px] font-mono text-fuchsia-300/85 tabular-nums"
+          >
+            {e.kind === 'restart' ? (
+              <RotateCcw className="h-2.5 w-2.5" />
+            ) : (
+              <InfinityIcon className="h-2.5 w-2.5" />
+            )}
+            <span className="text-fuchsia-200/90">{e.kind}</span>
+            <span className="text-muted-foreground/70">g{e.gen.toLocaleString()}</span>
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
