@@ -12,6 +12,7 @@ import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
 import Sparkline from '@/components/charts/sparkline';
 import { adminFetch } from '@/lib/admin-client';
+import { fmtBytes } from '@/lib/format';
 
 // ── Types ──
 
@@ -60,12 +61,14 @@ interface LogLine {
 
 // ── Helpers ──
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-  if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-  if (bytes < 1024 * 1024 * 1024 * 1024) return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
-  return (bytes / (1024 * 1024 * 1024 * 1024)).toFixed(2) + ' TB';
+/**
+ * Host to build service links against. Every endpoint in SERVICE_ENDPOINTS is a
+ * port served from this same machine, so we point at whatever host the dashboard
+ * was loaded from (LAN IP, Tailscale name, or localhost) instead of a hardcoded
+ * LAN IP that only works from one network.
+ */
+function serverHost(): string {
+  return typeof window !== 'undefined' ? window.location.hostname : 'localhost';
 }
 
 function formatUptime(seconds: number): string {
@@ -142,6 +145,8 @@ interface ServiceSpark { xs: number[]; ys: Array<number | null> }
 
 function ServiceRow({ service, onAction, spark }: { service: ServiceInfo; onAction: (name: string, action: string) => Promise<void>; spark?: ServiceSpark }) {
   const [expanded, setExpanded] = useState(false);
+  const [host, setHost] = useState('localhost');
+  useEffect(() => { setHost(serverHost()); }, []);
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [logSince, setLogSince] = useState('1h');
@@ -241,8 +246,8 @@ function ServiceRow({ service, onAction, spark }: { service: ServiceInfo; onActi
             <span className="text-xs font-mono text-muted-foreground hidden md:inline">
               {service.endpoints.map(ep =>
                 ep.protocol === 'http'
-                  ? `${ep.protocol}://192.168.2.15:${ep.port}`
-                  : `192.168.2.15:${ep.port}`
+                  ? `${ep.protocol}://${host}:${ep.port}`
+                  : `${host}:${ep.port}`
               ).join(', ')}
             </span>
           )}
@@ -348,11 +353,11 @@ function ServiceRow({ service, onAction, spark }: { service: ServiceInfo; onActi
                     <span className="text-muted-foreground">{ep.label || 'Endpoint'}: </span>
                     <span className="font-mono">
                       {ep.protocol === 'http' ? (
-                        <a href={`http://192.168.2.15:${ep.port}`} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">
-                          192.168.2.15:{ep.port}
+                        <a href={`http://${host}:${ep.port}`} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">
+                          {host}:{ep.port}
                         </a>
                       ) : (
-                        <>192.168.2.15:{ep.port}</>
+                        <>{host}:{ep.port}</>
                       )}
                     </span>
                   </div>
@@ -737,13 +742,13 @@ export default function ServerDashboard() {
                   icon={MemoryStick}
                   label="Memory"
                   value={`${stats.memory.percentUsed}%`}
-                  sub={`${formatBytes(stats.memory.used)} / ${formatBytes(stats.memory.total)}`}
+                  sub={`${fmtBytes(stats.memory.used, '—')} / ${fmtBytes(stats.memory.total, '—')}`}
                 />
                 <StatCard
                   icon={HardDrive}
                   label="Disk"
                   value={`${stats.disks[0]?.percentUsed ?? 0}%`}
-                  sub={`${formatBytes(stats.disks[0]?.used ?? 0)} / ${formatBytes(stats.disks[0]?.total ?? 0)}`}
+                  sub={`${fmtBytes(stats.disks[0]?.used ?? 0, '—')} / ${fmtBytes(stats.disks[0]?.total ?? 0, '—')}`}
                 />
                 <StatCard
                   icon={stats.cpuTemp !== null ? Thermometer : Clock}
@@ -764,13 +769,13 @@ export default function ServerDashboard() {
                   <UsageBar
                     percent={stats.memory.percentUsed}
                     label="RAM"
-                    detail={`${formatBytes(stats.memory.used)} / ${formatBytes(stats.memory.total)}`}
+                    detail={`${fmtBytes(stats.memory.used, '—')} / ${fmtBytes(stats.memory.total, '—')}`}
                   />
                   {stats.swap.total > 0 && (
                     <UsageBar
                       percent={stats.swap.total > 0 ? Math.round((stats.swap.used / stats.swap.total) * 100) : 0}
                       label="Swap"
-                      detail={`${formatBytes(stats.swap.used)} / ${formatBytes(stats.swap.total)}`}
+                      detail={`${fmtBytes(stats.swap.used, '—')} / ${fmtBytes(stats.swap.total, '—')}`}
                     />
                   )}
                 </div>
@@ -810,7 +815,7 @@ export default function ServerDashboard() {
                         key={i}
                         percent={disk.percentUsed}
                         label={`${disk.mountPoint} (${disk.device})`}
-                        detail={`${formatBytes(disk.used)} / ${formatBytes(disk.total)}`}
+                        detail={`${fmtBytes(disk.used, '—')} / ${fmtBytes(disk.total, '—')}`}
                       />
                     ))}
                   </div>

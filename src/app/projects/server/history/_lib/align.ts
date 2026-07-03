@@ -1,5 +1,6 @@
 import type { AlignedData } from 'uplot';
 import type { MetricsResponse } from './use-metrics';
+import { fmtBytes } from '@/lib/format';
 
 /**
  * Convert a v2 metrics response into uPlot's AlignedData format. Picks `field`
@@ -57,13 +58,10 @@ export function lastValue(response: MetricsResponse | null, field: string, label
 }
 
 export function formatBytes(n: number | null | undefined): string {
+  // '—' only for missing data; a genuine zero reading (e.g. no swap used)
+  // still shows as '0 B'.
   if (n == null || !Number.isFinite(n)) return '—';
-  const abs = Math.abs(n);
-  if (abs < 1024) return `${n.toFixed(0)} B`;
-  if (abs < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`;
-  if (abs < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`;
-  if (abs < 1024 ** 4) return `${(n / 1024 ** 3).toFixed(2)} GB`;
-  return `${(n / 1024 ** 4).toFixed(2)} TB`;
+  return fmtBytes(n, '0 B');
 }
 
 export function formatRate(bytesPerSec: number | null | undefined): string {

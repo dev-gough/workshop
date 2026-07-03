@@ -24,8 +24,15 @@ export default function NavigatorStrip({ fromMs, toMs, onSelect, retentionDays =
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(800);
 
-  // Strip always shows the full retention window.
-  const stripTo = useMemo(() => Date.now(), []);
+  // Strip always shows the full retention window, with the right edge pinned to
+  // "now". Re-tick every minute so the edge (and the derived date labels) don't
+  // freeze at mount time.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  const stripTo = nowMs;
   const stripFrom = stripTo - retentionDays * 86400_000;
 
   // Coarse data: ~maxPoints across the whole retention window.

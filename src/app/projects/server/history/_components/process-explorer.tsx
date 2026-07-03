@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Pin, PinOff, ChevronDown, ChevronRight } from 'lucide-react';
 import UplotChart from '@/components/charts/uplot-chart';
@@ -36,6 +36,22 @@ export default function ProcessExplorer({ fromMs, toMs, onZoom, onHover }: Proce
   const [expanded, setExpanded] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('cpu');
   const [pinning, setPinning] = useState<string | null>(null);
+  const [pinnedLabels, setPinnedLabels] = useState<Set<string>>(new Set());
+
+  // Manual pins live in metric_pin_config (served by /api/server/pins), not in the
+  // metrics stream, so fetch them separately to know which rows are pinned.
+  const refreshPins = useCallback(async () => {
+    try {
+      const res = await fetch('/api/server/pins');
+      const json = await res.json();
+      const labels: string[] = Array.isArray(json?.pins)
+        ? json.pins.map((p: { label: string }) => p.label)
+        : [];
+      setPinnedLabels(new Set(labels));
+    } catch { /* keep last-known pins */ }
+  }, []);
+
+  useEffect(() => { refreshPins(); }, [refreshPins]);
 
   const rows = useMemo<Row[]>(() => {
     if (!data) return [];
@@ -48,9 +64,7 @@ export default function ProcessExplorer({ fromMs, toMs, onZoom, onHover }: Proce
       const rssSeries = points.map((p) => typeof p.rssBytes === 'number' ? p.rssBytes : null);
       const last = points[points.length - 1];
       const comm = (last.comm as string) ?? (last.label as string) ?? label;
-      // pinned status is in the label endpoint, not here; approximate by checking if any point has pinned=true.
-      // Better: read from a separate fetch. For now, infer via the conventional service names list.
-      const pinned = isPinnedLabel(label);
+      const pinned = pinnedLabels.has(label);
       const curCpu = typeof last.cpuPercent === 'number' ? last.cpuPercent : 0;
       const curRss = typeof last.rssBytes === 'number' ? last.rssBytes : 0;
       const peakCpu = cpuSeries.reduce<number>((m, v) => v != null && v > m ? v : m, 0);
@@ -63,7 +77,7 @@ export default function ProcessExplorer({ fromMs, toMs, onZoom, onHover }: Proce
       if (sortKey === 'rss')   return b.curRss - a.curRss;
       return b.curCpu - a.curCpu;
     });
-  }, [data, sortKey]);
+  }, [data, sortKey, pinnedLabels]);
 
   const togglePin = useCallback(async (row: Row) => {
     setPinning(row.label);
@@ -73,10 +87,11 @@ export default function ProcessExplorer({ fromMs, toMs, onZoom, onHover }: Proce
       } else {
         await fetch('/api/server/pins', { method: 'POST',   headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label: row.label, comm: row.comm }) });
       }
+      await refreshPins();
     } finally {
       setPinning(null);
     }
-  }, []);
+  }, [refreshPins]);
 
   if (loading && rows.length === 0) {
     return (
@@ -142,14 +157,6 @@ export default function ProcessExplorer({ fromMs, toMs, onZoom, onHover }: Proce
     </div>
   );
 }
-
-const PINNED_LABELS = new Set([
-  'workshop', 'challenge-poller', 'nginx', 'postgresql@16-main', 'jellyfin',
-  'plexmediaserver', 'tailscaled', 'ssh',
-  'minecraft-atm6', 'minecraft-atm10', 'minecraft-stoneblock3', 'minecraft-meatballcraft',
-  'minecraft-atm9sky', 'minecraft-above-beyond', 'minecraft-star-technology',
-]);
-function isPinnedLabel(label: string): boolean { return PINNED_LABELS.has(label); }
 
 interface ProcessRowProps {
   row: Row;

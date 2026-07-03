@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type uPlot from 'uplot';
 import type { AlignedData, Series, Options, Cursor } from 'uplot';
 import 'uplot/dist/uPlot.min.css';
@@ -57,6 +57,10 @@ export default function UplotChart({
   const containerRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
   const [ready, setReady] = useState(false);
+  // Bumped by the theme MutationObserver to force a full chart rebuild, since
+  // strokes/fills are read from CSS vars at construct time and a bare redraw
+  // keeps the stale canvas colors.
+  const [themeVersion, setThemeVersion] = useState(0);
 
   // Lazy-load uPlot once.
   useEffect(() => { loadUplot().then(() => setReady(true)); }, []);
@@ -133,23 +137,23 @@ export default function UplotChart({
       plotRef.current?.destroy();
       plotRef.current = null;
     };
-    // Rebuilding when series shape changes; data-only updates use the next effect.
+    // Rebuilding when series shape (or theme) changes; data-only updates use the next effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, series.length, height, syncKey, spark]);
+  }, [ready, series.length, height, syncKey, spark, themeVersion]);
 
   // Cheap data updates (same series shape).
   useEffect(() => {
     if (plotRef.current) plotRef.current.setData(data);
   }, [data]);
 
-  // Theme change listener — repaint by destroying & letting the shape effect rebuild.
-  // (Done implicitly on next render; we just expose this for future hooking.)
-  const refresh = useCallback(() => { plotRef.current?.redraw(true, true); }, []);
+  // Theme change listener — bump themeVersion so the build effect above tears the
+  // plot down and reconstructs it, re-reading the CSS-var colors. A bare redraw
+  // wouldn't pick up new strokes/fills baked in at construct time.
   useEffect(() => {
-    const obs = new MutationObserver(refresh);
+    const obs = new MutationObserver(() => setThemeVersion((v) => v + 1));
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme'] });
     return () => obs.disconnect();
-  }, [refresh]);
+  }, []);
 
   return <div ref={containerRef} className={className} style={{ width: '100%', height }} />;
 }

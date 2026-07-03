@@ -16,13 +16,19 @@
  *    to that page as a local helper.
  */
 
-/** Human-readable byte size (up to TB). `placeholder` is returned for empty/≤0 input. */
+/**
+ * Human-readable byte size (up to TB). `placeholder` is returned for
+ * empty/null/NaN input and for `0`. Negative input (e.g. a byte-delta) is
+ * formatted as `-` + the absolute value so signed deltas still display; only
+ * exact `0` collapses to the placeholder.
+ */
 export function fmtBytes(
   bytes: number | string | null | undefined,
   placeholder = '–',
 ): string {
   const n = typeof bytes === 'string' ? parseInt(bytes) : bytes;
-  if (n == null || !Number.isFinite(n) || n <= 0) return placeholder;
+  if (n == null || !Number.isFinite(n) || n === 0) return placeholder;
+  if (n < 0) return '-' + fmtBytes(-n, placeholder);
   if (n < 1024) return n + ' B';
   if (n < 1024 ** 2) return (n / 1024).toFixed(1) + ' KB';
   if (n < 1024 ** 3) return (n / 1024 ** 2).toFixed(1) + ' MB';
