@@ -63,33 +63,48 @@ const DEFAULT_CONFIG: GAConfig = {
 
 // ── Preset slots ────────────────────────────────────────────────────────────
 // Five slots stored in localStorage. Single-click loads, double-click saves
-// the current config to that slot. Seeded on first visit with two contrasting
-// configs designed to reveal what's actually bottlenecking the algorithm.
+// the current config to that slot. Seeded on first visit with three
+// contrasting search strategies — the hyperparameter sweep's starting
+// points, each solve-suite-tested (see the bench tab's "preset:" batches).
 
 const PRESET_SLOTS = 5;
-const PRESETS_STORAGE_KEY = 'bf-ga-presets-v1';
+// v2: sweep-seed trio replaced the pre-pure-GA seeds (the old "1/L rule"
+// slot is obsolete now that mut_prob 0 = adaptive is the default). Bumping
+// the key lets the new seeds land despite existing stored slots.
+const PRESETS_STORAGE_KEY = 'bf-ga-presets-v2';
 
 const SEED_PRESETS: (GAConfig | null)[] = [
-  // 1: "1/L rule" — drop destructive per-char mutation to the textbook
-  // ~1/program-length sweet spot, raise skip-mutation for elitism, run
-  // crossover more often (gate is inverted: lower number = runs more).
+  // 1: "sprint" — small population, aggressive turnover. Frequent restarts
+  // trade depth for many cheap attempts; run-jumps and crossover run hot
+  // (crossover gate is inverted: lower number = runs more often).
   {
     ...DEFAULT_CONFIG,
-    mut_prob: 0.02,
-    mutation_rate: 0.20,
-    crossover_rate: 0.20,
+    pop_size: 40,
+    restart_every: 25_000,
+    restart_keep_frac: 0.1,
+    run_mut_rate: 0.5,
+    crossover_rate: 0.3,
   },
-  // 2: "Tiny pop, fast iter" — small population means more generations per
-  // second; macro-mutation is cranked to compensate for the diversity loss.
+  // 2: "archipelago" — diversity machine. Four islands with fast migration
+  // plus output sharing, betting that hard targets fail from attractor
+  // takeover rather than lack of raw speed.
   {
     ...DEFAULT_CONFIG,
-    pop_size: 30,
-    mut_prob: 0.05,
-    mutation_rate: 0.30,
-    macro_mut_rate: 0.15,
-    crossover_rate: 0.30,
+    pop_size: 160,
+    islands: 4,
+    migration_every: 5_000,
+    share_strength: 0.5,
   },
-  null,
+  // 3: "longform" — structural explorer. More gene budget and hot loop
+  // mutation for the 12+ char regime where straight-line printing no
+  // longer fits; the spin cap keeps the longer genes affordable.
+  {
+    ...DEFAULT_CONFIG,
+    max_prog_len: 500,
+    bracket_mut_rate: 0.5,
+    run_mut_rate: 0.5,
+    macro_mut_rate: 0.1,
+  },
   null,
   null,
 ];

@@ -587,6 +587,10 @@ interface BatchQueueItem {
   popSize: number;
   maxGen: number;
   lanes: number;
+  // Full GA config override for sweep cells; null = repo defaults (the
+  // preset's popSize/maxGen still apply — maxGen is passed last so it wins
+  // over the config's own value).
+  config: GAConfig | null;
 }
 
 let benchmarkBatchQueue: BatchQueueItem[] = [];
@@ -595,6 +599,7 @@ let benchmarkBatchStopped = false;
 export async function startBenchmarkBatch(
   label: string | null,
   suite: BenchmarkSuite = 'throughput',
+  config: GAConfig | null = null,
 ): Promise<{ batchId: string; rowIds: number[] }> {
   await bootstrap();
 
@@ -612,17 +617,21 @@ export async function startBenchmarkBatch(
   benchmarkBatchStopped = false;
 
   // Pre-create one row per config so the UI can show all configs in the batch
-  // immediately (queued ones too).
+  // immediately (queued ones too). With a config override, the override's
+  // pop_size replaces the preset's (the preset still owns target/maxGen/lanes)
+  // and the full config is recorded on the row — sweep cells self-describe.
   const rowIds: number[] = [];
   for (const cfg of preset) {
     const lanes = 'lanes' in cfg ? (cfg as { lanes: number }).lanes : 1;
+    const popSize = config?.pop_size ?? cfg.popSize;
     const { rows } = await pool.query(
       `INSERT INTO brainfuck_benchmarks
          (version_hash, version_subject, version_label, batch_id, suite,
-          target, pop_size, max_generations, lanes, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'queued')
+          target, pop_size, max_generations, lanes, config_json, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'queued')
        RETURNING id`,
-      [version.hash, version.subject, label, batchId, suite, cfg.target, cfg.popSize, cfg.maxGen, lanes],
+      [version.hash, version.subject, label, batchId, suite, cfg.target, popSize, cfg.maxGen, lanes,
+       config ? JSON.stringify(config) : null],
     );
     rowIds.push(rows[0].id);
   }
@@ -630,9 +639,10 @@ export async function startBenchmarkBatch(
   benchmarkBatchQueue = rowIds.map((rowId, i) => ({
     rowId,
     target: preset[i].target,
-    popSize: preset[i].popSize,
+    popSize: config?.pop_size ?? preset[i].popSize,
     maxGen: preset[i].maxGen,
     lanes: 'lanes' in preset[i] ? (preset[i] as { lanes: number }).lanes : 1,
+    config,
   }));
 
   spawnNextBenchmarkInBatch();
@@ -689,6 +699,11 @@ function spawnNextBenchmarkInBatch(): void {
   activeBenchmarkId = next.rowId;
   activeBenchLanes = [];
 
+  // Config override args go first; the preset row's --max-gen and
+  // --pop-size come last so argparse's last-wins keeps the row's budget
+  // authoritative even when a full config is present.
+  const configArgs = next.config ? configToCliArgs(next.config) : [];
+
   for (let lane = 0; lane < lanes; lane++) {
     const child = spawn(
       PYTHON,
@@ -696,6 +711,7 @@ function spawnNextBenchmarkInBatch(): void {
         RUNNER,
         '--benchmark',
         '--target', next.target,
+        ...configArgs,
         '--max-gen', String(next.maxGen),
         '--pop-size', String(next.popSize),
       ],

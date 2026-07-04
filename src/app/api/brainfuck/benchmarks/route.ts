@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
-import { startBenchmarkBatch, getActiveBenchmarkId, BENCHMARK_PRESET, SOLVE_PRESET } from '@/lib/brainfuck';
+import { startBenchmarkBatch, getActiveBenchmarkId, parseRunConfig, BENCHMARK_PRESET, SOLVE_PRESET } from '@/lib/brainfuck';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,7 +42,22 @@ export async function POST(request: NextRequest) {
         : null;
     const suite = body.suite === 'solve' ? 'solve' : 'throughput';
 
-    const { batchId, rowIds } = await startBenchmarkBatch(label, suite);
+    // Optional GA config override (hyperparam-sweep cells). Validated by
+    // the same parser as run configs; invalid knobs 400 here rather than
+    // silently benchmarking defaults.
+    let config = null;
+    if (body.config != null) {
+      if (typeof body.config !== 'object' || Array.isArray(body.config)) {
+        return NextResponse.json({ error: 'config must be an object' }, { status: 400 });
+      }
+      try {
+        config = parseRunConfig(body.config as Record<string, unknown>);
+      } catch (e) {
+        return NextResponse.json({ error: String((e as Error).message) }, { status: 400 });
+      }
+    }
+
+    const { batchId, rowIds } = await startBenchmarkBatch(label, suite, config);
     return NextResponse.json({ batchId, rowIds });
   } catch (error) {
     return NextResponse.json(
