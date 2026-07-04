@@ -1,13 +1,13 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { useTheme } from './ThemeProvider';
 import PatternSelector from './PatternSelector';
+import { parseLif } from '@/lib/lif';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import {
-  Play, Pause, RotateCcw, Trash2, Grid3X3, Zap, SkipForward,
-  ZoomIn, ZoomOut, Gauge, Home,
+  Play, Pause, RotateCcw, Trash2, Zap, SkipForward,
+  ZoomIn, ZoomOut, Gauge, Home, Archive,
 } from 'lucide-react';
 
 // ── Constants ────────────────────────────────────────────────────────────
@@ -24,6 +24,35 @@ const NEIGHBOR_OFFSETS = [
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 40;
 const DEFAULT_ZOOM = 10;
+
+// Chalk-dust smudges: a dying cell leaves a mark that fades over this many
+// generations. Capped so a huge soup can't grow the map without bound.
+const DUST_FADE = 12;
+const DUST_CAP = 200_000;
+
+// ── The chalk box (single-mode — the board is always slate) ─────────────
+
+const BOARD = { r: 14, g: 21, b: 19 };          // #0e1513 slate
+const CHALK = { r: 236, g: 231, b: 216 };       // #ece7d8 white chalk
+const FRESH = { r: 232, g: 212, b: 138 };       // #e8d48a yellow chalk (births)
+const CHALK_HEX = '#ece7d8';
+const FRESH_HEX = '#e8d48a';
+const BOARD_HEX = '#0e1513';
+const GRID_COLOR = 'rgba(236,231,216,0.05)';
+const ORIGIN_COLOR = 'rgba(236,231,216,0.13)';
+
+// Pre-mixed dust color for the low-zoom ImageData path (chalk over slate
+// at a fixed ~0.1 alpha — per-pixel blending isn't worth it down there).
+const DUST_PX = {
+  r: Math.round(BOARD.r + (CHALK.r - BOARD.r) * 0.1),
+  g: Math.round(BOARD.g + (CHALK.g - BOARD.g) * 0.1),
+  b: Math.round(BOARD.b + (CHALK.b - BOARD.b) * 0.1),
+};
+
+// One rgba string per dust age so the fillRect path never allocates in-loop.
+const DUST_STYLES: string[] = Array.from({ length: DUST_FADE + 1 }, (_, age) =>
+  `rgba(236,231,216,${(0.14 * (1 - age / DUST_FADE)).toFixed(3)})`
+);
 
 // ── Coordinate helpers ───────────────────────────────────────────────────
 
@@ -74,10 +103,14 @@ function screenToWorldY(sy: number, cam: Camera, canvasH: number): number {
 class GOLEngine {
   alive: Set<number>;
   generation: number;
+  births: Set<number>;        // cells born on the latest step — fresh chalk
+  dust: Map<number, number>;  // cell → generation it died — fading smudge
 
   constructor() {
     this.alive = new Set();
     this.generation = 0;
+    this.births = new Set();
+    this.dust = new Map();
   }
 
   get(x: number, y: number): boolean {
@@ -86,17 +119,24 @@ class GOLEngine {
 
   set(x: number, y: number, val: boolean) {
     const key = pack(x, y);
-    if (val) this.alive.add(key);
-    else this.alive.delete(key);
+    if (val) {
+      this.alive.add(key);
+      this.births.add(key);
+      this.dust.delete(key);
+    } else if (this.alive.has(key)) {
+      this.alive.delete(key);
+      this.births.delete(key);
+      this.dust.set(key, this.generation); // erasing leaves a smudge too
+    }
   }
 
   toggle(x: number, y: number): boolean {
     const key = pack(x, y);
     if (this.alive.has(key)) {
-      this.alive.delete(key);
+      this.set(x, y, false);
       return false;
     }
-    this.alive.add(key);
+    this.set(x, y, true);
     return true;
   }
 
@@ -109,15 +149,38 @@ class GOLEngine {
       }
     }
     const next = new Set<number>();
+    const births = new Set<number>();
     for (const [key, count] of counts) {
       if (count === 3 || (count === 2 && this.alive.has(key))) {
         next.add(key);
+        if (!this.alive.has(key)) births.add(key);
       }
     }
+    for (const key of this.alive) {
+      if (!next.has(key)) this.dust.set(key, this.generation);
+    }
     this.alive = next;
+    this.births = births;
     this.generation++;
+    this.pruneDust();
   }
 
+  private pruneDust() {
+    const cutoff = this.generation - DUST_FADE;
+    for (const [key, g] of this.dust) {
+      if (g < cutoff || this.alive.has(key)) this.dust.delete(key);
+    }
+    if (this.dust.size > DUST_CAP) {
+      // Map iterates in insertion order — drop the oldest overflow.
+      let drop = this.dust.size - DUST_CAP;
+      for (const key of this.dust.keys()) {
+        if (drop-- <= 0) break;
+        this.dust.delete(key);
+      }
+    }
+  }
+
+  // Bare stepping for the benchmark — no chalk bookkeeping.
   stepN(n: number) {
     for (let s = 0; s < n; s++) {
       const counts = new Map<number, number>();
@@ -141,11 +204,12 @@ class GOLEngine {
   clear() {
     this.alive = new Set();
     this.generation = 0;
+    this.births = new Set();
+    this.dust = new Map();
   }
 
   randomize(cx: number, cy: number, w: number, h: number) {
-    this.alive = new Set();
-    this.generation = 0;
+    this.clear();
     const x0 = Math.round(cx - w / 2);
     const y0 = Math.round(cy - h / 2);
     for (let dy = 0; dy < h; dy++) {
@@ -164,7 +228,9 @@ class GOLEngine {
     const ox = Math.round(cx - maxX / 2);
     const oy = Math.round(cy - maxY / 2);
     for (const c of cells) {
-      this.alive.add(pack(c.x + ox, c.y + oy));
+      const key = pack(c.x + ox, c.y + oy);
+      this.alive.add(key);
+      this.births.add(key); // freshly chalked — settles to white on first step
     }
     this.generation = 0;
   }
@@ -177,32 +243,6 @@ class GOLEngine {
   }
 }
 
-// ── Parse .lif file ──────────────────────────────────────────────────────
-
-function parseLif(content: string): { x: number; y: number }[] {
-  const lines = content.split('\n').map(l => l.trim()).filter(l => l && (!l.startsWith('#') || l.startsWith('#P')));
-  let cx = 0, cy = 0;
-  const pattern: { x: number; y: number }[] = [];
-  for (const line of lines) {
-    if (line.startsWith('#P')) {
-      const parts = line.split(/\s+/);
-      cx = parseInt(parts[1]);
-      cy = parseInt(parts[2]);
-    } else {
-      for (let i = 0; i < line.length; i++) {
-        if (line[i] === '*') pattern.push({ x: cx + i, y: cy });
-      }
-      cy++;
-    }
-  }
-  let minX = Infinity, minY = Infinity;
-  for (const p of pattern) {
-    if (p.x < minX) minX = p.x;
-    if (p.y < minY) minY = p.y;
-  }
-  return pattern.map(p => ({ x: p.x - minX, y: p.y - minY }));
-}
-
 // ── Drawing ──────────────────────────────────────────────────────────────
 
 function drawFrame(
@@ -211,63 +251,54 @@ function drawFrame(
   cam: Camera,
   canvasW: number,
   canvasH: number,
-  isDark: boolean,
 ) {
-  const fillColor = isDark ? '#e2e8f0' : '#0f172a';
-  const bgColor = isDark ? 'hsl(224,35%,11%)' : 'hsl(0,0%,99%)';
-  const gridColor = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
-  const originColor = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.1)';
-
   const zoom = cam.zoom;
   const bounds = getVisibleBounds(cam, canvasW, canvasH);
+  const gen = engine.generation;
 
-  // Use ImageData for pixel-level rendering at very low zoom
+  // ImageData for pixel-level rendering at very low zoom
   if (zoom <= 2) {
     const imageData = ctx.createImageData(canvasW, canvasH);
     const data = imageData.data;
 
-    // Fill background
-    const bgR = isDark ? 19 : 252;
-    const bgG = isDark ? 22 : 252;
-    const bgB = isDark ? 33 : 252;
     for (let i = 0; i < data.length; i += 4) {
-      data[i] = bgR; data[i + 1] = bgG; data[i + 2] = bgB; data[i + 3] = 255;
+      data[i] = BOARD.r; data[i + 1] = BOARD.g; data[i + 2] = BOARD.b; data[i + 3] = 255;
     }
 
-    const fillR = isDark ? 226 : 15;
-    const fillG = isDark ? 232 : 23;
-    const fillB = isDark ? 240 : 42;
     const halfW = canvasW / 2;
     const halfH = canvasH / 2;
+    const size = Math.ceil(zoom);
 
-    if (zoom <= 1) {
-      for (const key of engine.alive) {
-        const wx = unpackX(key);
-        const wy = unpackY(key);
+    const stamp = (key: number, r: number, g: number, b: number) => {
+      const wx = unpackX(key);
+      const wy = unpackY(key);
+      if (wx < bounds.minX || wx > bounds.maxX || wy < bounds.minY || wy > bounds.maxY) return;
+      if (zoom <= 1) {
         const sx = Math.round((wx - cam.x) * zoom + halfW);
         const sy = Math.round((wy - cam.y) * zoom + halfH);
         if (sx >= 0 && sx < canvasW && sy >= 0 && sy < canvasH) {
           const idx = (sy * canvasW + sx) * 4;
-          data[idx] = fillR; data[idx + 1] = fillG; data[idx + 2] = fillB;
+          data[idx] = r; data[idx + 1] = g; data[idx + 2] = b;
         }
-      }
-    } else {
-      // zoom ~2: draw 2x2 blocks
-      for (const key of engine.alive) {
-        const wx = unpackX(key);
-        const wy = unpackY(key);
+      } else {
         const sx = Math.floor((wx - cam.x) * zoom + halfW);
         const sy = Math.floor((wy - cam.y) * zoom + halfH);
-        const size = Math.ceil(zoom);
         for (let py = sy; py < sy + size && py < canvasH; py++) {
           if (py < 0) continue;
           for (let px = sx; px < sx + size && px < canvasW; px++) {
             if (px < 0) continue;
             const idx = (py * canvasW + px) * 4;
-            data[idx] = fillR; data[idx + 1] = fillG; data[idx + 2] = fillB;
+            data[idx] = r; data[idx + 1] = g; data[idx + 2] = b;
           }
         }
       }
+    };
+
+    // Dust first (glider trails read beautifully at survey zoom), then chalk.
+    for (const key of engine.dust.keys()) stamp(key, DUST_PX.r, DUST_PX.g, DUST_PX.b);
+    for (const key of engine.alive) {
+      if (engine.births.has(key)) stamp(key, FRESH.r, FRESH.g, FRESH.b);
+      else stamp(key, CHALK.r, CHALK.g, CHALK.b);
     }
 
     ctx.putImageData(imageData, 0, 0);
@@ -275,15 +306,16 @@ function drawFrame(
   }
 
   // Standard fillRect path
-  ctx.fillStyle = bgColor;
+  ctx.fillStyle = BOARD_HEX;
   ctx.fillRect(0, 0, canvasW, canvasH);
 
-  // Grid lines at higher zoom
+  const halfW = canvasW / 2;
+  const halfH = canvasH / 2;
+
+  // Chalk ruling at higher zoom
   if (zoom >= 8) {
-    ctx.strokeStyle = gridColor;
+    ctx.strokeStyle = GRID_COLOR;
     ctx.lineWidth = 1;
-    const halfW = canvasW / 2;
-    const halfH = canvasH / 2;
 
     ctx.beginPath();
     for (let x = bounds.minX; x <= bounds.maxX; x++) {
@@ -303,13 +335,11 @@ function drawFrame(
     ctx.stroke();
   }
 
-  // Origin crosshair
+  // Origin crosshair — the board's ruled axes
   {
-    const halfW = canvasW / 2;
-    const halfH = canvasH / 2;
     const ox = Math.round(-cam.x * zoom + halfW) - 0.5;
     const oy = Math.round(-cam.y * zoom + halfH) - 0.5;
-    ctx.strokeStyle = originColor;
+    ctx.strokeStyle = ORIGIN_COLOR;
     ctx.lineWidth = 1;
     ctx.beginPath();
     if (ox >= 0 && ox <= canvasW) { ctx.moveTo(ox, 0); ctx.lineTo(ox, canvasH); }
@@ -317,13 +347,25 @@ function drawFrame(
     ctx.stroke();
   }
 
-  // Draw alive cells
-  ctx.fillStyle = fillColor;
-  const halfW = canvasW / 2;
-  const halfH = canvasH / 2;
   const gap = zoom >= 6 ? 0.5 : 0;
 
+  // Chalk-dust smudges where cells died, fading with age
+  for (const [key, diedAt] of engine.dust) {
+    const wx = unpackX(key);
+    const wy = unpackY(key);
+    if (wx < bounds.minX || wx > bounds.maxX || wy < bounds.minY || wy > bounds.maxY) continue;
+    const age = Math.min(Math.max(gen - diedAt, 0), DUST_FADE);
+    ctx.fillStyle = DUST_STYLES[age];
+    const sx = (wx - cam.x) * zoom + halfW;
+    const sy = (wy - cam.y) * zoom + halfH;
+    ctx.fillRect(sx + gap, sy + gap, zoom - gap * 2, zoom - gap * 2);
+  }
+
+  // Settled cells in white chalk, this generation's births in yellow
+  const births = engine.births;
+  ctx.fillStyle = CHALK_HEX;
   for (const key of engine.alive) {
+    if (births.has(key)) continue;
     const wx = unpackX(key);
     const wy = unpackY(key);
     if (wx < bounds.minX || wx > bounds.maxX || wy < bounds.minY || wy > bounds.maxY) continue;
@@ -331,12 +373,41 @@ function drawFrame(
     const sy = (wy - cam.y) * zoom + halfH;
     ctx.fillRect(sx + gap, sy + gap, zoom - gap * 2, zoom - gap * 2);
   }
+  if (births.size > 0) {
+    ctx.fillStyle = FRESH_HEX;
+    for (const key of births) {
+      const wx = unpackX(key);
+      const wy = unpackY(key);
+      if (wx < bounds.minX || wx > bounds.maxX || wy < bounds.minY || wy > bounds.maxY) continue;
+      const sx = (wx - cam.x) * zoom + halfW;
+      const sy = (wy - cam.y) * zoom + halfH;
+      ctx.fillRect(sx + gap, sy + gap, zoom - gap * 2, zoom - gap * 2);
+    }
+  }
+}
+
+// ── Small pieces of chrome ───────────────────────────────────────────────
+
+function Readout({ label, value, width }: { label: string; value: string; width?: string }) {
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <span className="text-[9px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+        {label}
+      </span>
+      <span className={`gol-readout text-sm leading-none text-foreground ${width ?? ''}`}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function TrayDivider() {
+  return <div className="h-6 w-px self-center bg-border/70" />;
 }
 
 // ── React Component ──────────────────────────────────────────────────────
 
 const GameOfLife = () => {
-  const { theme } = useTheme();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<GOLEngine | null>(null);
@@ -344,8 +415,6 @@ const GameOfLife = () => {
   const rafRef = useRef<number>(0);
   const lastFrameRef = useRef<number>(0);
   const canvasSizeRef = useRef({ w: 0, h: 0 });
-  const themeRef = useRef(theme);
-  themeRef.current = theme;
 
   // Interaction state (not React state to avoid re-renders)
   const interactionRef = useRef<{
@@ -380,7 +449,7 @@ const GameOfLife = () => {
     if (!canvas || !engine) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    drawFrame(ctx, engine, cameraRef.current, canvas.width, canvas.height, themeRef.current === 'dark');
+    drawFrame(ctx, engine, cameraRef.current, canvas.width, canvas.height);
   }, []);
 
   // ── Resize observer ──
@@ -493,9 +562,6 @@ const GameOfLife = () => {
     rafRef.current = requestAnimationFrame(loop);
     return () => { cancelAnimationFrame(rafRef.current); rafRef.current = 0; };
   }, [running, speed, redraw]);
-
-  // Redraw on theme change
-  useEffect(() => { redraw(); }, [theme, redraw]);
 
   // ── Controls ──
 
@@ -667,37 +733,100 @@ const GameOfLife = () => {
 
   // ── Render ──
 
+  const slateClean = population === 0 && generation === 0;
+
   return (
-    <div className="flex flex-col gap-2 flex-1 min-h-0">
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2 p-2 bg-card rounded-lg border border-border">
+    <div className="absolute inset-0">
+      {/* The slate */}
+      <div ref={wrapperRef} className="absolute inset-0">
+        <canvas
+          ref={canvasRef}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          className="block h-full w-full cursor-crosshair"
+        />
+      </div>
+
+      {/* Vignette — the room's light falls off toward the board's edges */}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            'radial-gradient(ellipse 130% 100% at 50% 38%, transparent 55%, hsl(165 40% 2% / 0.4) 100%)',
+        }}
+      />
+
+      {/* A clean slate — invitation, disappears at the first mark */}
+      {slateClean && (
+        <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2">
+          <p
+            className="text-2xl italic text-foreground/90"
+            style={{ fontFamily: 'var(--font-display), serif' }}
+          >
+            A clean slate
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Drag to chalk cells, or load a pattern from the archive.
+          </p>
+        </div>
+      )}
+
+      {/* Readouts — top right */}
+      {/* On phones the title plate owns the top edge — readouts drop below it */}
+      <div className="absolute right-3 top-32 z-20 flex flex-col items-end gap-2 sm:right-4 sm:top-4">
+        <div className="gol-panel flex items-center gap-4 px-4 py-2">
+          <Readout label="Gen" value={generation.toLocaleString()} />
+          <div className="h-7 w-px bg-border/70" />
+          <Readout label="Pop" value={population.toLocaleString()} />
+          <div className="hidden h-7 w-px bg-border/70 sm:block" />
+          <div className="hidden sm:block">
+            <Readout label="Zoom" value={`${zoomDisplay.toFixed(1)}×`} />
+          </div>
+        </div>
+        {benchResult && (
+          <div className="gol-panel px-3 py-1.5">
+            <span className="gol-readout text-[10px] text-muted-foreground">{benchResult}</span>
+          </div>
+        )}
+      </div>
+
+      {/* How to hold the chalk — bottom left */}
+      <div className="pointer-events-none absolute bottom-5 left-5 z-10 hidden lg:block">
+        <p className="text-[11px] tracking-wide text-muted-foreground/80">
+          left-drag draws · right-drag pans · scroll zooms
+        </p>
+      </div>
+
+      {/* The chalk tray — bottom center */}
+      <div className="gol-panel gol-tray absolute bottom-3 left-1/2 z-20 flex max-w-[calc(100%-1rem)] -translate-x-1/2 flex-wrap items-center justify-center gap-x-3 gap-y-1.5 px-3 py-2 sm:bottom-4">
         {/* Playback */}
         <div className="flex items-center gap-1">
           <Button
             variant="default"
             size="sm"
-            className="h-7 w-7 p-0"
+            className="h-8 w-8 rounded-full p-0"
             onClick={() => setRunning(!running)}
             title={running ? 'Pause' : 'Play'}
           >
-            {running ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5 ml-0.5" />}
+            {running ? <Pause className="h-3.5 w-3.5" /> : <Play className="ml-0.5 h-3.5 w-3.5" />}
           </Button>
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 w-7 p-0"
+            className="h-8 w-8 p-0"
             onClick={handleStep}
             disabled={running}
-            title="Step forward"
+            title="Step one generation"
           >
             <SkipForward className="h-3.5 w-3.5" />
           </Button>
         </div>
 
-        <div className="w-px h-5 bg-border" />
+        <TrayDivider />
 
         {/* Speed */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" title="Generations per second">
           <Gauge className="h-3.5 w-3.5 text-muted-foreground" />
           <Slider
             value={[speed]}
@@ -707,13 +836,13 @@ const GameOfLife = () => {
             step={1}
             className="w-20"
           />
-          <span className="text-[10px] text-muted-foreground w-8 tabular-nums">{speed}/s</span>
+          <span className="gol-readout w-8 text-[10px] text-muted-foreground">{speed}/s</span>
         </div>
 
-        <div className="w-px h-5 bg-border" />
+        <TrayDivider />
 
         {/* Zoom */}
-        <div className="flex items-center gap-2">
+        <div className="hidden items-center gap-2 sm:flex">
           <ZoomOut className="h-3.5 w-3.5 text-muted-foreground" />
           <Slider
             value={[zoomDisplay]}
@@ -724,72 +853,49 @@ const GameOfLife = () => {
             className="w-20"
           />
           <ZoomIn className="h-3.5 w-3.5 text-muted-foreground" />
-          <span className="text-[10px] text-muted-foreground w-10 tabular-nums">{zoomDisplay.toFixed(1)}x</span>
         </div>
 
-        <div className="w-px h-5 bg-border" />
+        <div className="hidden sm:block">
+          <TrayDivider />
+        </div>
 
-        {/* Actions */}
+        {/* Board actions */}
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 px-2" onClick={handleInit} title="Randomize">
-            <RotateCcw className="h-3 w-3" /> Random
+          <Button variant="ghost" size="sm" className="h-8 gap-1.5 px-2 text-xs" onClick={handleInit} title="Scatter a random soup across the view">
+            <RotateCcw className="h-3 w-3" /> Soup
           </Button>
-          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 px-2" onClick={handleClear} title="Clear">
-            <Trash2 className="h-3 w-3" /> Clear
+          <Button variant="ghost" size="sm" className="h-8 gap-1.5 px-2 text-xs" onClick={handleClear} title="Wipe the board">
+            <Trash2 className="h-3 w-3" /> Wipe
           </Button>
-          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 px-2" onClick={() => setShowPatterns(true)}>
-            <Grid3X3 className="h-3 w-3" /> Patterns
-          </Button>
-          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={handleHome} title="Reset view to origin">
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleHome} title="Return to the origin">
             <Home className="h-3 w-3" />
           </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 p-0"
+            onClick={runBenchmark}
+            disabled={running || benchRunning}
+            title="Benchmark the engine (1000 generations)"
+          >
+            <Zap className={`h-3 w-3 ${benchRunning ? 'animate-pulse' : ''}`} />
+          </Button>
         </div>
 
-        <div className="w-px h-5 bg-border" />
+        <TrayDivider />
 
-        {/* Benchmark */}
+        {/* The archive */}
         <Button
-          variant="ghost"
+          variant="outline"
           size="sm"
-          className="h-7 text-xs gap-1 px-2"
-          onClick={runBenchmark}
-          disabled={running || benchRunning}
+          className="h-8 gap-1.5 border-primary/40 px-2.5 text-xs text-primary hover:border-primary/70 hover:text-primary"
+          onClick={() => setShowPatterns(true)}
         >
-          <Zap className="h-3 w-3" />
-          {benchRunning ? 'Running...' : 'Bench'}
+          <Archive className="h-3.5 w-3.5" /> Archive
         </Button>
-
-        {/* Stats */}
-        <div className="flex items-center gap-3 ml-auto">
-          {benchResult && (
-            <span className="text-[10px] text-muted-foreground font-mono hidden sm:inline">{benchResult}</span>
-          )}
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-muted-foreground">Gen</span>
-            <span className="font-mono tabular-nums font-medium">{generation.toLocaleString()}</span>
-          </div>
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-muted-foreground">Pop</span>
-            <span className="font-mono tabular-nums font-medium">{population.toLocaleString()}</span>
-          </div>
-        </div>
       </div>
 
-      {/* Canvas */}
-      <div
-        ref={wrapperRef}
-        className="flex-1 min-h-0 border border-border rounded-lg overflow-hidden bg-card"
-      >
-        <canvas
-          ref={canvasRef}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          className="cursor-crosshair block w-full h-full"
-        />
-      </div>
-
-      {/* Pattern Selector */}
+      {/* Pattern archive drawer */}
       <PatternSelector
         open={showPatterns}
         onOpenChange={setShowPatterns}

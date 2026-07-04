@@ -10,13 +10,14 @@ interface GameOfLifeProps {
   height: number;
   cellSize?: number;
   minimal?: boolean;
+  cellColor?: string; // fixed cell color (e.g. chalk on the GoL room tile); defaults to theme ink
 }
 
 // Decorative Game of Life. The simulation grid lives in a ref and the canvas is
 // driven directly from the interval — no per-tick React state clone/reconcile.
 // Visuals are identical to the previous setState-driven version.
 
-const GSMOL = ({ width, height, cellSize = 10, minimal = false }: GameOfLifeProps) => {
+const GSMOL = ({ width, height, cellSize = 10, minimal = false, cellColor }: GameOfLifeProps) => {
   const { theme } = useTheme();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rows = Math.floor(height / cellSize);
@@ -41,7 +42,7 @@ const GSMOL = ({ width, height, cellSize = 10, minimal = false }: GameOfLifeProp
     if (!ctx || grid.length === 0) return;
 
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = themeRef.current === 'dark' ? '#e2e8f0' : '#0f172a';
+    ctx.fillStyle = cellColor ?? (themeRef.current === 'dark' ? '#e2e8f0' : '#0f172a');
     for (let i = 0; i < rows; i++) {
       for (let j = 0; j < cols; j++) {
         if (grid[i] && grid[i][j]) {
@@ -49,7 +50,7 @@ const GSMOL = ({ width, height, cellSize = 10, minimal = false }: GameOfLifeProp
         }
       }
     }
-  }, [width, height, cellSize, rows, cols]);
+  }, [width, height, cellSize, rows, cols, cellColor]);
 
   const initGrid = useCallback(() => {
     gridRef.current = Array(rows).fill(null).map(() =>

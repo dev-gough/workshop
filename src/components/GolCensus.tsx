@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useTheme } from './ThemeProvider';
 import { Button } from '@/components/ui/button';
 import { Play, Pause, RotateCcw } from 'lucide-react';
 import type {
@@ -68,17 +67,16 @@ function accFromResult(r: CensusResult): CensusAcc {
 
 function MiniGrid({ state, w, h, cell = 12 }: { state: number; w: number; h: number; cell?: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { theme } = useTheme();
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    const isDark = theme === 'dark';
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    // grid lines
-    ctx.strokeStyle = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
+    // a small slab of slate, ruled in chalk (single-mode like the board)
+    ctx.fillStyle = '#0e1513';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = 'rgba(236,231,216,0.09)';
     ctx.lineWidth = 1;
     for (let x = 0; x <= w; x++) {
       ctx.beginPath();
@@ -92,7 +90,7 @@ function MiniGrid({ state, w, h, cell = 12 }: { state: number; w: number; h: num
       ctx.lineTo(w * cell + 0.5, y * cell + 0.5);
       ctx.stroke();
     }
-    ctx.fillStyle = isDark ? '#e2e8f0' : '#0f172a';
+    ctx.fillStyle = '#ece7d8';
     for (let i = 0; i < w * h; i++) {
       if ((state >>> i) & 1) {
         const cx = i % w;
@@ -100,7 +98,7 @@ function MiniGrid({ state, w, h, cell = 12 }: { state: number; w: number; h: num
         ctx.fillRect(cx * cell + 1, cy * cell + 1, cell - 1, cell - 1);
       }
     }
-  }, [state, w, h, cell, theme]);
+  }, [state, w, h, cell]);
 
   return (
     <canvas
@@ -180,12 +178,16 @@ function oscPercent(r: CensusResult): number {
   return r.processed > 0 ? (oscCount / r.processed) * 100 : 0;
 }
 
-function heatColor(pct: number): string {
-  // 0% → cool slate, high% → warm amber. Blend in HSL.
+function heatColor(pct: number): { bg: string; ink: string } {
+  // 0% → bare slate, high% → yellow chalk laid on thick. Blend in HSL.
   const t = Math.min(pct / 20, 1); // scale: oscillation is rare, cap at 20%
-  const hue = 210 - t * 180; // 210 (blue) → 30 (amber)
-  const light = 30 + t * 25;
-  return `hsl(${hue}, 70%, ${light}%)`;
+  const hue = 163 - t * 116;  // 163 (slate green) → 47 (yellow chalk)
+  const sat = 11 + t * 50;
+  const light = 15 + t * 51;
+  return {
+    bg: `hsl(${hue}, ${sat}%, ${light}%)`,
+    ink: t > 0.5 ? 'hsl(50 25% 8%)' : 'var(--gol-chalk, #ece7d8)',
+  };
 }
 
 // ── Per-size result card ──────────────────────────────────────────────────
@@ -203,14 +205,14 @@ function ResultCard({ result }: { result: CensusResult }) {
 
   const rows: { label: string; count: number; color: string }[] = [
     { label: 'Dies out', count: result.dies, color: 'bg-muted-foreground/40' },
-    { label: 'Still life', count: result.stillLifes, color: 'bg-blue-500' },
-    { label: 'Oscillates', count: oscCount, color: 'bg-amber-500' },
+    { label: 'Still life', count: result.stillLifes, color: 'bg-chart-2' },
+    { label: 'Oscillates', count: oscCount, color: 'bg-chart-1' },
   ];
 
   return (
     <div className="rounded-xl border border-border bg-card p-4 flex flex-col gap-3">
       <div className="flex items-baseline justify-between">
-        <h3 className="font-semibold text-sm">{result.w}×{result.h} grid</h3>
+        <h3 className="text-[11px] font-semibold uppercase tracking-[0.18em]">{result.w}×{result.h} board</h3>
         <span className="text-[10px] text-muted-foreground font-mono tabular-nums">
           {result.processed.toLocaleString()} / {result.total.toLocaleString()}
         </span>
@@ -242,7 +244,7 @@ function ResultCard({ result }: { result: CensusResult }) {
           {periodEntries.map(([p, c]) => (
             <span
               key={p}
-              className="text-[10px] font-mono tabular-nums px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+              className="text-[10px] font-mono tabular-nums px-1.5 py-0.5 rounded bg-chart-1/10 text-chart-1 border border-chart-1/25"
               title={`${c.toLocaleString()} configs oscillate with period ${p}`}
             >
               p{p}: {c.toLocaleString()}
@@ -407,10 +409,10 @@ export default function GolCensus() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h2 className="text-lg font-semibold">Exhaustive census</h2>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          Every starting configuration on a bounded W×H grid, simulated to its cycle and classified
-          as dies&nbsp;out, still&nbsp;life, or oscillator. Small sizes compute instantly; 5×5
+        <h2 className="ws-serif text-2xl font-semibold">The census</h2>
+        <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
+          Every starting configuration on a bounded W×H board, simulated to its cycle and classified
+          as dies&nbsp;out, still&nbsp;life, or oscillator. Small boards compute instantly; 5×5
           (33.5M states) runs in resumable chunks.
         </p>
       </div>
@@ -418,22 +420,23 @@ export default function GolCensus() {
       {/* Heatmap */}
       <div className="rounded-xl border border-border bg-card p-4">
         <div className="flex items-baseline justify-between mb-3">
-          <h3 className="font-semibold text-sm">Oscillation heatmap</h3>
+          <h3 className="text-[11px] font-semibold uppercase tracking-[0.18em]">Oscillation heatmap</h3>
           <span className="text-[10px] text-muted-foreground">% of configs ending in an oscillating cycle</span>
         </div>
         <div className="flex flex-wrap gap-2">
           {allSizes.map(s => {
             const r = results[sizeKey(s)];
             const pctVal = r ? oscPercent(r) : null;
+            const heat = pctVal !== null ? heatColor(pctVal) : null;
             return (
               <div
                 key={sizeKey(s)}
-                className={`flex flex-col items-center justify-center rounded-lg w-20 h-20 shadow-sm ${pctVal !== null ? 'text-white' : 'bg-muted text-muted-foreground'}`}
-                style={pctVal !== null ? { background: heatColor(pctVal) } : undefined}
+                className={`flex flex-col items-center justify-center rounded-lg w-20 h-20 shadow-sm ${heat ? '' : 'bg-muted text-muted-foreground'}`}
+                style={heat ? { background: heat.bg, color: heat.ink } : undefined}
                 title={r ? `${s.w}×${s.h}: ${pctVal!.toFixed(3)}% oscillate` : `${s.w}×${s.h}: pending`}
               >
-                <span className="text-xs font-semibold drop-shadow">{s.w}×{s.h}</span>
-                <span className="text-[11px] font-mono tabular-nums drop-shadow">
+                <span className="text-xs font-semibold">{s.w}×{s.h}</span>
+                <span className="text-[11px] font-mono tabular-nums">
                   {pctVal !== null ? `${pctVal.toFixed(2)}%` : '—'}
                 </span>
               </div>
@@ -446,7 +449,7 @@ export default function GolCensus() {
       <div className="rounded-xl border border-border bg-card p-4 flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="font-semibold text-sm">5×5 census (2²⁵ = 33.5M states)</h3>
+            <h3 className="text-[11px] font-semibold uppercase tracking-[0.18em]">5×5 census (2²⁵ = 33.5M states)</h3>
             <p className="text-xs text-muted-foreground mt-0.5">
               Runs in {(CHUNK_SIZE / 1_000_000).toFixed(0)}M-state chunks, checkpointed to
               localStorage so a page close doesn&apos;t lose progress.
@@ -472,14 +475,14 @@ export default function GolCensus() {
           <div className="flex flex-col gap-1.5">
             <div className="h-1.5 bg-muted/50 rounded-full overflow-hidden">
               <div
-                className="h-full bg-amber-500 transition-[width] duration-200"
+                className="h-full bg-chart-1 transition-[width] duration-200"
                 style={{ width: `${(bigResult.processed / bigResult.total) * 100}%` }}
               />
             </div>
             <div className="flex items-center justify-between text-[10px] text-muted-foreground font-mono tabular-nums">
               <span>{((bigResult.processed / bigResult.total) * 100).toFixed(2)}% · {bigResult.processed.toLocaleString()} / {bigResult.total.toLocaleString()}</span>
               {bigRate !== null && bigRunning && <span>{bigRate.toLocaleString()} states/s</span>}
-              {bigResult.done && <span className="text-emerald-500">complete</span>}
+              {bigResult.done && <span className="text-chart-4">complete</span>}
             </div>
           </div>
         )}
@@ -497,7 +500,7 @@ export default function GolCensus() {
       {/* Longest-period oscillator gallery */}
       {galleryItems.length > 0 && (
         <div>
-          <h3 className="font-semibold text-sm mb-3">Longest-period oscillators found</h3>
+          <h3 className="text-[11px] font-semibold uppercase tracking-[0.18em] mb-3">Longest-period oscillators found</h3>
           <div className="flex flex-wrap gap-3">
             {galleryItems.map((it, i) => (
               <OscillatorGalleryItem key={`${it.w}x${it.h}-${it.period}-${i}`} state={it.state} period={it.period} w={it.w} h={it.h} />

@@ -16,13 +16,17 @@ export function PolarRoom({ className }: { className?: string }) {
   );
 }
 
-// ── 06 · Game of Life — live cells behind glass ──
+// ── 06 · Game of Life — chalk cells living on the seminar slate ──
 
 export function GolRoom({ className }: { className?: string }) {
   return (
     <Door href="/projects/gol" number="RM 06" room="Game of Life" className={className}>
-      <div className="pointer-events-none flex h-full items-center justify-center overflow-hidden bg-zinc-950">
-        <GSMOL width={400} height={176} cellSize={8} minimal />
+      <div className="pointer-events-none relative flex h-full items-center justify-center overflow-hidden bg-[#0e1513]">
+        <GSMOL width={400} height={176} cellSize={8} minimal cellColor="#ece7d8" />
+        {/* chalked rule notation, bottom corner of the board */}
+        <span className="absolute bottom-1.5 right-2.5 font-mono text-[9px] tracking-widest text-[#ece7d8]/50">
+          B3/S23
+        </span>
       </div>
     </Door>
   );

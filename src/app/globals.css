@@ -567,6 +567,82 @@
 }
 
 /* ─────────────────────────────────────────────────────────────
+   Game of Life scope — applied to /projects/gol shell.
+   "Conway's blackboard": an infinite seminar slate. Chalk-white
+   cells on green-black slate, yellow chalk for fresh births, and
+   a box of colored chalk for the archive's categories. Panels
+   float over the board like index cards; the toolbar is the
+   chalk tray. Deliberately single-mode — a blackboard has no
+   light mode (same intent as cc-scope's instruments).
+   ──────────────────────────────────────────────────────────── */
+.gol-theme {
+  /* Palette — a box of chalk on slate */
+  --gol-slate:   #0e1513;            /* the board itself */
+  --gol-slate-2: #141c19;            /* panels / index cards */
+  --gol-line:    hsl(160 9% 22%);    /* chalk-dusted ruling */
+  --gol-chalk:   #ece7d8;            /* white chalk */
+  --gol-dim:     hsl(155 7% 62%);    /* smudged chalk */
+  --gol-yellow:  #e8d48a;            /* yellow chalk — the accent */
+  --gol-blue:    #a9c9e2;
+  --gol-rose:    #e0998c;
+  --gol-green:   #a3cdb0;
+  --gol-violet:  #c6b4de;
+
+  /* Remap the shared tokens so utilities + shadcn/lucide follow suit. */
+  --color-background:        var(--gol-slate);
+  --color-foreground:        var(--gol-chalk);
+  --color-card:              var(--gol-slate-2);
+  --color-card-foreground:   var(--gol-chalk);
+  --color-popover:           var(--gol-slate-2);
+  --color-popover-foreground:var(--gol-chalk);
+  --color-muted:             hsl(163 11% 15%);
+  --color-muted-foreground:  var(--gol-dim);
+  --color-secondary:         hsl(163 11% 16%);
+  --color-secondary-foreground: var(--gol-chalk);
+  --color-border:            var(--gol-line);
+  --color-input:             var(--gol-line);
+  --color-ring:              var(--gol-yellow);
+  --color-primary:           var(--gol-yellow);
+  --color-primary-foreground:hsl(50 25% 8%);
+  --color-accent:            hsl(163 11% 19%);
+  --color-accent-foreground: var(--gol-chalk);
+  --color-destructive:       var(--gol-rose);
+  --color-destructive-foreground: hsl(10 25% 8%);
+  --color-chart-1:           var(--gol-yellow);
+  --color-chart-2:           var(--gol-blue);
+  --color-chart-3:           var(--gol-rose);
+  --color-chart-4:           var(--gol-green);
+  --color-chart-5:           var(--gol-violet);
+
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  color: var(--gol-chalk);
+  background-color: var(--gol-slate);
+}
+
+/* Floating slate panel — the board's chrome (title plate, readout,
+   chalk tray). Translucent so the living cells read through the glass. */
+.gol-panel {
+  background: hsl(163 13% 9% / 0.86);
+  border: 1px solid hsl(160 10% 27% / 0.7);
+  border-radius: 10px;
+  box-shadow:
+    0 12px 32px hsl(165 40% 2% / 0.55),
+    inset 0 1px 0 hsl(45 25% 90% / 0.05);
+  backdrop-filter: blur(7px);
+}
+
+/* The chalk tray — dust settles along its bottom lip. */
+.gol-tray {
+  background-image: linear-gradient(to top, hsl(45 25% 85% / 0.05), transparent 45%);
+}
+
+/* Instrument numerals in chalk. */
+.gol-readout {
+  font-family: var(--font-readout), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─────────────────────────────────────────────────────────────
    Hallway scope — the homepage corridor. A neutral gallery shell
    whose only job is to frame each project tile rendered in its
    OWN theme (cc-scope, ws-theme, lol-theme, …). Light: warm

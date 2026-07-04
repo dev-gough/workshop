@@ -1,18 +1,16 @@
 'use client';
 
-import { useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { useEffect, useRef, useState } from 'react';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Calculator, Crosshair, Rocket, Infinity, Sparkles, Zap, Search } from 'lucide-react';
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
 import { Input } from '@/components/ui/input';
-import type { LucideIcon } from 'lucide-react';
+import { Search } from 'lucide-react';
+import { parseLif, type LifCell } from '@/lib/lif';
 
 interface PatternSelectorProps {
   open: boolean;
@@ -42,32 +40,89 @@ const PATTERNS: PatternInfo[] = [
   { file: 'thingun2.lif.txt', name: 'Thin Gun', description: 'A compact period-120 gun.', category: 'gun' },
 ];
 
-const CATEGORY_META: Record<string, { label: string; icon: LucideIcon; color: string }> = {
-  gun:       { label: 'Guns',       icon: Crosshair, color: '#ef4444' },
-  spaceship: { label: 'Spaceships', icon: Rocket,    color: '#3b82f6' },
-  math:      { label: 'Math',       icon: Calculator, color: '#f59e0b' },
-  infinite:  { label: 'Infinite Growth', icon: Infinity, color: '#10b981' },
-  other:     { label: 'Other',      icon: Sparkles,  color: '#8b5cf6' },
+// Each category gets its own stick from the chalk box.
+const CATEGORY_META: Record<PatternInfo['category'], { label: string; chalk: string }> = {
+  gun:       { label: 'Guns',            chalk: 'var(--gol-rose)' },
+  spaceship: { label: 'Spaceships',      chalk: 'var(--gol-blue)' },
+  math:      { label: 'Mathematics',     chalk: 'var(--gol-yellow)' },
+  infinite:  { label: 'Infinite growth', chalk: 'var(--gol-green)' },
+  other:     { label: 'Curiosities',     chalk: 'var(--gol-violet)' },
 };
 
 const CATEGORIES = ['gun', 'spaceship', 'math', 'infinite', 'other'] as const;
 
-const PatternSelector = ({ open, onOpenChange, onSelect }: PatternSelectorProps) => {
-  const [loading, setLoading] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
+interface LoadedPattern {
+  content: string;
+  cells: LifCell[];
+}
 
-  const handleSelect = async (filename: string) => {
-    setLoading(filename);
-    try {
-      const response = await fetch(`/patterns/${filename}`);
-      const content = await response.text();
-      onSelect(content);
-    } catch (error) {
-      console.error('Failed to load pattern:', error);
-    } finally {
-      setLoading(null);
+// ── Chalk thumbnail — the pattern itself, drawn to fit the card ──────────
+
+const THUMB_W = 560; // 2× internal resolution for crisp chalk at h-20 display
+const THUMB_H = 160;
+
+function PatternThumb({ cells }: { cells: LifCell[] }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.fillStyle = '#0e1513';
+    ctx.fillRect(0, 0, THUMB_W, THUMB_H);
+    if (cells.length === 0) return;
+
+    let maxX = 0, maxY = 0;
+    for (const c of cells) {
+      if (c.x > maxX) maxX = c.x;
+      if (c.y > maxY) maxY = c.y;
     }
-  };
+    const s = Math.min(THUMB_W / (maxX + 3), THUMB_H / (maxY + 3), 14);
+    const ox = (THUMB_W - (maxX + 1) * s) / 2;
+    const oy = (THUMB_H - (maxY + 1) * s) / 2;
+    const size = Math.max(s * 0.85, 0.75);
+
+    ctx.fillStyle = '#ece7d8';
+    for (const c of cells) {
+      ctx.fillRect(ox + c.x * s, oy + c.y * s, size, size);
+    }
+  }, [cells]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={THUMB_W}
+      height={THUMB_H}
+      className="block h-20 w-full"
+      aria-hidden
+    />
+  );
+}
+
+// ── The archive ──────────────────────────────────────────────────────────
+
+const PatternSelector = ({ open, onOpenChange, onSelect }: PatternSelectorProps) => {
+  const [search, setSearch] = useState('');
+  const [lib, setLib] = useState<Record<string, LoadedPattern> | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  // Fetch and parse every card once, on first open.
+  useEffect(() => {
+    if (!open || lib) return;
+    let cancelled = false;
+    Promise.all(
+      PATTERNS.map(async (p) => {
+        const res = await fetch(`/patterns/${p.file}`);
+        const content = await res.text();
+        return [p.file, { content, cells: parseLif(content) }] as const;
+      })
+    )
+      .then((entries) => { if (!cancelled) setLib(Object.fromEntries(entries)); })
+      .catch(() => { if (!cancelled) setLoadFailed(true); });
+    return () => { cancelled = true; };
+  }, [open, lib]);
 
   const searchLower = search.toLowerCase();
   const filtered = PATTERNS.filter(p =>
@@ -81,70 +136,97 @@ const PatternSelector = ({ open, onOpenChange, onSelect }: PatternSelectorProps)
   })).filter(g => g.patterns.length > 0);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Pattern Library</DialogTitle>
-          <DialogDescription>
-            Browse and load classic Conway&apos;s Game of Life patterns.
-          </DialogDescription>
-        </DialogHeader>
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      {/* Portals to <body>, outside the page scope — re-apply the room theme. */}
+      <SheetContent side="right" className="gol-theme w-full gap-0 border-border sm:max-w-md">
+        <SheetHeader className="pb-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-primary">
+            The Archive
+          </p>
+          <SheetTitle className="ws-serif text-xl font-semibold">Pattern index</SheetTitle>
+          <SheetDescription>
+            Classic constructions from the game&apos;s history. Pick a card to chalk it onto the
+            board at the current view.
+          </SheetDescription>
+        </SheetHeader>
 
-        <div className="relative mb-2">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-8 h-8 text-sm"
-            placeholder="Search patterns..."
-          />
+        <div className="px-4 pb-3">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="h-8 pl-8 text-sm"
+              placeholder="Search the index…"
+            />
+          </div>
         </div>
 
-        <ScrollArea className="max-h-[60vh]">
-          <div className="space-y-4 pr-3">
-            {grouped.map(({ category, label, icon: Icon, color, patterns }) => (
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+          <div className="flex flex-col gap-5">
+            {grouped.map(({ category, label, chalk, patterns }) => (
               <div key={category}>
-                <div className="flex items-center gap-2 mb-2">
-                  <Icon className="h-3.5 w-3.5" style={{ color }} />
-                  <span className="text-xs font-medium uppercase tracking-wider" style={{ color }}>{label}</span>
-                  <div className="flex-1 h-px bg-border" />
+                <div className="mb-2 flex items-center gap-2">
+                  <span className="h-1.5 w-4 rounded-full" style={{ background: chalk }} />
+                  <span
+                    className="text-[10px] font-semibold uppercase tracking-[0.2em]"
+                    style={{ color: chalk }}
+                  >
+                    {label}
+                  </span>
+                  <div className="h-px flex-1 bg-border" />
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {patterns.map((pattern) => (
-                    <button
-                      key={pattern.file}
-                      onClick={() => handleSelect(pattern.file)}
-                      disabled={loading === pattern.file}
-                      className="group relative text-left p-3 rounded-lg border border-border bg-card hover:bg-muted/50 hover:border-border/80 transition-all disabled:opacity-50"
-                    >
-                      <div className="flex items-start gap-2.5">
-                        <div
-                          className="w-8 h-8 rounded-md flex items-center justify-center shrink-0 mt-0.5"
-                          style={{ backgroundColor: `${color}15`, color }}
-                        >
-                          <Zap className="h-3.5 w-3.5" />
+
+                <div className="flex flex-col gap-2">
+                  {patterns.map((pattern) => {
+                    const loaded = lib?.[pattern.file];
+                    return (
+                      <button
+                        key={pattern.file}
+                        onClick={() => loaded && onSelect(loaded.content)}
+                        disabled={!loaded}
+                        className="group overflow-hidden rounded-md border border-border bg-card text-left transition-colors hover:bg-accent/40 disabled:cursor-wait"
+                        style={{ ['--cat-chalk' as string]: chalk }}
+                      >
+                        <div className="relative border-b border-border/60">
+                          {loaded ? (
+                            <PatternThumb cells={loaded.cells} />
+                          ) : (
+                            <div className="flex h-20 w-full items-center justify-center bg-[#0e1513]">
+                              <span className="text-[10px] text-muted-foreground">
+                                {loadFailed ? 'Could not load this card' : 'Fetching card…'}
+                              </span>
+                            </div>
+                          )}
+                          {/* the category's chalk stick, resting on the card */}
+                          <span
+                            className="absolute left-0 top-0 h-full w-[3px]"
+                            style={{ background: 'var(--cat-chalk)', opacity: 0.75 }}
+                          />
                         </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium truncate group-hover:text-foreground transition-colors">
-                            {loading === pattern.file ? 'Loading...' : pattern.name}
+                        <div className="px-3 py-2.5">
+                          <p className="text-sm font-medium transition-colors group-hover:text-[color:var(--cat-chalk)]">
+                            {pattern.name}
                           </p>
-                          <p className="text-[11px] text-muted-foreground leading-snug mt-0.5 line-clamp-2">
+                          <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-muted-foreground">
                             {pattern.description}
                           </p>
                         </div>
-                      </div>
-                    </button>
-                  ))}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             ))}
             {grouped.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-8">No patterns match your search</p>
+              <p className="py-10 text-center text-sm text-muted-foreground">
+                No card in the index matches &ldquo;{search}&rdquo;
+              </p>
             )}
           </div>
-        </ScrollArea>
-      </DialogContent>
-    </Dialog>
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 };
 
