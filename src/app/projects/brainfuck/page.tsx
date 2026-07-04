@@ -34,6 +34,7 @@ interface GAConfig {
   migration_every: number;
   lexicase: number;
   share_strength: number;
+  repair_every: number;
   parallel_runs: number;
 }
 
@@ -45,7 +46,7 @@ const DEFAULT_CONFIG: GAConfig = {
   max_crossover_dist: 10,
   crossover_rate: 0.5,
   mutation_rate: 0.1,
-  mut_prob: 0.7,
+  mut_prob: 0, // 0 = adaptive ~1.5/gene-length
   macro_mut_rate: 0.05,
   restart_every: 250_000,
   restart_keep_frac: 0.2,
@@ -54,6 +55,7 @@ const DEFAULT_CONFIG: GAConfig = {
   migration_every: 10_000,
   lexicase: 0,
   share_strength: 0,
+  repair_every: 2_000,
   parallel_runs: 1,
 };
 
@@ -191,7 +193,7 @@ const KNOB_GROUPS: KnobGroup[] = [
     knobs: [
       { key: 'mutation_rate',  label: 'skip rate',     hint: 'Chance to leave a child untouched',
         min: 0, max: 1, step: 0.01 },
-      { key: 'mut_prob',       label: 'per-char prob', hint: 'Per-character mutation probability — try ≈ 1/L',
+      { key: 'mut_prob',       label: 'per-char prob', hint: '0 = adaptive (~1.5/gene-length, the 1/L regime). Set explicitly to override',
         min: 0, max: 1, step: 0.01 },
       { key: 'macro_mut_rate', label: 'macro rate',    hint: 'Chance of bulk insert/delete pass',
         min: 0, max: 1, step: 0.01 },
@@ -243,6 +245,14 @@ const KNOB_GROUPS: KnobGroup[] = [
         min: 0, max: 1, step: 1, integer: true },
       { key: 'share_strength', label: 'output sharing', hint: 'Output-fitness-sharing strength. 0 = off. Divides each program\'s selection-fitness by 1/(count of others sharing its output)^strength so dominant clusters can\'t monopolize parents. Try 0.5 (soft) or 1.0 (sharp). Pairs well with lexicase',
         min: 0, max: 2, step: 0.05 },
+    ],
+  },
+  {
+    title: 'repair',
+    glyph: '.',
+    knobs: [
+      { key: 'repair_every', label: 'repair every', hint: 'Lamarckian run-length repair of the champion + best straight-line lineage every N gens — retunes +/- runs so printed bytes land on target. 0 disables',
+        min: 0, max: 1_000_000, step: 1000, integer: true },
     ],
   },
   {
@@ -304,6 +314,7 @@ interface Benchmark {
   version_subject: string | null;
   version_label: string | null;
   batch_id: string | null;
+  suite: string | null; // 'throughput' | 'solve' (null on pre-migration rows)
   target: string;
   pop_size: number;
   max_generations: number;
@@ -448,6 +459,8 @@ export default function BrainfuckPage() {
   const [benchmarks, setBenchmarks] = useState<Benchmark[]>([]);
   const [activeBenchId, setActiveBenchId] = useState<number | null>(null);
   const [benchPreset, setBenchPreset] = useState<BenchmarkPresetItem[]>([]);
+  const [solvePreset, setSolvePreset] = useState<BenchmarkPresetItem[]>([]);
+  const [benchSuite, setBenchSuite] = useState<'throughput' | 'solve'>('solve');
   const [benchLabel, setBenchLabel] = useState('');
   const [benchSubmitting, setBenchSubmitting] = useState(false);
   const [benchError, setBenchError] = useState<string | null>(null);
@@ -552,6 +565,7 @@ export default function BrainfuckPage() {
       setBenchmarks(data.benchmarks ?? []);
       setActiveBenchId(data.activeId ?? null);
       if (Array.isArray(data.preset)) setBenchPreset(data.preset);
+      if (Array.isArray(data.solvePreset)) setSolvePreset(data.solvePreset);
     } catch { /* leave previous state */ }
   }, []);
 
@@ -810,7 +824,7 @@ export default function BrainfuckPage() {
       const res = await fetch('/api/brainfuck/benchmarks', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ label: benchLabel.trim() || null }),
+        body: JSON.stringify({ label: benchLabel.trim() || null, suite: benchSuite }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -1258,24 +1272,42 @@ export default function BrainfuckPage() {
               {libTab === 'bench' && (
                 <div className="space-y-3">
                   <p className="text-[11px] text-muted-foreground leading-relaxed">
-                    Timed silent suite for raw GA throughput — each click sweeps a
-                    fixed set of configs, auto-tagged with the current BF repo commit.
+                    {benchSuite === 'solve'
+                      ? 'Solve-rate suite: repeated default-config runs per target — did it solve, and at what generation. The metric that makes algorithm changes comparable.'
+                      : 'Throughput suite: timed silent runs measuring raw evals/s at a few operating points.'}
+                    {' '}Auto-tagged with the current BF repo commit.
                   </p>
+
+                  <div className="flex items-center gap-1">
+                    {(['solve', 'throughput'] as const).map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => setBenchSuite(s)}
+                        className={`rounded border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] transition-colors ${
+                          benchSuite === s
+                            ? 'border-primary/50 bg-primary/10 text-primary'
+                            : 'border-border/60 bg-background/40 text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        {s === 'solve' ? 'solve rate' : 'throughput'}
+                      </button>
+                    ))}
+                  </div>
 
                   <div className="rounded-lg bg-background/40 border border-border/40 px-3 py-2 space-y-1">
                     <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
                       Configs in each batch
                     </div>
                     <div className="font-mono text-[11px] text-foreground/70 space-y-0.5">
-                      {benchPreset.length === 0 ? (
+                      {(benchSuite === 'solve' ? solvePreset : benchPreset).length === 0 ? (
                         <span className="italic text-muted-foreground">loading…</span>
                       ) : (
-                        benchPreset.map((c, i) => (
+                        (benchSuite === 'solve' ? solvePreset : benchPreset).map((c, i) => (
                           <div key={i}>
                             <span className="text-primary">{i + 1}.</span>{' '}
                             target <span className="text-foreground/90">&quot;{c.target}&quot;</span>
                             {' · '}pop <span className="text-foreground/90">{c.popSize}</span>
-                            {' · '}gens <span className="text-foreground/90">{c.maxGen}</span>
+                            {' · '}gens <span className="text-foreground/90">{c.maxGen.toLocaleString()}</span>
                           </div>
                         ))
                       )}
@@ -1478,6 +1510,7 @@ const BF_IDIOMS: { code: string; what: string }[] = [
 interface BenchmarkGroup {
   key: string;          // either the batch_id, or `solo:<id>` for unbatched legacy rows
   batchId: string | null;
+  suite: string;        // 'throughput' | 'solve' — pre-migration rows default to throughput
   rows: Benchmark[];    // ordered by id ASC so the suite reads in the order it was queued
   versionHash: string | null;
   versionSubject: string | null;
@@ -1494,6 +1527,7 @@ function groupBenchmarksByBatch(rows: Benchmark[]): BenchmarkGroup[] {
       g = {
         key,
         batchId: r.batch_id,
+        suite: r.suite ?? 'throughput',
         rows: [],
         versionHash: r.version_hash,
         versionSubject: r.version_subject,
@@ -1519,6 +1553,15 @@ function BenchmarkBatchCard({
     : null;
   const totalWall = group.rows.reduce((s, r) => s + (r.wall_seconds ?? 0), 0);
   const inFlight = group.rows.some((r) => r.status === 'running' || r.status === 'queued');
+  const isSolve = group.suite === 'solve';
+  // Solve-suite headline: solved n/m plus median gens-to-solve among solves.
+  const finished = group.rows.filter((r) => r.status === 'completed' && r.found != null);
+  const solvedRows = finished.filter((r) => r.found);
+  const medianGens = (() => {
+    if (solvedRows.length === 0) return null;
+    const gens = solvedRows.map((r) => r.generations).sort((a, b) => a - b);
+    return gens[Math.floor(gens.length / 2)];
+  })();
 
   return (
     <div className="rounded-lg bg-background/30 border border-border/30 overflow-hidden">
@@ -1527,20 +1570,35 @@ function BenchmarkBatchCard({
           <GitCommit className="h-3 w-3" />
           {group.versionHash ?? '—'}
         </div>
+        <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono uppercase tracking-[0.1em] ${
+          isSolve ? 'bg-ok/10 text-ok' : 'bg-foreground/[0.06] text-muted-foreground'
+        }`}>
+          {isSolve ? 'solve' : 'evals/s'}
+        </span>
         {group.versionLabel && (
           <span className="px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[10px] font-medium">
             {group.versionLabel}
           </span>
         )}
-        <span className="text-muted-foreground tabular-nums">
-          {group.rows.length} config{group.rows.length === 1 ? '' : 's'}
-        </span>
         {inFlight && <Loader className="h-3 w-3 text-chart-4 animate-spin" />}
         <div className="ml-auto flex items-center gap-3 text-muted-foreground tabular-nums">
-          {avgEps != null && (
-            <span>
-              avg <span className="text-foreground/90">{avgEps.toFixed(1)}</span> evals/s
-            </span>
+          {isSolve ? (
+            finished.length > 0 && (
+              <span>
+                solved <span className={solvedRows.length === finished.length ? 'text-ok' : 'text-foreground/90'}>
+                  {solvedRows.length}/{finished.length}
+                </span>
+                {medianGens != null && (
+                  <span> · med <span className="text-foreground/90">{medianGens.toLocaleString()}</span> gen</span>
+                )}
+              </span>
+            )
+          ) : (
+            avgEps != null && (
+              <span>
+                avg <span className="text-foreground/90">{avgEps.toFixed(1)}</span> evals/s
+              </span>
+            )
           )}
           <span>{totalWall.toFixed(1)}s wall</span>
           <span className="text-[10px]">{fmtTime(group.startedAt)}</span>
@@ -1580,12 +1638,22 @@ function BenchmarkConfigRow({ b, onDelete }: { b: Benchmark; onDelete: () => voi
     : 'text-destructive';
   return (
     <>
-      <div className="flex items-center gap-2 truncate">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
         <span className="font-mono text-foreground/90 truncate">&quot;{b.target}&quot;</span>
-        <span className="text-[10px] text-muted-foreground tabular-nums">
-          pop {b.pop_size} · gens {b.max_generations}
+        {b.status === 'completed' && b.found != null ? (
+          b.found ? (
+            <span className="text-[10px] text-ok tabular-nums whitespace-nowrap">
+              ✓ gen {b.generations.toLocaleString()}
+            </span>
+          ) : (
+            <span className="text-[10px] text-warn whitespace-nowrap">✗ capped</span>
+          )
+        ) : (
+          <span className={`text-[10px] ${statusColor}`}>{b.status}</span>
+        )}
+        <span className="text-[10px] text-muted-foreground tabular-nums whitespace-nowrap">
+          pop {b.pop_size} · {b.max_generations.toLocaleString()} cap
         </span>
-        <span className={`text-[10px] ${statusColor}`}>{b.status}</span>
       </div>
       <div className="text-right tabular-nums font-mono text-foreground/90">{evalsPerSec}</div>
       <div className="text-right tabular-nums font-mono text-muted-foreground">{gensPerSec}</div>

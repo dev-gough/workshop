@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
-import { startBenchmarkBatch, getActiveBenchmarkId, BENCHMARK_PRESET } from '@/lib/brainfuck';
+import { startBenchmarkBatch, getActiveBenchmarkId, BENCHMARK_PRESET, SOLVE_PRESET } from '@/lib/brainfuck';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,7 +9,7 @@ const MAX_LABEL_LENGTH = 64;
 export async function GET() {
   try {
     const { rows } = await pool.query(
-      `SELECT id, version_hash, version_subject, version_label, batch_id,
+      `SELECT id, version_hash, version_subject, version_label, batch_id, suite,
               target, pop_size, max_generations,
               generations, evaluations, wall_seconds,
               evals_per_sec, gens_per_sec,
@@ -23,6 +23,7 @@ export async function GET() {
       benchmarks: rows,
       activeId: getActiveBenchmarkId(),
       preset: BENCHMARK_PRESET,
+      solvePreset: SOLVE_PRESET,
     });
   } catch (error) {
     return NextResponse.json(
@@ -39,8 +40,9 @@ export async function POST(request: NextRequest) {
       typeof body.label === 'string' && body.label.trim().length > 0
         ? body.label.trim().slice(0, MAX_LABEL_LENGTH)
         : null;
+    const suite = body.suite === 'solve' ? 'solve' : 'throughput';
 
-    const { batchId, rowIds } = await startBenchmarkBatch(label);
+    const { batchId, rowIds } = await startBenchmarkBatch(label, suite);
     return NextResponse.json({ batchId, rowIds });
   } catch (error) {
     return NextResponse.json(

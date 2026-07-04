@@ -38,6 +38,10 @@ export interface GAConfig {
   // per copy"), 0.5 = soft (sqrt-crowding). Pairs well with lexicase: sharing
   // becomes the lexicase-tie weighting instead of a fitness rescale.
   share_strength: number;
+  // Lamarckian run-length repair cadence: every N generations the ticking
+  // island's champion + best straight-line lineage get a local-search pass
+  // that retunes '+'/'-' runs so printed bytes land on target. 0 disables.
+  repair_every: number;
   // Workshop-only knob (not passed to runner.py): when > 1, "Start run"
   // spawns N independent runner processes racing for the same target. First
   // one to emit a 'found' event wins; siblings get killed and marked
@@ -55,7 +59,10 @@ export const DEFAULT_CONFIG: GAConfig = {
   max_crossover_dist: 10,
   crossover_rate: 0.5,
   mutation_rate: 0.1,
-  mut_prob: 0.7,
+  // 0 = adaptive per-char rate (~1.5/gene-length, the textbook 1/L regime).
+  // The old constant 0.7 rewrote ~70% of every child and is why long
+  // near-solutions never survived; set an explicit value to override.
+  mut_prob: 0,
   macro_mut_rate: 0.05,
   restart_every: 250_000,
   restart_keep_frac: 0.2,
@@ -64,6 +71,7 @@ export const DEFAULT_CONFIG: GAConfig = {
   migration_every: 10_000,
   lexicase: 0,
   share_strength: 0,
+  repair_every: 2_000,
   parallel_runs: 1,
 };
 
@@ -92,6 +100,7 @@ export const CONFIG_BOUNDS: Record<keyof GAConfig, NumericRange> = {
   migration_every:    { min: 0,     max: 1_000_000,  integer: true },
   lexicase:           { min: 0,     max: 1,          integer: true },
   share_strength:     { min: 0,     max: 2 },
+  repair_every:       { min: 0,     max: 1_000_000,  integer: true },
   parallel_runs:      { min: 1,     max: 4,          integer: true },
 };
 
@@ -137,6 +146,7 @@ function configToCliArgs(cfg: GAConfig): string[] {
     '--migration-every',    String(cfg.migration_every),
     '--lexicase',           String(cfg.lexicase),
     '--share-strength',     String(cfg.share_strength),
+    '--repair-every',       String(cfg.repair_every),
   ];
 }
 
@@ -530,6 +540,26 @@ export const BENCHMARK_PRESET: { target: string; popSize: number; maxGen: number
   { target: 'sparqsys', popSize: 100, maxGen: 1_000_000 },
 ];
 
+// Solve-rate suite: repeated default-config runs per target, measuring
+// whether (and at what generation) the algorithm actually solves — the
+// metric that makes hyperparameter comparisons meaningful, where the
+// throughput suite only measures evals/s. A target ladder: 4 chars should
+// be routine, 8 the former ceiling, 12 (with a space, far from lowercase
+// ASCII) hard enough that flat-repair alone can't close it under the
+// 300-char budget — the discriminator for future operator work.
+export const SOLVE_PRESET: { target: string; popSize: number; maxGen: number }[] = [
+  { target: 'devy',         popSize: 100, maxGen: 200_000 },
+  { target: 'devy',         popSize: 100, maxGen: 200_000 },
+  { target: 'devy',         popSize: 100, maxGen: 200_000 },
+  { target: 'sparqsys',     popSize: 100, maxGen: 500_000 },
+  { target: 'sparqsys',     popSize: 100, maxGen: 500_000 },
+  { target: 'sparqsys',     popSize: 100, maxGen: 500_000 },
+  { target: 'the tape lab', popSize: 100, maxGen: 300_000 },
+  { target: 'the tape lab', popSize: 100, maxGen: 300_000 },
+];
+
+export type BenchmarkSuite = 'throughput' | 'solve';
+
 interface BatchQueueItem {
   rowId: number;
   target: string;
@@ -542,6 +572,7 @@ let benchmarkBatchStopped = false;
 
 export async function startBenchmarkBatch(
   label: string | null,
+  suite: BenchmarkSuite = 'throughput',
 ): Promise<{ batchId: string; rowIds: number[] }> {
   await bootstrap();
 
@@ -553,6 +584,7 @@ export async function startBenchmarkBatch(
     );
   }
 
+  const preset = suite === 'solve' ? SOLVE_PRESET : BENCHMARK_PRESET;
   const version = getBFVersion();
   const batchId = String(Date.now());
   benchmarkBatchStopped = false;
@@ -560,23 +592,23 @@ export async function startBenchmarkBatch(
   // Pre-create one row per config so the UI can show all configs in the batch
   // immediately (queued ones too).
   const rowIds: number[] = [];
-  for (const cfg of BENCHMARK_PRESET) {
+  for (const cfg of preset) {
     const { rows } = await pool.query(
       `INSERT INTO brainfuck_benchmarks
-         (version_hash, version_subject, version_label, batch_id,
+         (version_hash, version_subject, version_label, batch_id, suite,
           target, pop_size, max_generations, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued')
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued')
        RETURNING id`,
-      [version.hash, version.subject, label, batchId, cfg.target, cfg.popSize, cfg.maxGen],
+      [version.hash, version.subject, label, batchId, suite, cfg.target, cfg.popSize, cfg.maxGen],
     );
     rowIds.push(rows[0].id);
   }
 
   benchmarkBatchQueue = rowIds.map((rowId, i) => ({
     rowId,
-    target: BENCHMARK_PRESET[i].target,
-    popSize: BENCHMARK_PRESET[i].popSize,
-    maxGen: BENCHMARK_PRESET[i].maxGen,
+    target: preset[i].target,
+    popSize: preset[i].popSize,
+    maxGen: preset[i].maxGen,
   }));
 
   spawnNextBenchmarkInBatch();
