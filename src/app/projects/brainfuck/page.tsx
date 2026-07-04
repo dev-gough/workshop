@@ -22,7 +22,6 @@ interface GAConfig {
   max_generations: number;
   max_prog_len: number;
   min_prog_len: number;
-  max_crossover_dist: number;
   crossover_rate: number;
   mutation_rate: number;
   mut_prob: number;
@@ -35,6 +34,7 @@ interface GAConfig {
   lexicase: number;
   share_strength: number;
   repair_every: number;
+  run_mut_rate: number;
   parallel_runs: number;
 }
 
@@ -43,7 +43,6 @@ const DEFAULT_CONFIG: GAConfig = {
   max_generations: 1_000_000,
   max_prog_len: 300,
   min_prog_len: 10,
-  max_crossover_dist: 10,
   crossover_rate: 0.5,
   mutation_rate: 0.1,
   mut_prob: 0, // 0 = adaptive ~1.5/gene-length
@@ -53,9 +52,10 @@ const DEFAULT_CONFIG: GAConfig = {
   bracket_mut_rate: 0.30,
   islands: 1,
   migration_every: 10_000,
-  lexicase: 0,
+  lexicase: 1,
   share_strength: 0,
-  repair_every: 2_000,
+  repair_every: 0, // Lamarckian repair is non-GA; off by default
+  run_mut_rate: 0.35,
   parallel_runs: 1,
 };
 
@@ -197,16 +197,16 @@ const KNOB_GROUPS: KnobGroup[] = [
         min: 0, max: 1, step: 0.01 },
       { key: 'macro_mut_rate', label: 'macro rate',    hint: 'Chance of bulk insert/delete pass',
         min: 0, max: 1, step: 0.01 },
+      { key: 'run_mut_rate',   label: 'run jumps',     hint: 'Per-child chance of a blind ±k jump on one +/- run (geometric k, mean ≈3.5). Big random byte-space steps; selection decides what survives',
+        min: 0, max: 1, step: 0.01 },
     ],
   },
   {
     title: 'crossover',
     glyph: '[ ]',
     knobs: [
-      { key: 'crossover_rate',     label: 'skip rate', hint: 'Chance to skip recombination (gate is inverted!)',
+      { key: 'crossover_rate',     label: 'skip rate', hint: 'Chance to skip recombination (gate is inverted!). Splice crossover: each parent cut at an independent depth-0 point, tails swapped — children stay bracket-balanced',
         min: 0, max: 1, step: 0.01 },
-      { key: 'max_crossover_dist', label: 'span',      hint: 'Number of adjacent positions swapped',
-        min: 1, max: 100, step: 1, integer: true },
     ],
   },
   {
@@ -241,7 +241,7 @@ const KNOB_GROUPS: KnobGroup[] = [
     title: 'selection',
     glyph: '?',
     knobs: [
-      { key: 'lexicase', label: 'lexicase (0/1)', hint: 'Use lexicase parent selection (per-target-position case filtering) instead of tournament. Helps on deceptive multi-case targets where a "good enough" gene takes over the population',
+      { key: 'lexicase', label: 'lexicase (0/1)', hint: 'Lexicase parent selection (per-target-position case filtering) instead of tournament. Default ON — averaged fitness is what lets a one-letter loop printer ("ssss…" ≈ 98.5% on 8-char targets) eat the population',
         min: 0, max: 1, step: 1, integer: true },
       { key: 'share_strength', label: 'output sharing', hint: 'Output-fitness-sharing strength. 0 = off. Divides each program\'s selection-fitness by 1/(count of others sharing its output)^strength so dominant clusters can\'t monopolize parents. Try 0.5 (soft) or 1.0 (sharp). Pairs well with lexicase',
         min: 0, max: 2, step: 0.05 },
@@ -251,7 +251,7 @@ const KNOB_GROUPS: KnobGroup[] = [
     title: 'repair',
     glyph: '.',
     knobs: [
-      { key: 'repair_every', label: 'repair every', hint: 'Lamarckian run-length repair of the champion + best straight-line lineage every N gens — retunes +/- runs so printed bytes land on target. 0 disables',
+      { key: 'repair_every', label: 'repair every', hint: 'Lamarckian repair — NOT a genetic operator (reads the target to compute exact +/- deltas). 0 = pure GA, the default. Set >0 only for memetic-vs-pure A/B comparisons',
         min: 0, max: 1_000_000, step: 1000, integer: true },
     ],
   },

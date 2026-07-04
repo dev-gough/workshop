@@ -17,7 +17,6 @@ export interface GAConfig {
   max_generations: number;
   max_prog_len: number;
   min_prog_len: number;
-  max_crossover_dist: number;
   crossover_rate: number;
   mutation_rate: number;
   mut_prob: number;
@@ -38,10 +37,14 @@ export interface GAConfig {
   // per copy"), 0.5 = soft (sqrt-crowding). Pairs well with lexicase: sharing
   // becomes the lexicase-tie weighting instead of a fitness rescale.
   share_strength: number;
-  // Lamarckian run-length repair cadence: every N generations the ticking
-  // island's champion + best straight-line lineage get a local-search pass
-  // that retunes '+'/'-' runs so printed bytes land on target. 0 disables.
+  // Lamarckian repair cadence — NOT a genetic operator (it reads the target
+  // to compute exact deltas). 0 = pure GA, the default; kept only as an
+  // A/B instrument for memetic-vs-pure comparisons.
   repair_every: number;
+  // Per-child probability of a blind geometric ±k jump on one '+'/'-' run —
+  // the honest counterpart of repair's step-size lesson: big random moves
+  // through byte space, with selection (not the target) deciding survival.
+  run_mut_rate: number;
   // Workshop-only knob (not passed to runner.py): when > 1, "Start run"
   // spawns N independent runner processes racing for the same target. First
   // one to emit a 'found' event wins; siblings get killed and marked
@@ -56,7 +59,6 @@ export const DEFAULT_CONFIG: GAConfig = {
   max_generations: 1_000_000,
   max_prog_len: 300,
   min_prog_len: 10,
-  max_crossover_dist: 10,
   crossover_rate: 0.5,
   mutation_rate: 0.1,
   // 0 = adaptive per-char rate (~1.5/gene-length, the textbook 1/L regime).
@@ -69,9 +71,10 @@ export const DEFAULT_CONFIG: GAConfig = {
   bracket_mut_rate: 0.30,
   islands: 1,
   migration_every: 10_000,
-  lexicase: 0,
+  lexicase: 1,
   share_strength: 0,
-  repair_every: 2_000,
+  repair_every: 0,
+  run_mut_rate: 0.35,
   parallel_runs: 1,
 };
 
@@ -88,7 +91,6 @@ export const CONFIG_BOUNDS: Record<keyof GAConfig, NumericRange> = {
   max_generations:    { min: 100,   max: 10_000_000, integer: true },
   max_prog_len:       { min: 20,    max: 2000,       integer: true },
   min_prog_len:       { min: 1,     max: 200,        integer: true },
-  max_crossover_dist: { min: 1,     max: 100,        integer: true },
   crossover_rate:     { min: 0,     max: 1 },
   mutation_rate:      { min: 0,     max: 1 },
   mut_prob:           { min: 0,     max: 1 },
@@ -101,6 +103,7 @@ export const CONFIG_BOUNDS: Record<keyof GAConfig, NumericRange> = {
   lexicase:           { min: 0,     max: 1,          integer: true },
   share_strength:     { min: 0,     max: 2 },
   repair_every:       { min: 0,     max: 1_000_000,  integer: true },
+  run_mut_rate:       { min: 0,     max: 1 },
   parallel_runs:      { min: 1,     max: 4,          integer: true },
 };
 
@@ -134,7 +137,6 @@ function configToCliArgs(cfg: GAConfig): string[] {
     '--max-gen',            String(cfg.max_generations),
     '--max-prog-len',       String(cfg.max_prog_len),
     '--min-prog-len',       String(cfg.min_prog_len),
-    '--max-crossover-dist', String(cfg.max_crossover_dist),
     '--crossover-rate',     String(cfg.crossover_rate),
     '--mutation-rate',      String(cfg.mutation_rate),
     '--mut-prob',           String(cfg.mut_prob),
@@ -147,6 +149,7 @@ function configToCliArgs(cfg: GAConfig): string[] {
     '--lexicase',           String(cfg.lexicase),
     '--share-strength',     String(cfg.share_strength),
     '--repair-every',       String(cfg.repair_every),
+    '--run-mut-rate',       String(cfg.run_mut_rate),
   ];
 }
 
