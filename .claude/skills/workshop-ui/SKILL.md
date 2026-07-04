@@ -152,8 +152,9 @@ brass underline) is fixed; only its palette follows the scope.
    room's identity changed — the tile is a *miniature of the room*, in the
    room's own theme, with 1–3 live stats.
 7. Verify BOTH modes (unless single-mode by design), mobile width, and the
-   header recolor. Then: `npm run build` → `sudo systemctl restart workshop`
-   → commit.
+   header recolor — use the `/ui-shot` skill to actually *look* at the page
+   (light, `--dark`, `--mobile`, hover states). Then: `npm run build` →
+   `sudo systemctl restart workshop` → commit.
 
 ## 8. New project? New door.
 
