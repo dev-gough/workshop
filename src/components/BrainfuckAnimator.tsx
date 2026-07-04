@@ -33,6 +33,10 @@ interface Props {
   // the tape feed but skips the stamp (used for initial seeds).
   stampLabel?: string | null;
   height?: number;
+  // Fill the parent instead of using a fixed height — the workbench layout
+  // gives the transport whatever vertical space the viewport allows. The
+  // parent must be height-constrained (flex-1 min-h-0 etc.).
+  fill?: boolean;
   compact?: boolean;
   // When true, render a fullscreen toggle button and bind the `F` key to it.
   // The page should set this only on its primary animator (typically the
@@ -83,6 +87,7 @@ export default function BrainfuckAnimator({
   pendingLabel,
   stampLabel,
   height = 360,
+  fill = false,
   compact = false,
   fullscreenable = false,
   onCycleEnd,
@@ -325,7 +330,7 @@ export default function BrainfuckAnimator({
       className="relative w-full rounded-lg overflow-hidden"
       // The transport window: fixed dark instrument regardless of theme mode.
       style={{
-        height: isFullscreen ? '100vh' : `${height}px`,
+        height: isFullscreen ? '100vh' : fill ? '100%' : `${height}px`,
         background: C.win,
         border: `1px solid ${C.winEdge}`,
         boxShadow: 'inset 0 1px 0 rgba(234,223,196,0.05), inset 0 -14px 24px rgba(0,0,0,0.35)',

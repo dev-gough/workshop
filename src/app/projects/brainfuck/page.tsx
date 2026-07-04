@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Code2, Play, Square, Trash2, Loader, ChevronDown, ChevronRight, ChevronLeft,
-  Target, Hash, Zap, CheckCircle, AlertTriangle, Clock, Gauge, GitCommit,
+  CheckCircle, AlertTriangle, Clock, Gauge, GitCommit,
   RotateCcw, Sparkles, Infinity as InfinityIcon, Copy,
 } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
@@ -277,6 +277,15 @@ interface Run {
 
 interface ProgressPoint { gen: number; best_fitness: number; }
 
+// A tape pulled from the library into the transport. `runId` (when known)
+// lets the page fetch that run's progress trail for the strip chart.
+interface LoadedTape {
+  gene: string;
+  target: string;
+  label: string;
+  runId?: number | null;
+}
+
 // Lab-log activity for the active run. Diversity events (restart/migration)
 // arrive on the SSE stream; 'best' entries are minted client-side whenever a
 // poll surfaces a higher best_fitness — the same improvements that trigger
@@ -368,7 +377,13 @@ export default function BrainfuckPage() {
     Array.from({ length: PRESET_SLOTS }, () => null),
   );
   const [advanced, setAdvanced] = useState(false);
-  const [tab, setTab] = useState<'run' | 'solutions'>('run');
+  // Which drawer of the tape library (right column) is open.
+  const [libTab, setLibTab] = useState<'history' | 'solutions' | 'bench' | 'ref'>('history');
+  // A tape loaded into the transport from the library (history run or
+  // archived solution). Overrides the live run's display until cleared —
+  // the status strip shows a "return to live" control while a run is on.
+  const [loaded, setLoaded] = useState<LoadedTape | null>(null);
+  const [loadedTrail, setLoadedTrail] = useState<ProgressPoint[] | null>(null);
 
   // Hydrate from localStorage after mount so SSR markup matches and the
   // presets survive page reloads. Seeds slots 1+2 if storage is empty.
@@ -456,6 +471,28 @@ export default function BrainfuckPage() {
   const lastBestFitnessRef = useRef<number | null>(null);
   const lastForcedSwapAtRef = useRef<number>(0);
   const pollRef = useRef<number | null>(null);
+
+  const loadTape = useCallback((tape: LoadedTape) => {
+    setLoaded(tape);
+    // A pinned just-finished run has had its moment — the user asked for
+    // a different tape.
+    setPinnedRunId(null);
+  }, []);
+  const returnToLive = useCallback(() => setLoaded(null), []);
+
+  // Trail for a library tape that came from a run — feeds the strip chart.
+  useEffect(() => {
+    if (loaded?.runId == null) {
+      setLoadedTrail(null);
+      return;
+    }
+    let alive = true;
+    fetch(`/api/brainfuck/runs/${loaded.runId}`, { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((d) => { if (alive) setLoadedTrail(d.progress ?? []); })
+      .catch(() => { if (alive) setLoadedTrail([]); });
+    return () => { alive = false; };
+  }, [loaded?.runId]);
 
   const refresh = useCallback(async () => {
     try {
@@ -582,9 +619,11 @@ export default function BrainfuckPage() {
         setDisplayedGene(latestGeneRef.current);
       }
     }
-    // Starting a fresh run while still pinned on a previous one: release.
+    // Starting a fresh run: release any pin and any library tape — the
+    // live run owns the transport from its first generation.
     if (prev == null && activeId != null) {
       setPinnedRunId(null);
+      setLoaded(null);
     }
   }, [activeId]);
 
@@ -819,69 +858,77 @@ export default function BrainfuckPage() {
   );
   const targetFitness = active ? 256 * active.target.length : 0;
 
+  // What the transport is showing:
+  //  - a library tape the user loaded (wins even over a live run),
+  //  - else the live run,
+  //  - else the most recent finished run's champion, auto-threaded so the
+  //    machine is never dark when there's anything at all to play.
+  const champion = useMemo<LoadedTape | null>(() => {
+    const r = history.find((x) => x.best_gene);
+    return r
+      ? {
+          gene: r.best_gene!,
+          target: r.target,
+          label: `run #${r.id} · ${statusBadge(r.status).label.toLowerCase()}`,
+          runId: r.id,
+        }
+      : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runs, effectiveActiveId]);
+  const showingLive = loaded == null && effectiveActiveId != null;
+  const libraryTape = loaded ?? (showingLive ? null : champion);
+  // Champion fallback has no explicit load action, so fetch its trail too.
+  const shownTrailRunId = loaded != null ? loaded.runId : showingLive ? null : champion?.runId;
+  const [championTrail, setChampionTrail] = useState<ProgressPoint[] | null>(null);
+  useEffect(() => {
+    if (loaded != null || shownTrailRunId == null) {
+      setChampionTrail(null);
+      return;
+    }
+    let alive = true;
+    fetch(`/api/brainfuck/runs/${shownTrailRunId}`, { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((d) => { if (alive) setChampionTrail(d.progress ?? []); })
+      .catch(() => { if (alive) setChampionTrail([]); });
+    return () => { alive = false; };
+  }, [loaded, shownTrailRunId]);
+  const libraryTrail = useMemo(() => {
+    const src = loaded != null ? loadedTrail : championTrail;
+    return src?.map((p) => ({ gen: p.gen, fitness: p.best_fitness }));
+  }, [loaded, loadedTrail, championTrail]);
+
   return (
     <PageTransition>
-      <div className="bf-theme min-h-[calc(100vh-57px)]">
-      <div className="p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto space-y-6 relative">
-        <FadeIn>
-          <div className="flex items-end justify-between gap-6">
-            <div>
-              <div className="flex items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-primary">
-                <span>RM 07</span>
-                <span className="text-muted-foreground/60">·</span>
-                <span>Genetic algorithm</span>
-              </div>
-              <h1 className="mt-1 font-mono text-2xl font-semibold tracking-tight text-foreground">
-                The Tape Lab
-              </h1>
-              <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-muted-foreground">
-                Every program here is a strip of punched tape — eight instructions,
-                a three-bit punch code. The GA splices and re-punches a population of
-                strips until one prints the target; the champion runs on the transport below.
-              </p>
-            </div>
-            {/* Masthead offcut — a real strip that prints "hi", the lab's hello. */}
-            <TapeStrip
-              gene="++++++++++[>++++++++++<-]>++++.+."
-              maxFrames={33}
-              height={26}
-              className="hidden shrink-0 -rotate-2 opacity-80 sm:block"
-            />
+      {/* The workbench: one viewport on desktop, no page scroll — the job
+          card, the transport, and the tape library each manage their own
+          space. Below lg the bench stacks and scrolls like a normal page. */}
+      <div className="bf-theme flex flex-col lg:h-[calc(100vh-57px)] lg:overflow-hidden">
+        <header className="flex shrink-0 items-center gap-3 border-b border-border/60 px-4 py-2">
+          <div className="flex items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-primary">
+            <span>RM 07</span>
+            <span className="text-muted-foreground/60">·</span>
           </div>
-        </FadeIn>
+          <h1 className="shrink-0 font-mono text-sm font-semibold tracking-tight text-foreground">
+            The Tape Lab
+          </h1>
+          <p className="hidden min-w-0 truncate text-[11px] text-muted-foreground md:block">
+            programs are strips of punched tape — the GA splices and re-punches them until one prints the target
+          </p>
+          {/* Masthead offcut — a real strip that prints "hi", the lab's hello. */}
+          <TapeStrip
+            gene="++++++++++[>++++++++++<-]>++++.+."
+            maxFrames={33}
+            height={16}
+            className="ml-auto hidden shrink-0 opacity-80 sm:block"
+          />
+        </header>
 
-        <FadeIn delay={0.03}>
-          <div className="flex items-center gap-1 border-b border-border/60">
-            {(
-              [
-                { id: 'run',       label: 'Run',       icon: Play },
-                { id: 'solutions', label: 'Solutions', icon: Sparkles },
-              ] as const
-            ).map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                onClick={() => setTab(id)}
-                className={`px-3 py-2 font-mono text-[11px] font-semibold uppercase tracking-[0.15em] flex items-center gap-1.5 border-b-2 -mb-px transition-colors ${
-                  tab === id
-                    ? 'border-primary text-primary'
-                    : 'border-transparent text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                {label}
-              </button>
-            ))}
-          </div>
-        </FadeIn>
+        <div className="grid flex-1 grid-cols-1 gap-3 p-3 lg:min-h-0 lg:grid-cols-[300px_minmax(0,1fr)_360px] xl:grid-cols-[310px_minmax(0,1fr)_410px]">
 
-        {tab === 'solutions' ? (
-          <SolutionsTab />
-        ) : (
-        <>
-
-        <FadeIn delay={0.05}>
-          <div className="rounded-lg bg-card border border-border/60 p-4 space-y-4">
-            <div>
+          {/* ── Job card: target + knobs + start ── */}
+          <FadeIn className="lg:min-h-0" delay={0}>
+          <aside className="flex h-full flex-col rounded-lg bg-card border border-border/60 lg:min-h-0">
+            <div className="shrink-0 p-3">
               <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
                 Target string
               </label>
@@ -899,7 +946,7 @@ export default function BrainfuckPage() {
               </div>
             </div>
 
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between shrink-0 px-3">
               <button
                 type="button"
                 onClick={() => setAdvanced((v) => !v)}
@@ -923,6 +970,8 @@ export default function BrainfuckPage() {
               )}
             </div>
 
+            {/* Knob bank — scrolls inside the card so the bench never grows. */}
+            <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-2">
             <AnimatePresence initial={false}>
               {advanced && (
                 <motion.div
@@ -955,7 +1004,7 @@ export default function BrainfuckPage() {
                           </span>
                           <div className="h-px flex-1 bg-foreground/10" />
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-3">
+                        <div className="grid grid-cols-1 gap-y-3">
                           {group.knobs.map((spec) => (
                             <KnobRow
                               key={spec.key}
@@ -973,281 +1022,338 @@ export default function BrainfuckPage() {
                 </motion.div>
               )}
             </AnimatePresence>
+            </div>
 
-            {error && (
-              <div className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-lg">{error}</div>
-            )}
+            <div className="shrink-0 space-y-2 border-t border-border/40 p-3">
+              {error && (
+                <div className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-lg">{error}</div>
+              )}
+              <button
+                onClick={start}
+                disabled={submitting || activeId != null || !target.trim()}
+                className="w-full px-4 py-2.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground font-medium flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {submitting ? <Loader className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                {activeId != null ? 'Run in progress…' : 'Start run'}
+              </button>
+            </div>
+          </aside>
+          </FadeIn>
 
-            <button
-              onClick={start}
-              disabled={submitting || activeId != null || !target.trim()}
-              className="w-full px-4 py-2.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground font-medium flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          {/* ── The transport: one machine, whatever tape is threaded ── */}
+          <FadeIn className="lg:min-h-0" delay={0.05}>
+          <section className="flex h-full flex-col gap-2 lg:min-h-0">
+            <div
+              className={`flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-3 py-2 font-mono text-[11px] ${
+                showingLive ? 'border-primary/30 bg-card' : 'border-border/60 bg-card'
+              }`}
             >
-              {submitting ? <Loader className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-              {activeId != null ? 'Run in progress…' : 'Start run'}
-            </button>
-          </div>
-        </FadeIn>
-
-        <AnimatePresence>
-          {active && (
-            <motion.div
-              key={active.id}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              className="rounded-lg bg-card border border-primary/30 p-4 space-y-3"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
+              {showingLive && active ? (
+                <>
                   {active.status === 'found' ? (
-                    <CheckCircle className="h-4 w-4 text-ok" />
+                    <CheckCircle className="h-3.5 w-3.5 shrink-0 text-ok" />
                   ) : (
-                    <Loader className="h-4 w-4 text-chart-4 animate-spin" />
+                    <Loader className="h-3.5 w-3.5 shrink-0 animate-spin text-chart-4" />
                   )}
-                  <span className="text-sm font-semibold">
-                    {active.status === 'found' ? 'Solved' : 'Active'} run #{active.id}
+                  <span className="font-semibold uppercase tracking-[0.12em] text-foreground">
+                    {active.status === 'found' ? 'Solved' : 'Live'} · run #{active.id}
                   </span>
-                  <span className="text-xs text-muted-foreground">
-                    target <span className="font-mono text-foreground/80">&quot;{active.target}&quot;</span>
+                  <span className="min-w-0 truncate text-muted-foreground">
+                    &quot;{active.target}&quot;
                   </span>
-                </div>
-                {active.status !== 'found' && (
-                  <button
-                    onClick={() => stop(active.id)}
-                    className="text-xs px-2 py-1 rounded bg-warn/10 text-warn hover:bg-warn/20 flex items-center gap-1"
-                  >
-                    <Square className="h-3 w-3" /> Stop
-                  </button>
-                )}
-              </div>
+                  <span className="text-muted-foreground tabular-nums">
+                    gen <span className="text-foreground">{active.generations.toLocaleString()}</span>
+                  </span>
+                  <span className="text-muted-foreground tabular-nums">
+                    fit <span className="text-foreground">{active.best_fitness ?? 0}/{targetFitness}</span>
+                  </span>
+                  <span className="text-muted-foreground tabular-nums">
+                    {fmtDuration(active.started_at, null)}
+                  </span>
+                  {active.status !== 'found' && (
+                    <button
+                      onClick={() => stop(active.id)}
+                      className="ml-auto flex items-center gap-1 rounded bg-warn/10 px-2 py-1 text-warn hover:bg-warn/20"
+                    >
+                      <Square className="h-3 w-3" /> Stop
+                    </button>
+                  )}
+                </>
+              ) : libraryTape ? (
+                <>
+                  <span className="shrink-0 text-primary">▤</span>
+                  <span className="font-semibold uppercase tracking-[0.12em] text-foreground">
+                    {loaded ? 'Loaded tape' : 'Last champion'}
+                  </span>
+                  <span className="text-muted-foreground">{libraryTape.label}</span>
+                  <span className="min-w-0 truncate text-muted-foreground">
+                    &quot;{libraryTape.target}&quot;
+                  </span>
+                  <span className="text-muted-foreground tabular-nums">{libraryTape.gene.length} ch</span>
+                  {effectiveActiveId != null && (
+                    <button
+                      onClick={returnToLive}
+                      className="ml-auto flex animate-pulse items-center gap-1.5 rounded bg-primary/10 px-2 py-1 text-primary hover:bg-primary/20"
+                    >
+                      <span className="text-[9px]">●</span> return to live run
+                    </button>
+                  )}
+                </>
+              ) : (
+                <span className="text-muted-foreground">
+                  transport idle — punch a target on the job card and start a run
+                </span>
+              )}
+            </div>
 
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <Stat label="Gen" value={active.generations.toLocaleString()} icon={<Hash className="h-3 w-3" />} />
-                <Stat
-                  label="Fitness"
-                  value={`${active.best_fitness ?? 0}/${targetFitness}`}
-                  icon={<Zap className="h-3 w-3" />}
-                />
-                <Stat
-                  label="Elapsed"
-                  value={fmtDuration(active.started_at, null)}
-                  icon={<Clock className="h-3 w-3" />}
-                />
-              </div>
-
-              <div className="h-1.5 bg-muted/60 rounded-full overflow-hidden">
+            {showingLive && active && (
+              <div className="h-1 shrink-0 overflow-hidden rounded-full bg-muted/60">
                 <motion.div
-                  className="h-full bg-primary rounded-full"
+                  className="h-full rounded-full bg-primary"
                   animate={{ width: `${fitnessPercent(active.target, active.best_fitness) * 100}%` }}
                   transition={{ duration: 0.4 }}
                 />
               </div>
+            )}
 
-              {displayedGene ? (
+            {/* Fixed height below lg — a percentage-height canvas inside an
+                auto-height flex chain feeds back into itself and never
+                stabilizes. Desktop gets the definite viewport chain. */}
+            <div className="h-[460px] lg:h-auto lg:min-h-0 lg:flex-1">
+              {showingLive ? (
+                displayedGene ? (
+                  <BrainfuckAnimator
+                    gene={displayedGene}
+                    target={active?.target}
+                    fitnessTrail={animatorTrail}
+                    targetFitness={targetFitness}
+                    stampLabel={
+                      active
+                        ? `gen ${active.generations.toLocaleString()} · ${active.best_fitness ?? 0}/${targetFitness}`
+                        : null
+                    }
+                    pendingGene={latestGeneRef.current}
+                    pendingLabel={
+                      latestGeneRef.current && latestGeneRef.current !== displayedGene && active
+                        ? `gen ${active.generations}`
+                        : undefined
+                    }
+                    fill
+                    fullscreenable
+                    onCycleEnd={onAnimatorCycleEnd}
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center rounded-lg bg-background/40 border border-border/40 text-sm text-muted-foreground">
+                    Waiting for the first tape to feed in…
+                  </div>
+                )
+              ) : libraryTape ? (
                 <BrainfuckAnimator
-                  gene={displayedGene}
-                  target={active.target}
-                  fitnessTrail={animatorTrail}
-                  targetFitness={targetFitness}
-                  stampLabel={`gen ${active.generations.toLocaleString()} · ${active.best_fitness ?? 0}/${targetFitness}`}
-                  pendingGene={latestGeneRef.current}
-                  pendingLabel={
-                    latestGeneRef.current && latestGeneRef.current !== displayedGene
-                      ? `gen ${active.generations}`
-                      : undefined
-                  }
-                  height={420}
+                  gene={libraryTape.gene}
+                  target={libraryTape.target}
+                  fitnessTrail={libraryTrail}
+                  targetFitness={256 * libraryTape.target.length}
+                  fill
                   fullscreenable
-                  onCycleEnd={onAnimatorCycleEnd}
                 />
               ) : (
-                <div className="rounded-lg bg-background/40 border border-border/40 h-[420px] flex items-center justify-center text-muted-foreground text-sm">
-                  Waiting for the first tape to feed in…
+                <div className="flex h-full flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border/60 bg-background/30 text-sm text-muted-foreground">
+                  <TapeStrip gene=",,,,,,,,,,,,,,,," maxFrames={16} height={22} className="opacity-50" />
+                  No tapes in the lab yet — the transport will thread the first run automatically.
+                </div>
+              )}
+            </div>
+
+            <ActivityLog entries={activity} />
+          </section>
+          </FadeIn>
+
+          {/* ── Tape library: history, solved tapes, bench, reference ── */}
+          <FadeIn className="lg:min-h-0" delay={0.1}>
+          <aside className="flex h-[560px] flex-col rounded-lg bg-card border border-border/60 lg:h-full lg:min-h-0">
+            <div className="flex shrink-0 items-center border-b border-border/60 px-2">
+              {(
+                [
+                  { id: 'history',   label: 'History' },
+                  { id: 'solutions', label: 'Solutions' },
+                  { id: 'bench',     label: 'Bench' },
+                  { id: 'ref',       label: 'Ref' },
+                ] as const
+              ).map(({ id, label }) => (
+                <button
+                  key={id}
+                  onClick={() => setLibTab(id)}
+                  className={`-mb-px border-b-2 px-2.5 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.15em] transition-colors ${
+                    libTab === id
+                      ? 'border-primary text-primary'
+                      : 'border-transparent text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+              <span className="ml-auto pr-1 font-mono text-[10px] tabular-nums text-muted-foreground">
+                {libTab === 'history'
+                  ? `${history.length} run${history.length === 1 ? '' : 's'}`
+                  : libTab === 'bench'
+                    ? `${benchmarks.length} row${benchmarks.length === 1 ? '' : 's'}`
+                    : ''}
+              </span>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-2">
+              {libTab === 'history' && (
+                history.length === 0 ? (
+                  <div className="py-8 text-center text-sm text-muted-foreground">
+                    No previous runs. Punch one on the job card.
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-1">
+                      {history
+                        .slice(
+                          Math.min(historyPage, Math.max(0, Math.ceil(history.length / historyPerPage) - 1)) * historyPerPage,
+                          Math.min(historyPage, Math.max(0, Math.ceil(history.length / historyPerPage) - 1)) * historyPerPage + historyPerPage,
+                        )
+                        .map((r) => (
+                        <HistoryRow
+                          key={r.id}
+                          run={r}
+                          open={expanded === r.id}
+                          isThreaded={loaded?.runId === r.id}
+                          onToggle={() => {
+                            setExpanded((cur) => (cur === r.id ? null : r.id));
+                            // Opening a run threads its champion tape into
+                            // the transport — the row itself stays compact.
+                            if (r.best_gene) {
+                              loadTape({
+                                gene: r.best_gene,
+                                target: r.target,
+                                label: `run #${r.id} · ${statusBadge(r.status).label.toLowerCase()}`,
+                                runId: r.id,
+                              });
+                            }
+                          }}
+                          onDelete={() => remove(r.id)}
+                          onCopyConfig={(cfg) => beginCopyConfig(r.id, cfg)}
+                          copyArmed={pendingCopy?.runId === r.id}
+                        />
+                      ))}
+                    </div>
+                    <Pagination
+                      page={historyPage}
+                      perPage={historyPerPage}
+                      total={history.length}
+                      onPageChange={setHistoryPage}
+                      onPerPageChange={(n) => { setHistoryPerPage(n); setHistoryPage(0); }}
+                    />
+                  </>
+                )
+              )}
+
+              {libTab === 'solutions' && (
+                <SolutionsPanel onLoad={loadTape} loadedGene={loaded?.gene ?? null} />
+              )}
+
+              {libTab === 'bench' && (
+                <div className="space-y-3">
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Timed silent suite for raw GA throughput — each click sweeps a
+                    fixed set of configs, auto-tagged with the current BF repo commit.
+                  </p>
+
+                  <div className="rounded-lg bg-background/40 border border-border/40 px-3 py-2 space-y-1">
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+                      Configs in each batch
+                    </div>
+                    <div className="font-mono text-[11px] text-foreground/70 space-y-0.5">
+                      {benchPreset.length === 0 ? (
+                        <span className="italic text-muted-foreground">loading…</span>
+                      ) : (
+                        benchPreset.map((c, i) => (
+                          <div key={i}>
+                            <span className="text-primary">{i + 1}.</span>{' '}
+                            target <span className="text-foreground/90">&quot;{c.target}&quot;</span>
+                            {' · '}pop <span className="text-foreground/90">{c.popSize}</span>
+                            {' · '}gens <span className="text-foreground/90">{c.maxGen}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-end gap-2">
+                    <div className="min-w-0 flex-1">
+                      <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+                        Label (optional)
+                      </label>
+                      <input
+                        type="text"
+                        value={benchLabel}
+                        onChange={(e) => setBenchLabel(e.target.value)}
+                        disabled={benchSubmitting || activeBenchId != null}
+                        maxLength={64}
+                        placeholder="e.g. init, trim-dead"
+                        className="mt-1 w-full px-2.5 py-1.5 rounded-lg bg-background border border-border/60 text-sm focus:border-primary/60 focus:outline-none disabled:opacity-50"
+                      />
+                    </div>
+                    {activeBenchId != null ? (
+                      <button
+                        onClick={() => stopBenchmarkApi(activeBenchId)}
+                        className="flex shrink-0 items-center gap-1.5 rounded-lg bg-warn/10 px-3 py-1.5 text-sm text-warn hover:bg-warn/20"
+                      >
+                        <Loader className="h-3.5 w-3.5 animate-spin" /> Stop #{activeBenchId}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={startBenchmark}
+                        disabled={benchSubmitting || activeId != null}
+                        className="flex shrink-0 items-center gap-1.5 rounded-lg bg-primary/90 px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+                        title={activeId != null ? 'Stop the active run first' : undefined}
+                      >
+                        {benchSubmitting ? <Loader className="h-3.5 w-3.5 animate-spin" /> : <Gauge className="h-3.5 w-3.5" />}
+                        Run
+                      </button>
+                    )}
+                  </div>
+
+                  {benchError && (
+                    <div className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-lg">{benchError}</div>
+                  )}
+
+                  {benchmarks.length > 0 && (() => {
+                    const groups = groupBenchmarksByBatch(benchmarks);
+                    const totalPages = Math.max(1, Math.ceil(groups.length / benchPerPage));
+                    const safePage = Math.min(benchPage, totalPages - 1);
+                    const start = safePage * benchPerPage;
+                    const visible = groups.slice(start, start + benchPerPage);
+                    return (
+                      <div className="space-y-3">
+                        {visible.map((group) => (
+                          <BenchmarkBatchCard
+                            key={group.key}
+                            group={group}
+                            onDelete={(id) => deleteBenchmark(id)}
+                          />
+                        ))}
+                        <Pagination
+                          page={benchPage}
+                          perPage={benchPerPage}
+                          total={groups.length}
+                          onPageChange={setBenchPage}
+                          onPerPageChange={(n) => { setBenchPerPage(n); setBenchPage(0); }}
+                        />
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 
-              <ActivityLog entries={activity} />
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <FadeIn delay={0.1}>
-          <div className="rounded-lg bg-card border border-border/60 p-4">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="font-mono text-[11px] font-semibold uppercase tracking-[0.15em] flex items-center gap-2">
-                <Target className="h-4 w-4 text-primary" />
-                History
-              </h2>
-              <span className="text-xs text-muted-foreground">{history.length} run{history.length === 1 ? '' : 's'}</span>
+              {libTab === 'ref' && <BFReference />}
             </div>
-
-            {history.length === 0 ? (
-              <div className="text-sm text-muted-foreground text-center py-6">
-                No previous runs. Start one above.
-              </div>
-            ) : (
-              <>
-                <div className="space-y-1">
-                  {history
-                    .slice(
-                      Math.min(historyPage, Math.max(0, Math.ceil(history.length / historyPerPage) - 1)) * historyPerPage,
-                      Math.min(historyPage, Math.max(0, Math.ceil(history.length / historyPerPage) - 1)) * historyPerPage + historyPerPage,
-                    )
-                    .map((r) => (
-                    <HistoryRow
-                      key={r.id}
-                      run={r}
-                      open={expanded === r.id}
-                      onToggle={() => setExpanded((cur) => (cur === r.id ? null : r.id))}
-                      onDelete={() => remove(r.id)}
-                      onCopyConfig={(cfg) => beginCopyConfig(r.id, cfg)}
-                      copyArmed={pendingCopy?.runId === r.id}
-                    />
-                  ))}
-                </div>
-                <Pagination
-                  page={historyPage}
-                  perPage={historyPerPage}
-                  total={history.length}
-                  onPageChange={setHistoryPage}
-                  onPerPageChange={(n) => { setHistoryPerPage(n); setHistoryPage(0); }}
-                />
-              </>
-            )}
-          </div>
-        </FadeIn>
-
-        <FadeIn delay={0.15}>
-          <div className="rounded-lg bg-card border border-border/60 p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <h2 className="font-mono text-[11px] font-semibold uppercase tracking-[0.15em] flex items-center gap-2">
-                <Gauge className="h-4 w-4 text-primary" />
-                Benchmarks
-              </h2>
-              <span className="text-xs text-muted-foreground">{benchmarks.length} row{benchmarks.length === 1 ? '' : 's'}</span>
-            </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed -mt-1">
-              Timed silent suite for measuring raw GA throughput. Each click sweeps a fixed
-              set of configs (short → longer targets, varying pop/gens) so we capture
-              throughput at multiple operating points. Auto-tagged with the current BF repo
-              commit so versions are comparable.
-            </p>
-
-            <div className="rounded-lg bg-background/40 border border-border/40 px-3 py-2 space-y-1">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                Configs in each batch
-              </div>
-              <div className="font-mono text-[11px] text-foreground/70 space-y-0.5">
-                {benchPreset.length === 0 ? (
-                  <span className="italic text-muted-foreground">loading…</span>
-                ) : (
-                  benchPreset.map((c, i) => (
-                    <div key={i}>
-                      <span className="text-primary">{i + 1}.</span>{' '}
-                      target <span className="text-foreground/90">&quot;{c.target}&quot;</span>
-                      {' · '}pop <span className="text-foreground/90">{c.popSize}</span>
-                      {' · '}gens <span className="text-foreground/90">{c.maxGen}</span>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            <div>
-              <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                Label (optional)
-              </label>
-              <input
-                type="text"
-                value={benchLabel}
-                onChange={(e) => setBenchLabel(e.target.value)}
-                disabled={benchSubmitting || activeBenchId != null}
-                maxLength={64}
-                placeholder="e.g. init, trim-dead"
-                className="mt-1 w-full px-2.5 py-1.5 rounded-lg bg-background border border-border/60 text-sm focus:border-primary/60 focus:outline-none disabled:opacity-50"
-              />
-            </div>
-
-            {benchError && (
-              <div className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-lg">{benchError}</div>
-            )}
-
-            {activeBenchId != null ? (
-              <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-primary/10 border border-primary/30">
-                <div className="flex items-center gap-2 text-sm text-primary">
-                  <Loader className="h-4 w-4 animate-spin" />
-                  Benchmark #{activeBenchId} running…
-                </div>
-                <button
-                  onClick={() => stopBenchmarkApi(activeBenchId)}
-                  className="text-xs px-2 py-1 rounded bg-warn/10 text-warn hover:bg-warn/20 flex items-center gap-1"
-                >
-                  <Square className="h-3 w-3" /> Stop
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={startBenchmark}
-                disabled={benchSubmitting || activeId != null}
-                className="w-full px-4 py-2 rounded-lg bg-primary/90 hover:bg-primary text-primary-foreground text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                title={activeId != null ? 'Stop the active run first' : undefined}
-              >
-                {benchSubmitting ? <Loader className="h-4 w-4 animate-spin" /> : <Gauge className="h-4 w-4" />}
-                Run benchmark
-              </button>
-            )}
-
-            {benchmarks.length > 0 && (() => {
-              const groups = groupBenchmarksByBatch(benchmarks);
-              const totalPages = Math.max(1, Math.ceil(groups.length / benchPerPage));
-              const safePage = Math.min(benchPage, totalPages - 1);
-              const start = safePage * benchPerPage;
-              const visible = groups.slice(start, start + benchPerPage);
-              return (
-                <div className="pt-2 space-y-3">
-                  {visible.map((group) => (
-                    <BenchmarkBatchCard
-                      key={group.key}
-                      group={group}
-                      onDelete={(id) => deleteBenchmark(id)}
-                    />
-                  ))}
-                  <Pagination
-                    page={benchPage}
-                    perPage={benchPerPage}
-                    total={groups.length}
-                    onPageChange={setBenchPage}
-                    onPerPageChange={(n) => { setBenchPerPage(n); setBenchPage(0); }}
-                  />
-                </div>
-              );
-            })()}
-          </div>
-        </FadeIn>
-
-        </>
-        )}
-
-        {/*
-          Reference panel lives in the right slack area beside the centered
-          main content. Absolutely positioned so main stays exactly where it
-          was, with a width that caps based on the available slack to prevent
-          horizontal scroll on any viewport size. Inner sticky div keeps it in
-          view while the user scrolls the main column.
-        */}
-        <aside
-          className="hidden absolute top-0 pointer-events-auto min-[1500px]:block"
-          style={{
-            left: 'calc(100% + 1.5rem)',
-            width: 'min(18rem, calc(50vw - 32rem - 2.5rem))',
-          }}
-        >
-          <div className="sticky top-4 max-h-[calc(100vh-2rem)] overflow-y-auto pr-1">
-            <BFReference />
-          </div>
-        </aside>
-      </div>
+          </aside>
+          </FadeIn>
+        </div>
       </div>
     </PageTransition>
   );
@@ -1767,8 +1873,13 @@ function PresetSlots({
           </button>
         </span>
       ) : (
-        <span className="text-[9px] text-muted-foreground/50 hidden sm:inline">
-          click load · dbl-click save · right-click clear
+        // Slot semantics live in each slot's tooltip — an inline hint has no
+        // room in the job card's narrow column.
+        <span
+          className="cursor-help text-[10px] text-muted-foreground/50"
+          title="click to load · double-click to save · right-click to clear"
+        >
+          ?
         </span>
       )}
     </div>
@@ -1972,10 +2083,13 @@ function ActivityLog({ entries }: { entries: ActivityEntry[] }) {
 }
 
 function HistoryRow({
-  run, open, onToggle, onDelete, onCopyConfig, copyArmed,
+  run, open, isThreaded, onToggle, onDelete, onCopyConfig, copyArmed,
 }: {
   run: Run;
   open: boolean;
+  // True when this run's tape is the one threaded into the transport —
+  // the row carries a stamp-ink edge so you can see what's playing.
+  isThreaded: boolean;
   onToggle: () => void;
   onDelete: () => void;
   onCopyConfig: (cfg: GAConfig) => void;
@@ -1985,29 +2099,10 @@ function HistoryRow({
 }) {
   const badge = statusBadge(run.status);
   const pct = fitnessPercent(run.target, run.best_fitness);
-  const [trail, setTrail] = useState<ProgressPoint[] | null>(null);
   // Gold standard: solved AND halted naturally before MAX_OPS AND output is
   // an exact match (no trailing junk). Rare across runs — celebrate it.
   const isPerfect =
     run.status === 'found' && run.halted === true && run.output_exact_match === true;
-
-  // Stable reference for the animator — otherwise every parent re-render
-  // (every 1s while a run polls) hands BrainfuckAnimator a new array and
-  // its rAF effect cycles needlessly.
-  const animatorTrail = useMemo(
-    () => trail?.map((p) => ({ gen: p.gen, fitness: p.best_fitness })),
-    [trail],
-  );
-
-  useEffect(() => {
-    if (!open || trail !== null) return;
-    let alive = true;
-    fetch(`/api/brainfuck/runs/${run.id}`, { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((d) => { if (alive) setTrail(d.progress ?? []); })
-      .catch(() => { if (alive) setTrail([]); });
-    return () => { alive = false; };
-  }, [open, run.id, trail]);
 
   return (
     <motion.div
@@ -2015,7 +2110,7 @@ function HistoryRow({
         isPerfect
           ? 'bg-warn/[0.04] border-warn/60'
           : 'bg-background/30 border-border/30'
-      }`}
+      } ${isThreaded ? 'border-l-2 border-l-primary' : ''}`}
       animate={isPerfect ? {
         boxShadow: [
           '0 0 0 0 rgba(196,150,42,0)',
@@ -2027,16 +2122,17 @@ function HistoryRow({
     >
       <button
         onClick={onToggle}
-        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-background/50 transition-colors text-left"
+        title={run.best_gene ? 'Thread this run’s best tape into the transport' : undefined}
+        className="w-full flex items-center gap-2 px-2.5 py-2 hover:bg-background/50 transition-colors text-left"
       >
-        {open ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
-        <span className={`font-mono text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${badge.color} flex items-center gap-1`}>
+        {open ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+        <span className={`font-mono text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${badge.color} flex items-center gap-1 shrink-0`}>
           <badge.Icon className={`h-3 w-3 ${run.status === 'running' ? 'animate-spin' : ''}`} />
           {badge.label}
         </span>
         {isPerfect && (
           <motion.span
-            className="text-warn"
+            className="shrink-0 text-warn"
             title="Gold standard: solved, halted, exact-match output"
             animate={{ rotate: [0, 8, -8, 0], scale: [1, 1.15, 1] }}
             transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
@@ -2045,14 +2141,11 @@ function HistoryRow({
           </motion.span>
         )}
         <span className="font-mono text-sm flex-1 truncate">&quot;{run.target}&quot;</span>
-        <span className="text-xs text-muted-foreground tabular-nums">
+        <span className="text-xs text-muted-foreground tabular-nums shrink-0">
           {run.generations.toLocaleString()} gen
         </span>
-        <span className="text-xs text-muted-foreground tabular-nums">
+        <span className="text-xs text-muted-foreground tabular-nums shrink-0">
           {Math.round(pct * 100)}%
-        </span>
-        <span className="text-xs text-muted-foreground tabular-nums hidden sm:inline">
-          {fmtTime(run.started_at)}
         </span>
       </button>
       <AnimatePresence initial={false}>
@@ -2064,24 +2157,18 @@ function HistoryRow({
             transition={{ duration: 0.18 }}
             className="overflow-hidden"
           >
-            <div className="px-3 pb-3 pt-1 space-y-2 text-xs">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+            <div className="px-2.5 pb-2.5 pt-1 space-y-2 text-xs">
+              <div className="grid grid-cols-2 gap-2 text-center">
                 <Stat label="Fitness" value={`${run.best_fitness ?? 0}/${256 * run.target.length}`} />
                 <Stat label="Pop" value={run.pop_size.toString()} />
                 <Stat label="Max gen" value={run.max_generations.toLocaleString()} />
                 <Stat label="Elapsed" value={fmtDuration(run.started_at, run.completed_at)} />
               </div>
+              <div className="text-[10px] text-muted-foreground">
+                started {fmtTime(run.started_at)}
+                {run.best_gene && <span> · tape on the transport ◂</span>}
+              </div>
               {run.config_json && <ConfigSummary cfg={run.config_json} />}
-              {run.best_gene && (
-                <BrainfuckAnimator
-                  gene={run.best_gene}
-                  target={run.target}
-                  fitnessTrail={animatorTrail}
-                  targetFitness={256 * run.target.length}
-                  height={240}
-                  compact
-                />
-              )}
               {run.error && (
                 <div className="text-destructive bg-destructive/10 rounded px-2 py-1.5 break-all">
                   {run.error}
@@ -2157,11 +2244,20 @@ interface Solution {
   times_found: number;
 }
 
-function SolutionsTab() {
+// The solved-tape drawer of the library. Targets are folders; each solution
+// inside is a physical strip you can thread straight into the transport —
+// the strip itself is the row, stats ride along, details unfold on demand.
+function SolutionsPanel({
+  onLoad, loadedGene,
+}: {
+  onLoad: (tape: LoadedTape) => void;
+  loadedGene: string | null;
+}) {
   const [targets, setTargets] = useState<TargetRollup[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [solutions, setSolutions] = useState<Solution[]>([]);
   const [loading, setLoading] = useState(false);
+  const [openSolution, setOpenSolution] = useState<number | null>(null);
 
   const refreshTargets = useCallback(async () => {
     try {
@@ -2177,6 +2273,7 @@ function SolutionsTab() {
 
   const loadTarget = useCallback(async (t: string) => {
     setSelected(t);
+    setOpenSolution(null);
     setLoading(true);
     try {
       const res = await fetch(`/api/brainfuck/solutions?target=${encodeURIComponent(t)}`, {
@@ -2192,64 +2289,66 @@ function SolutionsTab() {
   }, []);
 
   return (
-    <FadeIn delay={0.05}>
-      <div className="rounded-lg bg-card border border-border/60 p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="font-mono text-[11px] font-semibold uppercase tracking-[0.15em] flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-primary" />
-            Solved targets
-          </h2>
-          <span className="text-xs text-muted-foreground">
-            {targets.length} target{targets.length === 1 ? '' : 's'}
-          </span>
-        </div>
-        <p className="text-[11px] text-muted-foreground leading-relaxed">
-          Every program that has ever printed its target gets archived here, deduped
-          by (target, gene). Click a target to compare the different shapes of
-          solution found across runs.
-        </p>
+    <div className="space-y-2">
+      <p className="text-[11px] text-muted-foreground leading-relaxed">
+        Every program that ever printed its target, deduped by (target, gene).
+        Click a strip to thread it into the transport.
+      </p>
 
-        {targets.length === 0 ? (
-          <div className="text-sm text-muted-foreground text-center py-8">
-            No solved targets yet. Start a run that finds one and it will appear here.
-          </div>
-        ) : (
-          <div className="space-y-1">
-            {targets.map((t) => (
-              <TargetRow
-                key={t.target}
-                row={t}
-                open={selected === t.target}
-                solutions={selected === t.target ? solutions : []}
-                loading={selected === t.target && loading}
-                onToggle={() => {
-                  if (selected === t.target) {
-                    setSelected(null);
-                    setSolutions([]);
-                  } else {
-                    loadTarget(t.target);
-                  }
-                }}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    </FadeIn>
+      {targets.length === 0 ? (
+        <div className="py-8 text-center text-sm text-muted-foreground">
+          No solved targets yet. Start a run that finds one and it will appear here.
+        </div>
+      ) : (
+        <div className="space-y-1">
+          {targets.map((t) => (
+            <TargetRow
+              key={t.target}
+              row={t}
+              open={selected === t.target}
+              solutions={selected === t.target ? solutions : []}
+              loading={selected === t.target && loading}
+              onToggle={() => {
+                if (selected === t.target) {
+                  setSelected(null);
+                  setSolutions([]);
+                } else {
+                  loadTarget(t.target);
+                }
+              }}
+              openSolution={openSolution}
+              onToggleSolution={(sol) => {
+                setOpenSolution((cur) => (cur === sol.id ? null : sol.id));
+                onLoad({
+                  gene: sol.gene,
+                  target: sol.target,
+                  label: `solution #${sol.id}${sol.run_id != null ? ` · run #${sol.run_id}` : ''}`,
+                  runId: sol.run_id,
+                });
+              }}
+              loadedGene={loadedGene}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
 function TargetRow({
-  row, open, solutions, loading, onToggle,
+  row, open, solutions, loading, onToggle, openSolution, onToggleSolution, loadedGene,
 }: {
   row: TargetRollup;
   open: boolean;
   solutions: Solution[];
   loading: boolean;
   onToggle: () => void;
+  openSolution: number | null;
+  onToggleSolution: (sol: Solution) => void;
+  loadedGene: string | null;
 }) {
   // At least one solution that's both halted and exact-match → target row
-  // gets the gold flair too. Doesn't pulse as strong as the per-card glow,
+  // gets the gold flair too. Doesn't pulse as strong as the per-strip glow,
   // since not every solution underneath is necessarily gold.
   const hasGold = row.gold_count > 0;
   return (
@@ -2268,7 +2367,7 @@ function TargetRow({
     >
       <button
         onClick={onToggle}
-        className="w-full px-3 py-2 flex items-center gap-3 hover:bg-foreground/5 transition-colors text-left"
+        className="w-full px-2.5 py-2 flex items-center gap-2 hover:bg-foreground/5 transition-colors text-left"
       >
         {open ? <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
               : <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />}
@@ -2285,7 +2384,7 @@ function TargetRow({
         <span className="font-mono text-sm text-foreground/90 truncate">
           &quot;{row.target}&quot;
         </span>
-        <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground tabular-nums shrink-0">
+        <div className="ml-auto flex items-center gap-2.5 text-[11px] text-muted-foreground tabular-nums shrink-0">
           <span title="Distinct (target,gene) solutions">
             <span className="text-foreground/80">{row.solution_count}</span>
             {' '}shape{row.solution_count === 1 ? '' : 's'}
@@ -2298,23 +2397,25 @@ function TargetRow({
           <span title="Shortest gene length">
             min <span className="text-foreground/80">{row.shortest_gene}</span> ch
           </span>
-          <span title="Fastest ops_executed (lower = tighter program)">
-            min <span className="text-foreground/80">{row.fastest_ops.toLocaleString()}</span> ops
-          </span>
-          <span title="Solutions that halt naturally before MAX_OPS">
-            <span className="text-foreground/80">{row.halting_count}</span>/{row.solution_count} halt
-          </span>
         </div>
       </button>
       {open && (
-        <div className="border-t border-border/40 px-3 py-3 bg-background/30">
+        <div className="border-t border-border/40 px-2 py-2 bg-background/30">
           {loading ? (
             <div className="text-xs text-muted-foreground py-4 text-center">Loading…</div>
           ) : solutions.length === 0 ? (
             <div className="text-xs text-muted-foreground py-4 text-center">No solutions.</div>
           ) : (
-            <div className="space-y-2">
-              {solutions.map((s) => <SolutionCard key={s.id} sol={s} />)}
+            <div className="space-y-1.5">
+              {solutions.map((s) => (
+                <SolutionRow
+                  key={s.id}
+                  sol={s}
+                  open={openSolution === s.id}
+                  isThreaded={loadedGene === s.gene}
+                  onToggle={() => onToggleSolution(s)}
+                />
+              ))}
             </div>
           )}
         </div>
@@ -2323,18 +2424,27 @@ function TargetRow({
   );
 }
 
-function SolutionCard({ sol }: { sol: Solution }) {
+// One archived tape. The collapsed row IS the strip — punch pattern first,
+// headline stats after; opening it unfolds the full measurement card.
+function SolutionRow({
+  sol, open, isThreaded, onToggle,
+}: {
+  sol: Solution;
+  open: boolean;
+  isThreaded: boolean;
+  onToggle: () => void;
+}) {
   // Same trifecta as the History gold-standard: halted naturally + output
   // matches target exactly. Solutions table only stores rows where the GA
   // declared a solve, so 'status=found' is implied and not re-checked.
   const isPerfect = sol.halted && sol.output_exact_match;
   return (
     <motion.div
-      className={`rounded-lg border p-3 space-y-2 ${
+      className={`rounded-lg border ${
         isPerfect
           ? 'border-warn/60 bg-warn/[0.04]'
           : 'border-border/40 bg-card/60'
-      }`}
+      } ${isThreaded ? 'border-l-2 border-l-primary' : ''}`}
       animate={isPerfect ? {
         boxShadow: [
           '0 0 0 0 rgba(196,150,42,0)',
@@ -2344,61 +2454,99 @@ function SolutionCard({ sol }: { sol: Solution }) {
       } : undefined}
       transition={isPerfect ? { duration: 3.2, repeat: Infinity, ease: 'easeInOut' } : undefined}
     >
-      {isPerfect && (
-        <div className="-mb-1">
-          <span className="bf-stamp text-warn">
-            <Sparkles className="h-3 w-3" />
-            gold standard
+      <button
+        onClick={onToggle}
+        title="Thread this tape into the transport"
+        className="w-full px-2.5 py-2 text-left hover:bg-foreground/5 transition-colors space-y-1"
+      >
+        <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1 overflow-hidden">
+            <TapeStrip gene={sol.gene} maxFrames={40} height={16} />
+          </div>
+          {isPerfect && (
+            <motion.span
+              className="shrink-0 text-warn"
+              title="Gold standard: halts + exact-match output"
+              animate={{ rotate: [0, 8, -8, 0], scale: [1, 1.15, 1] }}
+              transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+            </motion.span>
+          )}
+          <span className="shrink-0 font-mono text-[11px] tabular-nums text-foreground/85">
+            {sol.gene_length} ch
           </span>
         </div>
-      )}
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] tabular-nums">
-        <SolStat label="length"   value={`${sol.gene_length} ch`} />
-        <SolStat label="ops"      value={sol.ops_executed.toLocaleString()} />
-        <SolStat
-          label="halts"
-          value={sol.halted ? 'yes' : 'no'}
-          accent={sol.halted ? 'good' : 'warn'}
-          icon={sol.halted ? CheckCircle : InfinityIcon}
-        />
-        <SolStat
-          label="exact"
-          value={sol.output_exact_match ? 'yes' : 'trail'}
-          accent={sol.output_exact_match ? 'good' : 'neutral'}
-          title={sol.output_exact_match
-            ? 'output == target'
-            : 'output starts with target then prints more'}
-        />
-        <SolStat label="loops"      value={String(sol.loop_count)} />
-        <SolStat label="depth"      value={String(sol.max_loop_depth)} />
-        <SolStat label="cells"      value={String(sol.cells_used)} />
-        <SolStat label="alphabet"   value={`${sol.unique_instructions}/7`} title="distinct BF instructions used" />
-        <SolStat label="found×"     value={String(sol.times_found)} title="rediscovery count across runs" />
-        {sol.generations_to_solve != null && (
-          <SolStat label="gen"      value={sol.generations_to_solve.toLocaleString()} />
-        )}
-      </div>
-      <div className="overflow-hidden">
-        <TapeStrip gene={sol.gene} maxFrames={72} height={20} />
-      </div>
-      <div className="font-mono text-[11px] break-all bg-background/60 rounded px-2 py-1.5 text-foreground/85">
-        {sol.gene}
-      </div>
-      {!sol.output_exact_match && (
-        <div className="font-mono text-[10px] text-muted-foreground">
-          out: <span className="text-foreground/70">{truncateWithEllipsis(sol.output, 96)}</span>
-        </div>
-      )}
-      <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-        {sol.run_id != null && <span>run #{sol.run_id}</span>}
-        {sol.bf_version_hash && (
-          <span className="flex items-center gap-1">
-            <GitCommit className="h-2.5 w-2.5" />
-            {sol.bf_version_hash}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-[10px] tabular-nums text-muted-foreground">
+          <span>{sol.ops_executed.toLocaleString()} ops</span>
+          <span className={sol.halted ? 'text-ok' : 'text-warn'}>
+            {sol.halted ? 'halts' : 'runs on'}
           </span>
+          <span className={sol.output_exact_match ? 'text-ok' : ''}>
+            {sol.output_exact_match ? 'exact' : 'trailing output'}
+          </span>
+          {sol.generations_to_solve != null && <span>gen {sol.generations_to_solve.toLocaleString()}</span>}
+          {sol.times_found > 1 && <span>found ×{sol.times_found}</span>}
+        </div>
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="overflow-hidden"
+          >
+            <div className="space-y-2 border-t border-border/40 px-2.5 pb-2.5 pt-2">
+              {isPerfect && (
+                <span className="bf-stamp text-warn">
+                  <Sparkles className="h-3 w-3" />
+                  gold standard
+                </span>
+              )}
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] tabular-nums">
+                <SolStat
+                  label="halts"
+                  value={sol.halted ? 'yes' : 'no'}
+                  accent={sol.halted ? 'good' : 'warn'}
+                  icon={sol.halted ? CheckCircle : InfinityIcon}
+                />
+                <SolStat
+                  label="exact"
+                  value={sol.output_exact_match ? 'yes' : 'trail'}
+                  accent={sol.output_exact_match ? 'good' : 'neutral'}
+                  title={sol.output_exact_match
+                    ? 'output == target'
+                    : 'output starts with target then prints more'}
+                />
+                <SolStat label="loops"    value={String(sol.loop_count)} />
+                <SolStat label="depth"    value={String(sol.max_loop_depth)} />
+                <SolStat label="cells"    value={String(sol.cells_used)} />
+                <SolStat label="alphabet" value={`${sol.unique_instructions}/7`} title="distinct BF instructions used" />
+              </div>
+              <div className="font-mono text-[11px] break-all bg-background/60 rounded px-2 py-1.5 text-foreground/85">
+                {sol.gene}
+              </div>
+              {!sol.output_exact_match && (
+                <div className="font-mono text-[10px] text-muted-foreground">
+                  out: <span className="text-foreground/70">{truncateWithEllipsis(sol.output, 96)}</span>
+                </div>
+              )}
+              <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                {sol.run_id != null && <span>run #{sol.run_id}</span>}
+                {sol.bf_version_hash && (
+                  <span className="flex items-center gap-1">
+                    <GitCommit className="h-2.5 w-2.5" />
+                    {sol.bf_version_hash}
+                  </span>
+                )}
+                <span className="ml-auto">first seen {fmtTime(sol.first_seen_at)}</span>
+              </div>
+            </div>
+          </motion.div>
         )}
-        <span className="ml-auto">first seen {fmtTime(sol.first_seen_at)}</span>
-      </div>
+      </AnimatePresence>
     </motion.div>
   );
 }
