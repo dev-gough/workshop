@@ -86,7 +86,7 @@ export function Noticeboard({ music, games, fetches, splitwiser, brainfuck }: {
     if (bf) {
       items.push({
         key: 'bf', ts: new Date(bf.completed_at).getTime(),
-        icon: Code2, color: '#e879f9',
+        icon: Code2, color: '#ef79d3',
         title: `${bf.status === 'found' ? 'Solved' : bf.status === 'stopped' ? 'Stopped' : 'Capped'} "${bf.target}"`,
         detail: `${bf.generations.toLocaleString()} generations`,
       });

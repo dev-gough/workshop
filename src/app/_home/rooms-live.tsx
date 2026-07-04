@@ -253,34 +253,80 @@ export function ChallengesRoom({ challenges, games, className }: {
   );
 }
 
-// ── 07 · BrainFuck — fuchsia terminal ──
+// ── 07 · BrainFuck — the tape lab's transport window in miniature ──
+// A strip of punched tape (BF's 3-bit punch code — this strip really prints
+// "hi") running under the magenta read head, with the latest run's stats
+// printed along the bench. Colors are the transport's own, hardcoded like
+// every tile diorama.
+
+const BF_TILE_PUNCH: Record<string, number> = {
+  ',': 0, '>': 1, '<': 2, '+': 3, '-': 4, '.': 5, '[': 6, ']': 7,
+};
+const BF_TILE_GENE = '++++++++++[>++++++++++<-]>++++.+.'; // prints "hi"
+
+function TileTape() {
+  const cellW = 8;
+  const h = 24;
+  const frames = BF_TILE_GENE.length;
+  const w = frames * cellW;
+  const rowGap = h / 4.6;
+  const holes: React.ReactNode[] = [];
+  for (let i = 0; i < frames; i++) {
+    const code = BF_TILE_PUNCH[BF_TILE_GENE[i]] ?? 0;
+    const cx = (i + 0.5) * cellW;
+    for (let bit = 0; bit < 3; bit++) {
+      const punched = (code >> (2 - bit)) & 1;
+      holes.push(
+        <circle key={`${i}-${bit}`} cx={cx} cy={rowGap * (bit + 0.9)}
+          r={punched ? 2 : 0.9} fill={punched ? '#151009' : 'rgba(58,44,30,0.18)'} />,
+      );
+    }
+    holes.push(<circle key={`${i}-s`} cx={cx} cy={rowGap * 3.9} r={0.9} fill="#151009" />);
+  }
+  return (
+    <svg
+      viewBox={`0 0 ${w} ${h}`}
+      className="w-full"
+      height={h}
+      preserveAspectRatio="xMidYMid slice"
+      aria-hidden
+    >
+      <rect x="0" y="0" width={w} height={h} rx="1.5" fill="#e4d6b2" />
+      {holes}
+      {/* read head clamped mid-strip */}
+      <rect x={w * 0.42} y="-2" width={cellW} height={h + 4} fill="rgba(239,121,211,0.18)"
+        stroke="#ef79d3" strokeWidth="1" />
+    </svg>
+  );
+}
 
 export function BrainfuckRoom({ brainfuck, className }: { brainfuck: BfRun[]; className?: string }) {
   const run = brainfuck[0];
   const statusColor =
-    run?.status === 'found' ? 'text-fuchsia-400' :
-    run?.status === 'stopped' ? 'text-amber-400' :
-    run?.status === 'failed' ? 'text-red-400' : 'text-zinc-400';
+    run?.status === 'found' ? 'text-[#93d8a4]' :
+    run?.status === 'stopped' ? 'text-[#eebc62]' :
+    run?.status === 'failed' ? 'text-[#e57f6b]' : 'text-[#a89a7d]';
   const statusWord =
     run?.status === 'found' ? 'solved' :
     run?.status === 'stopped' ? 'stopped' :
     run?.status === 'failed' ? 'failed' : run?.status ?? '';
 
   return (
-    <Door href="/projects/brainfuck" number="RM 07" room="BrainFuck Lab" className={className}>
-      <div className="flex h-full flex-col justify-center gap-1.5 bg-[#0d0813] p-4 pb-9 font-mono text-[11px] leading-relaxed">
-        <p className="truncate text-zinc-600">
-          <span className="text-fuchsia-500/80">$</span> bf-evolve --target <span className="text-zinc-400">&quot;{run?.target ?? 'hello world'}&quot;</span>
+    <Door href="/projects/brainfuck" number="RM 07" room="The Tape Lab" className={className}>
+      <div className="flex h-full flex-col justify-center gap-2 bg-[#151009] p-4 pb-9 font-mono text-[11px] leading-relaxed">
+        <p className="truncate text-[10px] uppercase tracking-[0.18em] text-[#ef79d3]/80">
+          target <span className="text-[#e4d6b2]/80 normal-case tracking-normal">&quot;{run?.target ?? 'hi'}&quot;</span>
         </p>
-        <p className="truncate text-zinc-700">++[&gt;+++&lt;-]&gt;+.-.&gt;++.[-]&lt;+.&gt;&gt;.+++.</p>
+        <TileTape />
         {run ? (
-          <p className="truncate">
+          <p className="truncate text-[#8d7f66]">
             <span className={statusColor}>{statusWord}</span>
-            <span className="text-zinc-500"> · gen {run.generations.toLocaleString()} · fitness {run.best_fitness ?? 0}/{256 * run.target.length}</span>
-            <span className="hall-blink ml-1 text-fuchsia-400">▊</span>
+            {' · '}gen {run.generations.toLocaleString()}
+            {' · '}fit {run.best_fitness ?? 0}/{256 * run.target.length}
+            <span className="hall-blink ml-1 text-[#ef79d3]">▊</span>
           </p>
         ) : (
-          <p className="text-zinc-600">awaiting first run<span className="hall-blink ml-1 text-fuchsia-400">▊</span></p>
+          <p className="text-[#8d7f66]">awaiting first tape<span className="hall-blink ml-1 text-[#ef79d3]">▊</span></p>
         )}
       </div>
     </Door>

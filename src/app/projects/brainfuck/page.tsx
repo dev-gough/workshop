@@ -5,11 +5,13 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Code2, Play, Square, Trash2, Loader, ChevronDown, ChevronRight, ChevronLeft,
   Target, Hash, Zap, CheckCircle, AlertTriangle, Clock, Gauge, GitCommit,
-  RotateCcw, Sparkles, Infinity as InfinityIcon, Copy, X,
+  RotateCcw, Sparkles, Infinity as InfinityIcon, Copy,
 } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
 import BrainfuckAnimator from '@/components/BrainfuckAnimator';
+import TapeStrip from '@/components/TapeStrip';
+import { useHeaderConfig } from '@/components/header-config';
 
 // ── GA config knobs ─────────────────────────────────────────────────────────
 // Mirror of the server-side DEFAULT_CONFIG / CONFIG_BOUNDS in lib/brainfuck.ts.
@@ -275,12 +277,13 @@ interface Run {
 
 interface ProgressPoint { gen: number; best_fitness: number; }
 
-// Diversity-mechanism activity surfaced live from the SSE stream. `kind`
-// distinguishes a population restart from an island migration; `detail` is a
-// short human-readable note (elites kept / island count).
+// Lab-log activity for the active run. Diversity events (restart/migration)
+// arrive on the SSE stream; 'best' entries are minted client-side whenever a
+// poll surfaces a higher best_fitness — the same improvements that trigger
+// the tape splice in the transport. `detail` is a short human-readable note.
 interface ActivityEntry {
   key: string;
-  kind: 'restart' | 'migration';
+  kind: 'restart' | 'migration' | 'best';
   gen: number;
   best_fitness: number;
   detail: string;
@@ -333,15 +336,15 @@ function fmtDuration(startISO: string, endISO: string | null): string {
 
 function statusBadge(status: string) {
   const map: Record<string, { color: string; label: string; Icon: React.ElementType }> = {
-    running:     { color: 'text-blue-400 bg-blue-400/10',       label: 'Running',     Icon: Loader },
-    found:       { color: 'text-emerald-400 bg-emerald-400/10', label: 'Solved',      Icon: CheckCircle },
-    done:        { color: 'text-zinc-400 bg-zinc-400/10',       label: 'Capped',      Icon: Clock },
-    stopped:     { color: 'text-amber-400 bg-amber-400/10',     label: 'Stopped',     Icon: Square },
-    failed:      { color: 'text-red-400 bg-red-400/10',         label: 'Failed',      Icon: AlertTriangle },
-    interrupted: { color: 'text-amber-400 bg-amber-400/10',     label: 'Interrupted', Icon: AlertTriangle },
-    superseded:  { color: 'text-zinc-400 bg-zinc-400/10',       label: 'Superseded',  Icon: Square },
+    running:     { color: 'text-chart-4 bg-chart-4/10',       label: 'Running',     Icon: Loader },
+    found:       { color: 'text-ok bg-ok/10', label: 'Solved',      Icon: CheckCircle },
+    done:        { color: 'text-muted-foreground bg-muted-foreground/10',       label: 'Capped',      Icon: Clock },
+    stopped:     { color: 'text-warn bg-warn/10',     label: 'Stopped',     Icon: Square },
+    failed:      { color: 'text-destructive bg-destructive/10',         label: 'Failed',      Icon: AlertTriangle },
+    interrupted: { color: 'text-warn bg-warn/10',     label: 'Interrupted', Icon: AlertTriangle },
+    superseded:  { color: 'text-muted-foreground bg-muted-foreground/10',       label: 'Superseded',  Icon: Square },
   };
-  return map[status] ?? { color: 'text-zinc-400 bg-zinc-400/10', label: status, Icon: Clock };
+  return map[status] ?? { color: 'text-muted-foreground bg-muted-foreground/10', label: status, Icon: Clock };
 }
 
 function fitnessPercent(target: string, fitness: number | null): number {
@@ -352,6 +355,7 @@ function fitnessPercent(target: string, fitness: number | null): number {
 }
 
 export default function BrainfuckPage() {
+  useHeaderConfig({ scopeClass: 'bf-theme' });
   const [runs, setRuns] = useState<Run[]>([]);
   // serverActiveIds: every run id the server reports as currently executing
   // (1 for solo runs, N for parallel races). The display "leader" — the run
@@ -487,6 +491,14 @@ export default function BrainfuckPage() {
           setDisplayedGene(newGene);
           lastForcedSwapAtRef.current = now;
         }
+        // Log the improvement — the same event the transport stamps.
+        const gen: number = data.run?.generations ?? 0;
+        const delta = newBest - lastBestFitnessRef.current;
+        const entry: ActivityEntry = {
+          key: `b-${newBest}`, kind: 'best', gen, best_fitness: newBest,
+          detail: `+${delta} fitness`,
+        };
+        setActivity((cur) => (cur[0]?.key === entry.key ? cur : [entry, ...cur].slice(0, 30)));
       }
       lastBestFitnessRef.current = newBest;
     } catch { /* leave previous state */ }
@@ -809,16 +821,32 @@ export default function BrainfuckPage() {
 
   return (
     <PageTransition>
+      <div className="bf-theme min-h-[calc(100vh-57px)]">
       <div className="p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto space-y-6 relative">
         <FadeIn>
-          <div className="flex items-center gap-3">
-            <Code2 className="h-7 w-7 text-fuchsia-400" />
+          <div className="flex items-end justify-between gap-6">
             <div>
-              <h1 className="text-2xl font-semibold text-foreground">BrainFuck Genetic Algorithm</h1>
-              <p className="text-sm text-muted-foreground">
-                Evolve a BrainFuck program that prints a target string. Watch the best gene execute as a Turing machine — instructions, tape, output.
+              <div className="flex items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-primary">
+                <span>RM 07</span>
+                <span className="text-muted-foreground/60">·</span>
+                <span>Genetic algorithm</span>
+              </div>
+              <h1 className="mt-1 font-mono text-2xl font-semibold tracking-tight text-foreground">
+                The Tape Lab
+              </h1>
+              <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-muted-foreground">
+                Every program here is a strip of punched tape — eight instructions,
+                a three-bit punch code. The GA splices and re-punches a population of
+                strips until one prints the target; the champion runs on the transport below.
               </p>
             </div>
+            {/* Masthead offcut — a real strip that prints "hi", the lab's hello. */}
+            <TapeStrip
+              gene="++++++++++[>++++++++++<-]>++++.+."
+              maxFrames={33}
+              height={26}
+              className="hidden shrink-0 -rotate-2 opacity-80 sm:block"
+            />
           </div>
         </FadeIn>
 
@@ -833,9 +861,9 @@ export default function BrainfuckPage() {
               <button
                 key={id}
                 onClick={() => setTab(id)}
-                className={`px-3 py-2 text-sm font-medium flex items-center gap-1.5 border-b-2 -mb-px transition-colors ${
+                className={`px-3 py-2 font-mono text-[11px] font-semibold uppercase tracking-[0.15em] flex items-center gap-1.5 border-b-2 -mb-px transition-colors ${
                   tab === id
-                    ? 'border-fuchsia-400 text-fuchsia-300'
+                    ? 'border-primary text-primary'
                     : 'border-transparent text-muted-foreground hover:text-foreground'
                 }`}
               >
@@ -852,7 +880,7 @@ export default function BrainfuckPage() {
         <>
 
         <FadeIn delay={0.05}>
-          <div className="rounded-xl bg-card border border-border/60 p-4 space-y-4">
+          <div className="rounded-lg bg-card border border-border/60 p-4 space-y-4">
             <div>
               <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
                 Target string
@@ -863,7 +891,7 @@ export default function BrainfuckPage() {
                 onChange={(e) => setTarget(e.target.value)}
                 disabled={submitting || activeId != null}
                 maxLength={64}
-                className="mt-1 w-full px-3 py-2 rounded-lg bg-background border border-border/60 font-mono text-base focus:border-fuchsia-400/60 focus:outline-none disabled:opacity-50"
+                className="mt-1 w-full px-3 py-2 rounded-lg bg-background border border-border/60 font-mono text-base focus:border-primary/60 focus:outline-none disabled:opacity-50"
                 placeholder="hi"
               />
               <div className="mt-1 text-[11px] text-muted-foreground">
@@ -878,16 +906,16 @@ export default function BrainfuckPage() {
                 className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1.5 font-mono uppercase tracking-[0.15em]"
               >
                 {advanced ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                <span className="text-fuchsia-400/70">{'{'}</span>
+                <span className="text-primary/70">{'{'}</span>
                 hyperparameters
-                <span className="text-fuchsia-400/70">{'}'}</span>
+                <span className="text-primary/70">{'}'}</span>
               </button>
               {advanced && !configEqualsDefault(config) && (
                 <button
                   type="button"
                   onClick={() => setConfig(DEFAULT_CONFIG)}
                   disabled={submitting || activeId != null}
-                  className="text-[10px] text-muted-foreground hover:text-fuchsia-400 flex items-center gap-1 disabled:opacity-40 font-mono uppercase tracking-[0.15em]"
+                  className="text-[10px] text-muted-foreground hover:text-primary flex items-center gap-1 disabled:opacity-40 font-mono uppercase tracking-[0.15em]"
                   title="Reset all knobs to repo defaults"
                 >
                   <RotateCcw className="h-3 w-3" /> reset all
@@ -919,7 +947,7 @@ export default function BrainfuckPage() {
                     {KNOB_GROUPS.map((group) => (
                       <div key={group.title} className="space-y-2">
                         <div className="flex items-center gap-2">
-                          <span className="text-fuchsia-400/70 text-[10px] tabular-nums shrink-0">
+                          <span className="text-primary/70 text-[10px] tabular-nums shrink-0">
                             {group.glyph}
                           </span>
                           <span className="text-[10px] uppercase tracking-[0.15em] text-foreground/60 shrink-0">
@@ -947,13 +975,13 @@ export default function BrainfuckPage() {
             </AnimatePresence>
 
             {error && (
-              <div className="text-sm text-red-400 bg-red-400/10 px-3 py-2 rounded-lg">{error}</div>
+              <div className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-lg">{error}</div>
             )}
 
             <button
               onClick={start}
               disabled={submitting || activeId != null || !target.trim()}
-              className="w-full px-4 py-2.5 rounded-lg bg-fuchsia-500 hover:bg-fuchsia-400 text-white font-medium flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="w-full px-4 py-2.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground font-medium flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               {submitting ? <Loader className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
               {activeId != null ? 'Run in progress…' : 'Start run'}
@@ -968,14 +996,14 @@ export default function BrainfuckPage() {
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
-              className="rounded-xl bg-card border border-fuchsia-400/30 p-4 space-y-3"
+              className="rounded-lg bg-card border border-primary/30 p-4 space-y-3"
             >
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   {active.status === 'found' ? (
-                    <CheckCircle className="h-4 w-4 text-emerald-400" />
+                    <CheckCircle className="h-4 w-4 text-ok" />
                   ) : (
-                    <Loader className="h-4 w-4 text-blue-400 animate-spin" />
+                    <Loader className="h-4 w-4 text-chart-4 animate-spin" />
                   )}
                   <span className="text-sm font-semibold">
                     {active.status === 'found' ? 'Solved' : 'Active'} run #{active.id}
@@ -987,7 +1015,7 @@ export default function BrainfuckPage() {
                 {active.status !== 'found' && (
                   <button
                     onClick={() => stop(active.id)}
-                    className="text-xs px-2 py-1 rounded bg-amber-400/10 text-amber-400 hover:bg-amber-400/20 flex items-center gap-1"
+                    className="text-xs px-2 py-1 rounded bg-warn/10 text-warn hover:bg-warn/20 flex items-center gap-1"
                   >
                     <Square className="h-3 w-3" /> Stop
                   </button>
@@ -1010,7 +1038,7 @@ export default function BrainfuckPage() {
 
               <div className="h-1.5 bg-muted/60 rounded-full overflow-hidden">
                 <motion.div
-                  className="h-full bg-fuchsia-400 rounded-full"
+                  className="h-full bg-primary rounded-full"
                   animate={{ width: `${fitnessPercent(active.target, active.best_fitness) * 100}%` }}
                   transition={{ duration: 0.4 }}
                 />
@@ -1022,6 +1050,7 @@ export default function BrainfuckPage() {
                   target={active.target}
                   fitnessTrail={animatorTrail}
                   targetFitness={targetFitness}
+                  stampLabel={`gen ${active.generations.toLocaleString()} · ${active.best_fitness ?? 0}/${targetFitness}`}
                   pendingGene={latestGeneRef.current}
                   pendingLabel={
                     latestGeneRef.current && latestGeneRef.current !== displayedGene
@@ -1033,8 +1062,8 @@ export default function BrainfuckPage() {
                   onCycleEnd={onAnimatorCycleEnd}
                 />
               ) : (
-                <div className="rounded-xl bg-background/40 border border-border/40 h-[420px] flex items-center justify-center text-muted-foreground text-sm">
-                  Waiting for first program…
+                <div className="rounded-lg bg-background/40 border border-border/40 h-[420px] flex items-center justify-center text-muted-foreground text-sm">
+                  Waiting for the first tape to feed in…
                 </div>
               )}
 
@@ -1044,10 +1073,10 @@ export default function BrainfuckPage() {
         </AnimatePresence>
 
         <FadeIn delay={0.1}>
-          <div className="rounded-xl bg-card border border-border/60 p-4">
+          <div className="rounded-lg bg-card border border-border/60 p-4">
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold flex items-center gap-2">
-                <Target className="h-4 w-4 text-fuchsia-400" />
+              <h2 className="font-mono text-[11px] font-semibold uppercase tracking-[0.15em] flex items-center gap-2">
+                <Target className="h-4 w-4 text-primary" />
                 History
               </h2>
               <span className="text-xs text-muted-foreground">{history.length} run{history.length === 1 ? '' : 's'}</span>
@@ -1090,10 +1119,10 @@ export default function BrainfuckPage() {
         </FadeIn>
 
         <FadeIn delay={0.15}>
-          <div className="rounded-xl bg-card border border-border/60 p-4 space-y-3">
+          <div className="rounded-lg bg-card border border-border/60 p-4 space-y-3">
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold flex items-center gap-2">
-                <Gauge className="h-4 w-4 text-fuchsia-400" />
+              <h2 className="font-mono text-[11px] font-semibold uppercase tracking-[0.15em] flex items-center gap-2">
+                <Gauge className="h-4 w-4 text-primary" />
                 Benchmarks
               </h2>
               <span className="text-xs text-muted-foreground">{benchmarks.length} row{benchmarks.length === 1 ? '' : 's'}</span>
@@ -1115,7 +1144,7 @@ export default function BrainfuckPage() {
                 ) : (
                   benchPreset.map((c, i) => (
                     <div key={i}>
-                      <span className="text-fuchsia-400">{i + 1}.</span>{' '}
+                      <span className="text-primary">{i + 1}.</span>{' '}
                       target <span className="text-foreground/90">&quot;{c.target}&quot;</span>
                       {' · '}pop <span className="text-foreground/90">{c.popSize}</span>
                       {' · '}gens <span className="text-foreground/90">{c.maxGen}</span>
@@ -1136,23 +1165,23 @@ export default function BrainfuckPage() {
                 disabled={benchSubmitting || activeBenchId != null}
                 maxLength={64}
                 placeholder="e.g. init, trim-dead"
-                className="mt-1 w-full px-2.5 py-1.5 rounded-lg bg-background border border-border/60 text-sm focus:border-fuchsia-400/60 focus:outline-none disabled:opacity-50"
+                className="mt-1 w-full px-2.5 py-1.5 rounded-lg bg-background border border-border/60 text-sm focus:border-primary/60 focus:outline-none disabled:opacity-50"
               />
             </div>
 
             {benchError && (
-              <div className="text-sm text-red-400 bg-red-400/10 px-3 py-2 rounded-lg">{benchError}</div>
+              <div className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-lg">{benchError}</div>
             )}
 
             {activeBenchId != null ? (
-              <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-fuchsia-400/10 border border-fuchsia-400/30">
-                <div className="flex items-center gap-2 text-sm text-fuchsia-300">
+              <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-primary/10 border border-primary/30">
+                <div className="flex items-center gap-2 text-sm text-primary">
                   <Loader className="h-4 w-4 animate-spin" />
                   Benchmark #{activeBenchId} running…
                 </div>
                 <button
                   onClick={() => stopBenchmarkApi(activeBenchId)}
-                  className="text-xs px-2 py-1 rounded bg-amber-400/10 text-amber-400 hover:bg-amber-400/20 flex items-center gap-1"
+                  className="text-xs px-2 py-1 rounded bg-warn/10 text-warn hover:bg-warn/20 flex items-center gap-1"
                 >
                   <Square className="h-3 w-3" /> Stop
                 </button>
@@ -1161,7 +1190,7 @@ export default function BrainfuckPage() {
               <button
                 onClick={startBenchmark}
                 disabled={benchSubmitting || activeId != null}
-                className="w-full px-4 py-2 rounded-lg bg-fuchsia-500/90 hover:bg-fuchsia-400 text-white text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="w-full px-4 py-2 rounded-lg bg-primary/90 hover:bg-primary text-primary-foreground text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 title={activeId != null ? 'Stop the active run first' : undefined}
               >
                 {benchSubmitting ? <Loader className="h-4 w-4 animate-spin" /> : <Gauge className="h-4 w-4" />}
@@ -1219,6 +1248,7 @@ export default function BrainfuckPage() {
           </div>
         </aside>
       </div>
+      </div>
     </PageTransition>
   );
 }
@@ -1257,11 +1287,11 @@ function Pagination({
   const btnBase =
     'min-w-[26px] px-1.5 h-7 rounded-md border tabular-nums text-[11px] flex items-center justify-center transition-colors';
   const btnIdle =
-    'border-border/60 bg-background/40 text-foreground/80 hover:border-fuchsia-400/60 hover:text-fuchsia-300';
+    'border-border/60 bg-background/40 text-foreground/80 hover:border-primary/60 hover:text-primary';
   const btnActive =
-    'border-fuchsia-400 bg-fuchsia-500/90 text-white';
+    'border-primary bg-primary/90 text-primary-foreground';
   const navBase =
-    'h-7 w-7 rounded-md border border-border/60 bg-background/40 text-foreground/80 hover:border-fuchsia-400/60 hover:text-fuchsia-300 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:border-border/60 disabled:hover:text-foreground/80 transition-colors flex items-center justify-center';
+    'h-7 w-7 rounded-md border border-border/60 bg-background/40 text-foreground/80 hover:border-primary/60 hover:text-primary disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:border-border/60 disabled:hover:text-foreground/80 transition-colors flex items-center justify-center';
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 pt-3 mt-1 border-t border-border/40 text-[11px]">
@@ -1308,7 +1338,7 @@ function Pagination({
         <select
           value={perPage}
           onChange={(e) => onPerPageChange(Number(e.target.value))}
-          className="h-7 px-2 rounded-md bg-background border border-border/60 text-foreground/90 text-[11px] focus:border-fuchsia-400/60 focus:outline-none cursor-pointer"
+          className="h-7 px-2 rounded-md bg-background border border-border/60 text-foreground/90 text-[11px] focus:border-primary/60 focus:outline-none cursor-pointer"
         >
           {[10, 25, 50, 100].map((n) => (
             <option key={n} value={n}>{n}</option>
@@ -1387,19 +1417,19 @@ function BenchmarkBatchCard({
   return (
     <div className="rounded-lg bg-background/30 border border-border/30 overflow-hidden">
       <div className="flex items-center gap-3 px-3 py-2 bg-background/40 text-[11px]">
-        <div className="font-mono text-fuchsia-400 flex items-center gap-1" title={group.versionSubject ?? ''}>
+        <div className="font-mono text-primary flex items-center gap-1" title={group.versionSubject ?? ''}>
           <GitCommit className="h-3 w-3" />
           {group.versionHash ?? '—'}
         </div>
         {group.versionLabel && (
-          <span className="px-1.5 py-0.5 rounded bg-fuchsia-400/10 text-fuchsia-300 text-[10px] font-medium">
+          <span className="px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[10px] font-medium">
             {group.versionLabel}
           </span>
         )}
         <span className="text-muted-foreground tabular-nums">
           {group.rows.length} config{group.rows.length === 1 ? '' : 's'}
         </span>
-        {inFlight && <Loader className="h-3 w-3 text-blue-400 animate-spin" />}
+        {inFlight && <Loader className="h-3 w-3 text-chart-4 animate-spin" />}
         <div className="ml-auto flex items-center gap-3 text-muted-foreground tabular-nums">
           {avgEps != null && (
             <span>
@@ -1437,11 +1467,11 @@ function BenchmarkConfigRow({ b, onDelete }: { b: Benchmark; onDelete: () => voi
   const gensPerSec = b.gens_per_sec != null ? b.gens_per_sec.toFixed(1) : '—';
   const wall = b.wall_seconds != null ? `${b.wall_seconds.toFixed(1)}s` : '—';
   const statusColor =
-    b.status === 'completed' ? 'text-emerald-400/80'
-    : b.status === 'running' ? 'text-blue-400'
-    : b.status === 'queued' ? 'text-zinc-500'
-    : b.status === 'stopped' ? 'text-amber-400'
-    : 'text-red-400';
+    b.status === 'completed' ? 'text-ok/80'
+    : b.status === 'running' ? 'text-chart-4'
+    : b.status === 'queued' ? 'text-muted-foreground/80'
+    : b.status === 'stopped' ? 'text-warn'
+    : 'text-destructive';
   return (
     <>
       <div className="flex items-center gap-2 truncate">
@@ -1457,7 +1487,7 @@ function BenchmarkConfigRow({ b, onDelete }: { b: Benchmark; onDelete: () => voi
       <button
         onClick={onDelete}
         disabled={b.status === 'running' || b.status === 'queued'}
-        className="text-muted-foreground/60 hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        className="text-muted-foreground/60 hover:text-destructive disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
         aria-label="Delete benchmark"
       >
         <Trash2 className="h-3 w-3" />
@@ -1474,12 +1504,35 @@ function Kbd({ children }: { children: React.ReactNode }) {
   );
 }
 
+// The punch code the tape motif uses everywhere (animator, TapeStrip, the
+// legend below). ',' sits at 000 — the blank frame, like NUL on real tape.
+const REFERENCE_PUNCH_CODE: Record<string, number> = {
+  ',': 0, '>': 1, '<': 2, '+': 3, '-': 4, '.': 5, '[': 6, ']': 7,
+};
+
+// Three dots reading the instruction's punch column, bit2 → bit0.
+function PunchDots({ sym }: { sym: string }) {
+  const code = REFERENCE_PUNCH_CODE[sym] ?? 0;
+  return (
+    <span className="flex w-7 shrink-0 items-center gap-[3px] pt-[7px]" aria-hidden>
+      {[2, 1, 0].map((bit) => (
+        <span
+          key={bit}
+          className={`inline-block h-[6px] w-[6px] rounded-full ${
+            (code >> bit) & 1 ? 'bg-foreground/70' : 'border border-foreground/25'
+          }`}
+        />
+      ))}
+    </span>
+  );
+}
+
 function BFReference() {
   return (
     <div className="space-y-3">
-      <div className="rounded-xl bg-card border border-border/60 p-4 space-y-3">
+      <div className="rounded-lg bg-card border border-border/60 p-4 space-y-3">
         <div className="flex items-center gap-2">
-          <Code2 className="h-4 w-4 text-fuchsia-400" />
+          <Code2 className="h-4 w-4 text-primary" />
           <h3 className="text-sm font-semibold text-foreground">BrainFuck</h3>
         </div>
         <p className="text-xs text-muted-foreground leading-relaxed">
@@ -1490,16 +1543,21 @@ function BFReference() {
           <span className="font-mono text-foreground/80">0</span>. Cells wrap
           symmetrically in the 7-bit ASCII range (0..127).
         </p>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          Eight instructions fit a 3-bit punch code exactly — the dots below
+          are the hole pattern each symbol gets on the tape.
+        </p>
       </div>
 
-      <div className="rounded-xl bg-card border border-border/60 p-4 space-y-2">
+      <div className="rounded-lg bg-card border border-border/60 p-4 space-y-2">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
           Instructions
         </div>
         <div className="space-y-1">
           {BF_INSTRUCTIONS.map((i) => (
             <div key={i.sym} className="flex items-start gap-2 text-xs">
-              <span className="font-mono text-fuchsia-400 w-5 text-center text-sm leading-5 shrink-0">
+              <PunchDots sym={i.sym} />
+              <span className="font-mono text-primary w-5 text-center text-sm leading-5 shrink-0">
                 {i.sym}
               </span>
               <span className="text-muted-foreground leading-5">{i.desc}</span>
@@ -1508,21 +1566,21 @@ function BFReference() {
         </div>
       </div>
 
-      <div className="rounded-xl bg-card border border-border/60 p-4 space-y-2">
+      <div className="rounded-lg bg-card border border-border/60 p-4 space-y-2">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
           Common idioms
         </div>
         <div className="space-y-1.5">
           {BF_IDIOMS.map((i) => (
             <div key={i.code} className="space-y-0.5">
-              <div className="font-mono text-xs text-fuchsia-300/90">{i.code}</div>
+              <div className="font-mono text-xs text-primary/90">{i.code}</div>
               <div className="text-[11px] text-muted-foreground leading-snug">{i.what}</div>
             </div>
           ))}
         </div>
       </div>
 
-      <div className="rounded-xl bg-card border border-border/60 p-4 space-y-2">
+      <div className="rounded-lg bg-card border border-border/60 p-4 space-y-2">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
           Animator tips
         </div>
@@ -1634,7 +1692,7 @@ function PresetSlots({
 
   return (
     <div ref={rowRef} className="flex items-center gap-2">
-      <span className="text-fuchsia-400/70 text-[10px] shrink-0">{'>>>'}</span>
+      <span className="text-primary/70 text-[10px] shrink-0">{'>>>'}</span>
       <span className="text-[10px] uppercase tracking-[0.15em] text-foreground/60 shrink-0">
         presets
       </span>
@@ -1674,22 +1732,22 @@ function PresetSlots({
                   transition-colors select-none
                   ${
                     isReceiver
-                      ? 'border-fuchsia-400/80 bg-fuchsia-400/[0.10] text-fuchsia-200 cursor-pointer animate-pulse hover:bg-fuchsia-400/20'
+                      ? 'border-primary/80 bg-primary/[0.10] text-primary cursor-pointer animate-pulse hover:bg-primary/20'
                       : isOccupiedDuringCapture
                         ? 'border-foreground/15 bg-foreground/[0.02] text-foreground/30 cursor-not-allowed'
                         : isActive
-                          ? 'border-fuchsia-400/70 bg-fuchsia-400/15 text-fuchsia-200'
+                          ? 'border-primary/70 bg-primary/15 text-primary'
                           : isFilled
-                            ? 'border-fuchsia-400/30 bg-fuchsia-400/[0.04] text-fuchsia-300/85 hover:border-fuchsia-400/55 hover:bg-fuchsia-400/[0.08]'
+                            ? 'border-primary/30 bg-primary/[0.04] text-primary/85 hover:border-primary/55 hover:bg-primary/[0.08]'
                             : 'border-foreground/10 bg-foreground/[0.02] text-foreground/40 hover:border-foreground/25 hover:text-foreground/60'
                   }
-                  ${isFlashing ? 'ring-1 ring-fuchsia-400/70' : ''}
+                  ${isFlashing ? 'ring-1 ring-primary/70' : ''}
                   disabled:opacity-40 disabled:cursor-not-allowed
                 `}
               >
-                <span className="text-fuchsia-400/45 text-[9px] mr-px">[</span>
+                <span className="text-primary/45 text-[9px] mr-px">[</span>
                 {i + 1}
-                <span className="text-fuchsia-400/45 text-[9px] ml-px">]</span>
+                <span className="text-primary/45 text-[9px] ml-px">]</span>
               </button>
             </div>
           );
@@ -1697,7 +1755,7 @@ function PresetSlots({
       </div>
       <div className="flex-1" />
       {capture ? (
-        <span className="text-[9px] text-fuchsia-300/90 flex items-center gap-1.5">
+        <span className="text-[9px] text-primary/90 flex items-center gap-1.5">
           pick an empty slot
           <button
             type="button"
@@ -1771,7 +1829,7 @@ function KnobRow({
               type="button"
               onClick={() => onChange(defaultValue)}
               disabled={disabled}
-              className="text-muted-foreground/50 hover:text-fuchsia-400 disabled:opacity-30 transition-colors"
+              className="text-muted-foreground/50 hover:text-primary disabled:opacity-30 transition-colors"
               title={`Reset to default (${fmtValue(defaultValue)})`}
               tabIndex={-1}
             >
@@ -1779,16 +1837,16 @@ function KnobRow({
             </button>
           )}
         </div>
-        {/* Memory-cell-style value readout: thin border, monospace, fuchsia
-            when off-default. Mirrors the tape cells in the animator. */}
+        {/* Counter-style value readout: thin border, monospace, stamp ink
+            when off-default. Mirrors the counter bank in the transport. */}
         <div
           className={`flex items-center gap-0.5 px-1 py-0 rounded-sm border tabular-nums shrink-0 ${
             isDefault
               ? 'border-foreground/10 bg-foreground/[0.02] text-foreground/60'
-              : 'border-fuchsia-400/40 bg-fuchsia-400/[0.06] text-fuchsia-300'
+              : 'border-primary/40 bg-primary/[0.06] text-primary'
           }`}
         >
-          <span className="text-fuchsia-400/40 text-[9px] leading-none select-none">[</span>
+          <span className="text-primary/40 text-[9px] leading-none select-none">[</span>
           <input
             type="text"
             inputMode={spec.integer ? 'numeric' : 'decimal'}
@@ -1806,7 +1864,7 @@ function KnobRow({
             className="w-[58px] bg-transparent text-[10.5px] focus:outline-none disabled:opacity-50 text-right tabular-nums"
             title={spec.integer ? 'Accepts shorthand: 250k = 250,000, 1m = 1,000,000, 2b = 2,000,000,000' : undefined}
           />
-          <span className="text-fuchsia-400/40 text-[9px] leading-none select-none">]</span>
+          <span className="text-primary/40 text-[9px] leading-none select-none">]</span>
         </div>
       </div>
       <div className="relative pt-0.5">
@@ -1821,7 +1879,7 @@ function KnobRow({
           className="bf-knob-slider"
           aria-label={spec.label}
         />
-        {/* Default-value mark: a small fuchsia chevron sitting just below the
+        {/* Default-value mark: a small stamp-ink chevron sitting just below the
             tape track, pointing up at the default position. Reads as a
             "bookmark" the way the animator marks the target output column. */}
         <div
@@ -1829,7 +1887,7 @@ function KnobRow({
           aria-hidden
         >
           <div
-            className="absolute w-0 h-0 border-l-[3px] border-l-transparent border-r-[3px] border-r-transparent border-b-[3px] border-b-fuchsia-400/45 -translate-x-1/2"
+            className="absolute w-0 h-0 border-l-[3px] border-l-transparent border-r-[3px] border-r-transparent border-b-[3px] border-b-primary/45 -translate-x-1/2"
             style={{ left: `calc(3px + (100% - 6px) * ${defaultPct / 100})` }}
           />
         </div>
@@ -1857,7 +1915,7 @@ function ConfigSummary({ cfg }: { cfg: GAConfig }) {
       </div>
       pop {cfg.pop_size} · gens {cfg.max_generations.toLocaleString()}
       {diffs.length > 0 && (
-        <span className="text-fuchsia-300/80">{' · ' + diffs.join(' · ')}</span>
+        <span className="text-primary/80">{' · ' + diffs.join(' · ')}</span>
       )}
       {diffs.length === 0 && <span className="text-muted-foreground/60"> · defaults</span>}
     </div>
@@ -1875,30 +1933,36 @@ function Stat({ label, value, icon }: { label: string; value: string; icon?: Rea
   );
 }
 
-// Subtle live-activity strip for the active run. Surfaces the diversity events
-// (restart / migration) the runner emits, which used to be dropped. Newest
-// first; renders nothing until the first event lands so it stays out of the
-// way on quiet runs. Kept in the page's fuchsia / mono visual language.
+// The lab log — a subtle live strip for the active run. New-best punches
+// (the same improvements the transport stamps) in green ink, diversity
+// events (restart / migration) in stamp ink. Newest first; renders nothing
+// until the first event lands so it stays out of the way on quiet runs.
 function ActivityLog({ entries }: { entries: ActivityEntry[] }) {
   if (entries.length === 0) return null;
   return (
     <div className="rounded-lg bg-background/40 border border-border/40 px-2.5 py-2 space-y-1">
       <div className="flex items-center gap-1.5 text-[9px] uppercase tracking-[0.15em] text-muted-foreground/80 font-mono">
-        <span className="text-fuchsia-400/60">,</span> diversity events
+        <span className="text-primary/60">,</span> lab log
       </div>
       <div className="flex flex-wrap gap-1">
         {entries.slice(0, 8).map((e) => (
           <span
             key={e.key}
             title={`gen ${e.gen.toLocaleString()} · best ${e.best_fitness} · ${e.detail}`}
-            className="inline-flex items-center gap-1 rounded-sm border border-fuchsia-400/25 bg-fuchsia-400/[0.05] px-1.5 py-0.5 text-[10px] font-mono text-fuchsia-300/85 tabular-nums"
+            className={`inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-[10px] font-mono tabular-nums ${
+              e.kind === 'best'
+                ? 'border-ok/35 bg-ok/[0.06] text-ok'
+                : 'border-primary/25 bg-primary/[0.05] text-primary/85'
+            }`}
           >
-            {e.kind === 'restart' ? (
+            {e.kind === 'best' ? (
+              <Sparkles className="h-2.5 w-2.5" />
+            ) : e.kind === 'restart' ? (
               <RotateCcw className="h-2.5 w-2.5" />
             ) : (
               <InfinityIcon className="h-2.5 w-2.5" />
             )}
-            <span className="text-fuchsia-200/90">{e.kind}</span>
+            <span>{e.kind === 'best' ? e.detail : e.kind}</span>
             <span className="text-muted-foreground/70">g{e.gen.toLocaleString()}</span>
           </span>
         ))}
@@ -1949,14 +2013,14 @@ function HistoryRow({
     <motion.div
       className={`rounded-lg border ${
         isPerfect
-          ? 'bg-amber-300/[0.04] border-amber-300/60'
+          ? 'bg-warn/[0.04] border-warn/60'
           : 'bg-background/30 border-border/30'
       }`}
       animate={isPerfect ? {
         boxShadow: [
-          '0 0 0 0 rgba(252,211,77,0)',
-          '0 0 14px 1px rgba(252,211,77,0.22)',
-          '0 0 0 0 rgba(252,211,77,0)',
+          '0 0 0 0 rgba(196,150,42,0)',
+          '0 0 14px 1px rgba(196,150,42,0.22)',
+          '0 0 0 0 rgba(196,150,42,0)',
         ],
       } : undefined}
       transition={isPerfect ? { duration: 3.2, repeat: Infinity, ease: 'easeInOut' } : undefined}
@@ -1966,13 +2030,13 @@ function HistoryRow({
         className="w-full flex items-center gap-2 px-3 py-2 hover:bg-background/50 transition-colors text-left"
       >
         {open ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
-        <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${badge.color} flex items-center gap-1`}>
+        <span className={`font-mono text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${badge.color} flex items-center gap-1`}>
           <badge.Icon className={`h-3 w-3 ${run.status === 'running' ? 'animate-spin' : ''}`} />
           {badge.label}
         </span>
         {isPerfect && (
           <motion.span
-            className="text-amber-300"
+            className="text-warn"
             title="Gold standard: solved, halted, exact-match output"
             animate={{ rotate: [0, 8, -8, 0], scale: [1, 1.15, 1] }}
             transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
@@ -2019,7 +2083,7 @@ function HistoryRow({
                 />
               )}
               {run.error && (
-                <div className="text-red-400 bg-red-400/10 rounded px-2 py-1.5 break-all">
+                <div className="text-destructive bg-destructive/10 rounded px-2 py-1.5 break-all">
                   {run.error}
                 </div>
               )}
@@ -2031,8 +2095,8 @@ function HistoryRow({
                     onClick={() => onCopyConfig(run.config_json!)}
                     className={`text-xs px-2 py-1 rounded flex items-center gap-1 transition-colors ${
                       copyArmed
-                        ? 'bg-fuchsia-400/20 text-fuchsia-200 ring-1 ring-fuchsia-400/60'
-                        : 'bg-fuchsia-400/10 text-fuchsia-300 hover:bg-fuchsia-400/20'
+                        ? 'bg-primary/20 text-primary ring-1 ring-primary/60'
+                        : 'bg-primary/10 text-primary hover:bg-primary/20'
                     }`}
                     title={copyArmed
                       ? 'Pick an empty preset slot above (esc to cancel)'
@@ -2043,7 +2107,7 @@ function HistoryRow({
                 )}
                 <button
                   onClick={onDelete}
-                  className="text-xs px-2 py-1 rounded bg-red-400/10 text-red-400 hover:bg-red-400/20 flex items-center gap-1"
+                  className="text-xs px-2 py-1 rounded bg-destructive/10 text-destructive hover:bg-destructive/20 flex items-center gap-1"
                 >
                   <Trash2 className="h-3 w-3" /> Delete
                 </button>
@@ -2129,10 +2193,10 @@ function SolutionsTab() {
 
   return (
     <FadeIn delay={0.05}>
-      <div className="rounded-xl bg-card border border-border/60 p-4 space-y-3">
+      <div className="rounded-lg bg-card border border-border/60 p-4 space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-fuchsia-400" />
+          <h2 className="font-mono text-[11px] font-semibold uppercase tracking-[0.15em] flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-primary" />
             Solved targets
           </h2>
           <span className="text-xs text-muted-foreground">
@@ -2191,13 +2255,13 @@ function TargetRow({
   return (
     <motion.div
       className={`rounded-lg border overflow-hidden ${
-        hasGold ? 'border-amber-300/60 bg-amber-300/[0.03]' : 'border-border/40'
+        hasGold ? 'border-warn/60 bg-warn/[0.03]' : 'border-border/40'
       }`}
       animate={hasGold ? {
         boxShadow: [
-          '0 0 0 0 rgba(252,211,77,0)',
-          '0 0 12px 0 rgba(252,211,77,0.16)',
-          '0 0 0 0 rgba(252,211,77,0)',
+          '0 0 0 0 rgba(196,150,42,0)',
+          '0 0 12px 0 rgba(196,150,42,0.16)',
+          '0 0 0 0 rgba(196,150,42,0)',
         ],
       } : undefined}
       transition={hasGold ? { duration: 3.6, repeat: Infinity, ease: 'easeInOut' } : undefined}
@@ -2210,7 +2274,7 @@ function TargetRow({
               : <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />}
         {hasGold && (
           <motion.span
-            className="text-amber-300 shrink-0"
+            className="text-warn shrink-0"
             title={`${row.gold_count} gold-standard solution${row.gold_count === 1 ? '' : 's'}`}
             animate={{ rotate: [0, 8, -8, 0], scale: [1, 1.15, 1] }}
             transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
@@ -2227,7 +2291,7 @@ function TargetRow({
             {' '}shape{row.solution_count === 1 ? '' : 's'}
           </span>
           {hasGold && (
-            <span title="Solutions that both halt and match exactly" className="text-amber-300">
+            <span title="Solutions that both halt and match exactly" className="text-warn">
               <span className="font-semibold">{row.gold_count}</span> gold
             </span>
           )}
@@ -2268,28 +2332,22 @@ function SolutionCard({ sol }: { sol: Solution }) {
     <motion.div
       className={`rounded-lg border p-3 space-y-2 ${
         isPerfect
-          ? 'border-amber-300/60 bg-amber-300/[0.04]'
+          ? 'border-warn/60 bg-warn/[0.04]'
           : 'border-border/40 bg-card/60'
       }`}
       animate={isPerfect ? {
         boxShadow: [
-          '0 0 0 0 rgba(252,211,77,0)',
-          '0 0 14px 1px rgba(252,211,77,0.22)',
-          '0 0 0 0 rgba(252,211,77,0)',
+          '0 0 0 0 rgba(196,150,42,0)',
+          '0 0 14px 1px rgba(196,150,42,0.22)',
+          '0 0 0 0 rgba(196,150,42,0)',
         ],
       } : undefined}
       transition={isPerfect ? { duration: 3.2, repeat: Infinity, ease: 'easeInOut' } : undefined}
     >
       {isPerfect && (
-        <div className="flex items-center gap-1.5 -mb-1">
-          <motion.span
-            className="text-amber-300"
-            animate={{ rotate: [0, 8, -8, 0], scale: [1, 1.15, 1] }}
-            transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
-          >
+        <div className="-mb-1">
+          <span className="bf-stamp text-warn">
             <Sparkles className="h-3 w-3" />
-          </motion.span>
-          <span className="text-[9.5px] uppercase tracking-[0.18em] text-amber-300/90 font-medium">
             gold standard
           </span>
         </div>
@@ -2319,6 +2377,9 @@ function SolutionCard({ sol }: { sol: Solution }) {
         {sol.generations_to_solve != null && (
           <SolStat label="gen"      value={sol.generations_to_solve.toLocaleString()} />
         )}
+      </div>
+      <div className="overflow-hidden">
+        <TapeStrip gene={sol.gene} maxFrames={72} height={20} />
       </div>
       <div className="font-mono text-[11px] break-all bg-background/60 rounded px-2 py-1.5 text-foreground/85">
         {sol.gene}
@@ -2352,8 +2413,8 @@ function SolStat({
   title?: string;
 }) {
   const colour =
-    accent === 'good' ? 'text-emerald-400'
-    : accent === 'warn' ? 'text-amber-400'
+    accent === 'good' ? 'text-ok'
+    : accent === 'warn' ? 'text-warn'
     : 'text-foreground/80';
   return (
     <span className="inline-flex items-center gap-1" title={title}>

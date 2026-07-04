@@ -643,6 +643,110 @@
 }
 
 /* ─────────────────────────────────────────────────────────────
+   BrainFuck scope — applied to /projects/brainfuck shell.
+   "The tape lab": a 1960s tape-breeding room. Programs are strips
+   of punched paper tape (BF's 8 instructions are a 3-bit punch
+   code); the GA splices and re-punches them, and the champion
+   runs through a dark transport window under a magenta read
+   head. Light: the bench in daylight — manila paper and umber
+   ink. Dark: the same lab after hours, bakelite and lamp-lit
+   paper. The transport window (canvas) is a self-lit instrument
+   and stays dark in both modes.
+   ──────────────────────────────────────────────────────────── */
+.bf-theme {
+  /* Palette — paper, ink, and a stamp pad */
+  --bf-paper:   #e9dfc6;             /* manila sheet — background */
+  --bf-paper-2: #f2ead7;             /* fresh tape / job cards */
+  --bf-ink:     #33261a;             /* umber ink */
+  --bf-dim:     #83745d;             /* pencil notes */
+  --bf-line:    #cfc09e;             /* ruled lines */
+  --bf-stamp:   #a81d7c;             /* magenta stamp-pad ink — the accent */
+  --bf-ok:      #2e6b3e;             /* green ink — solved / halts */
+  --bf-warn:    #96660f;             /* amber ink — stopped / capped */
+  --bf-fault:   #a83226;             /* red ink — failed */
+
+  /* Remap the shared tokens so utilities + shadcn/lucide follow suit. */
+  --color-background:        var(--bf-paper);
+  --color-foreground:        var(--bf-ink);
+  --color-card:              var(--bf-paper-2);
+  --color-card-foreground:   var(--bf-ink);
+  --color-popover:           var(--bf-paper-2);
+  --color-popover-foreground:var(--bf-ink);
+  --color-muted:             #e0d5b8;
+  --color-muted-foreground:  var(--bf-dim);
+  --color-secondary:         #e0d5b8;
+  --color-secondary-foreground: var(--bf-ink);
+  --color-border:            var(--bf-line);
+  --color-input:             var(--bf-line);
+  --color-ring:              var(--bf-stamp);
+  --color-primary:           var(--bf-stamp);
+  --color-primary-foreground:#f7f1e2;
+  --color-accent:            #ddd1b1;
+  --color-accent-foreground: var(--bf-ink);
+  --color-destructive:       var(--bf-fault);
+  --color-destructive-foreground: #f7f1e2;
+  --color-ok:                var(--bf-ok);
+  --color-warn:              var(--bf-warn);
+  --color-chart-1:           var(--bf-stamp);
+  --color-chart-2:           var(--bf-ok);
+  --color-chart-3:           var(--bf-warn);
+  --color-chart-4:           #4a5a8a;
+  --color-chart-5:           var(--bf-fault);
+
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  color: var(--bf-ink);
+  background-color: var(--bf-paper);
+  /* Paper fiber — a whisper of diagonal grain, plus soft top light. */
+  background-image:
+    linear-gradient(180deg, hsl(45 40% 97% / 0.35), transparent 220px),
+    repeating-linear-gradient(115deg, transparent 0 3px, hsl(40 30% 30% / 0.016) 3px 4px);
+}
+
+.dark .bf-theme {
+  --bf-paper:   #171210;
+  --bf-paper-2: #1f1914;
+  --bf-ink:     #eadfc4;
+  --bf-dim:     hsl(38 12% 58%);
+  --bf-line:    hsl(35 14% 24%);
+  --bf-stamp:   #ee7cd4;
+  --bf-ok:      #8ecf9d;
+  --bf-warn:    #dfb35e;
+  --bf-fault:   #e07a66;
+
+  --color-muted:             hsl(33 14% 13%);
+  --color-muted-foreground:  var(--bf-dim);
+  --color-secondary:         hsl(33 14% 14%);
+  --color-accent:            hsl(33 14% 17%);
+  --color-accent-foreground: var(--bf-ink);
+  --color-primary-foreground:#231018;
+  --color-destructive-foreground: #23100c;
+  --color-chart-4:           #93a7dd;
+
+  background-image:
+    radial-gradient(ellipse 60% 30% at 50% -8%, hsl(35 60% 45% / 0.07), transparent 70%),
+    repeating-linear-gradient(115deg, transparent 0 3px, hsl(40 30% 70% / 0.012) 3px 4px);
+}
+
+/* Rubber stamp — generation marks, gold-standard seals, the room plaque.
+   Inked border + letterspaced mono caps, tilted half a degree off true. */
+.bf-stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.15em 0.55em;
+  border: 1.5px solid currentColor;
+  border-radius: 3px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  transform: rotate(-1.2deg);
+  /* uneven ink coverage */
+  mask-image: radial-gradient(ellipse 120% 100% at 42% 55%, black 62%, hsl(0 0% 0% / 0.72) 100%);
+}
+
+/* ─────────────────────────────────────────────────────────────
    Hallway scope — the homepage corridor. A neutral gallery shell
    whose only job is to frame each project tile rendered in its
    OWN theme (cc-scope, ws-theme, lol-theme, …). Light: warm
@@ -826,9 +930,9 @@
   }
 
   /* BrainFuck "tape" slider — used by the GA hyperparameter knobs.
-     Track is rendered as a row of discrete cells (mirroring the BF memory
-     tape in the animator) and the thumb is a fuchsia rectangle that reads
-     as an instruction pointer rather than a generic UI handle. */
+     The track is a strip of unpunched tape (discrete frames with faint
+     sprocket ticks) and the thumb is a stamp-ink punch head. Token-driven
+     so it reads correctly in both bf-theme modes. */
   .bf-knob-slider {
     -webkit-appearance: none;
     appearance: none;
@@ -853,11 +957,11 @@
         to right,
         transparent 0,
         transparent calc(100% / 24 - 1px),
-        rgba(255, 255, 255, 0.07) calc(100% / 24 - 1px),
-        rgba(255, 255, 255, 0.07) calc(100% / 24)
+        color-mix(in srgb, var(--color-foreground) 9%, transparent) calc(100% / 24 - 1px),
+        color-mix(in srgb, var(--color-foreground) 9%, transparent) calc(100% / 24)
       ),
-      rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.10);
+      color-mix(in srgb, var(--color-foreground) 4%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-foreground) 14%, transparent);
     border-radius: 1px;
   }
   .bf-knob-slider::-moz-range-track {
@@ -867,11 +971,11 @@
         to right,
         transparent 0,
         transparent calc(100% / 24 - 1px),
-        rgba(255, 255, 255, 0.07) calc(100% / 24 - 1px),
-        rgba(255, 255, 255, 0.07) calc(100% / 24)
+        color-mix(in srgb, var(--color-foreground) 9%, transparent) calc(100% / 24 - 1px),
+        color-mix(in srgb, var(--color-foreground) 9%, transparent) calc(100% / 24)
       ),
-      rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.10);
+      color-mix(in srgb, var(--color-foreground) 4%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-foreground) 14%, transparent);
     border-radius: 1px;
   }
 
@@ -880,46 +984,46 @@
     appearance: none;
     width: 6px;
     height: 20px;
-    background: #e879f9;
+    background: var(--color-primary);
     border: none;
     border-radius: 1px;
     margin-top: -4px;
     box-shadow:
-      0 0 0 1px rgba(9, 9, 11, 1),
-      0 0 0 2px rgba(232, 121, 249, 0.45);
+      0 0 0 1px var(--color-background),
+      0 0 0 2px color-mix(in srgb, var(--color-primary) 45%, transparent);
     cursor: pointer;
     transition: box-shadow 120ms ease;
   }
   .bf-knob-slider:hover::-webkit-slider-thumb {
     box-shadow:
-      0 0 0 1px rgba(9, 9, 11, 1),
-      0 0 0 2px rgba(232, 121, 249, 0.85),
-      0 0 8px rgba(232, 121, 249, 0.35);
+      0 0 0 1px var(--color-background),
+      0 0 0 2px color-mix(in srgb, var(--color-primary) 85%, transparent),
+      0 0 8px color-mix(in srgb, var(--color-primary) 35%, transparent);
   }
   .bf-knob-slider:focus-visible::-webkit-slider-thumb {
     box-shadow:
-      0 0 0 1px rgba(9, 9, 11, 1),
-      0 0 0 2px #e879f9,
-      0 0 10px rgba(232, 121, 249, 0.55);
+      0 0 0 1px var(--color-background),
+      0 0 0 2px var(--color-primary),
+      0 0 10px color-mix(in srgb, var(--color-primary) 55%, transparent);
   }
 
   .bf-knob-slider::-moz-range-thumb {
     width: 6px;
     height: 20px;
-    background: #e879f9;
+    background: var(--color-primary);
     border: none;
     border-radius: 1px;
     box-shadow:
-      0 0 0 1px rgba(9, 9, 11, 1),
-      0 0 0 2px rgba(232, 121, 249, 0.45);
+      0 0 0 1px var(--color-background),
+      0 0 0 2px color-mix(in srgb, var(--color-primary) 45%, transparent);
     cursor: pointer;
     transition: box-shadow 120ms ease;
   }
   .bf-knob-slider:hover::-moz-range-thumb {
     box-shadow:
-      0 0 0 1px rgba(9, 9, 11, 1),
-      0 0 0 2px rgba(232, 121, 249, 0.85),
-      0 0 8px rgba(232, 121, 249, 0.35);
+      0 0 0 1px var(--color-background),
+      0 0 0 2px color-mix(in srgb, var(--color-primary) 85%, transparent),
+      0 0 8px color-mix(in srgb, var(--color-primary) 35%, transparent);
   }
 
   /* Floating player horizontal seek slider. */
