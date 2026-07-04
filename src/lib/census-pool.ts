@@ -34,11 +34,11 @@ const CHUNK_MAX = 1 << 25;       // 33.5M — bounds pause latency in dense stri
 const GROW_BELOW_MS = 400;
 const SHRINK_ABOVE_MS = 2500;
 
-export function freshResult(n: number): CensusResult {
+export function freshResult(w: number, h: number): CensusResult {
   return {
-    w: n,
-    h: n,
-    total: Math.pow(2, n * n),
+    w,
+    h,
+    total: Math.pow(2, w * h),
     processed: 0,
     dies: 0,
     stillLifes: 0,
@@ -63,7 +63,8 @@ export interface CensusPoolCallbacks {
 }
 
 export class CensusPool {
-  readonly n: number;
+  readonly w: number;
+  readonly h: number;
   readonly workerCount: number;
   private readonly result: CensusResult;
   private readonly pending = new Map<number, { end: number; acc: ChunkAcc }>(); // keyed by range start
@@ -74,8 +75,9 @@ export class CensusPool {
   private lastWall = 0;
   private stopped = false;
 
-  constructor(n: number, resume: CensusResult | null, private cb: CensusPoolCallbacks) {
-    this.n = n;
+  constructor(w: number, h: number, resume: CensusResult | null, private cb: CensusPoolCallbacks) {
+    this.w = w;
+    this.h = h;
     this.workerCount = poolWorkerCount();
 
     if (resume && !resume.done && resume.processed > 0) {
@@ -84,7 +86,7 @@ export class CensusPool {
       this.result = { ...resume };
     } else {
       this.contiguous = 0;
-      this.result = freshResult(n);
+      this.result = freshResult(w, h);
     }
     this.cursor = this.contiguous;
   }
@@ -124,7 +126,7 @@ export class CensusPool {
     const start = this.cursor;
     const end = Math.min(start + this.chunkSize, this.result.total);
     this.cursor = end;
-    const req: CensusChunkRequest = { n: this.n, chunkId: start, start, end };
+    const req: CensusChunkRequest = { w: this.w, h: this.h, start, end };
     w.postMessage(req);
   }
 

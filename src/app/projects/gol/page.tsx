@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import GameOfLife from '@/components/GameOfLife';
+import { useCallback, useRef, useState } from 'react';
+import GameOfLife, { type GameOfLifeHandle } from '@/components/GameOfLife';
 import GolCensus from '@/components/GolCensus';
 import PageTransition from '@/components/motion/PageTransition';
 import { useHeaderConfig } from '@/components/header-config';
@@ -13,32 +13,45 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'census', label: 'The Census' },
 ];
 
+// The two panes are boards hung on the same wall: the active one slides into
+// place while the other lifts away, a 300ms crossfade. Both stay mounted —
+// the board keeps its engine state, the census keeps its worker pool running.
+const PANE = 'absolute inset-0 transition-[opacity,transform] duration-300 ease-out';
+const PANE_ON = 'opacity-100 translate-y-0';
+const PANE_OFF = 'pointer-events-none opacity-0';
+
 export default function GameOfLifePage() {
   // Recolor the global header to match the seminar room.
   useHeaderConfig({ scopeClass: 'gol-theme' });
 
   const [tab, setTab] = useState<Tab>('board');
-  // Once visited, the census stays mounted (hidden) so a deep multi-core run
-  // keeps crunching while the visitor is back on the board.
   const [censusVisited, setCensusVisited] = useState(false);
-  const selectTab = (t: Tab) => {
+  const boardRef = useRef<GameOfLifeHandle>(null);
+
+  const selectTab = useCallback((t: Tab) => {
     if (t === 'census') setCensusVisited(true);
     setTab(t);
-  };
+  }, []);
+
+  // Census gallery → chalk the oscillator onto the live board.
+  const showOnBoard = useCallback((cells: { x: number; y: number }[]) => {
+    boardRef.current?.chalkPattern(cells);
+    setTab('board');
+  }, []);
 
   return (
     <PageTransition>
       <div className="gol-theme relative overflow-hidden" style={{ height: 'calc(100vh - 57px)' }}>
-        {/* The board stays mounted across tabs — the engine's state lives here.
-            Hidden (not unmounted) while the census is open. */}
-        <div className={tab === 'board' ? 'absolute inset-0' : 'hidden'}>
-          <GameOfLife />
+        <div className={`${PANE} ${tab === 'board' ? PANE_ON : `${PANE_OFF} translate-y-4`}`}>
+          <GameOfLife ref={boardRef} />
         </div>
 
         {censusVisited && (
-          <div className={tab === 'census' ? 'absolute inset-0 overflow-y-auto' : 'hidden'}>
+          <div
+            className={`${PANE} overflow-y-auto ${tab === 'census' ? PANE_ON : `${PANE_OFF} -translate-y-4 overflow-y-hidden`}`}
+          >
             <div className="mx-auto max-w-5xl px-4 pb-14 pt-28 sm:px-6">
-              <GolCensus />
+              <GolCensus onShowOnBoard={showOnBoard} />
             </div>
           </div>
         )}

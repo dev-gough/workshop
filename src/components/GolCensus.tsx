@@ -8,33 +8,46 @@ import {
   createCensusEngine,
   decodeState,
   stepBounded,
-  MAX_N,
+  MAX_AXIS,
 } from '@/workers/gol-census-core';
 import type { CensusResult } from '@/workers/gol-census-shared';
-import { CensusPool, freshResult, poolWorkerCount } from '@/lib/census-pool';
+import { CensusPool, poolWorkerCount } from '@/lib/census-pool';
 
 // ── Board sizes ───────────────────────────────────────────────────────────
 //
-// 1×1..4×4 (≤65k states) compute synchronously on mount — the engine clears
-// them in milliseconds. 5×5 and up are "the long count": a CensusPool fans
-// block-aligned chunks out to one worker per core, and the merged contiguous
-// prefix checkpoints to localStorage so a page close never loses work.
-// 7×7 is the ceiling: its 2^49 indices are the largest that stay exact in a
-// float64 (8×8 would need 2^64), and even it is a gift to future hardware.
+// The heatmap is the full W×H matrix (width → columns, height ↓ rows) up to
+// 7 on each axis, and doubles as the board picker. W×H and H×W are distinct
+// boards computed independently — the transpose bijection says their counts
+// must agree, which scripts/census-verify.ts exploits as a cross-check.
+//
+// Boards up to 2^20 states compute synchronously on mount (the engine clears
+// ~7M states/s/core). Anything bigger is "the long count": a CensusPool fans
+// block-aligned chunks out to one worker per core, checkpointing the merged
+// contiguous prefix to localStorage so a page close never loses work.
 
-const AUTO_NS = [1, 2, 3, 4];
-const DEEP_NS = [5, 6, 7];
-const ALL_NS = [...AUTO_NS, ...DEEP_NS];
+const AXES = Array.from({ length: MAX_AXIS }, (_, i) => i + 1);
+const AUTO_MAX_STATES = Math.pow(2, 20);
+
+interface Size { w: number; h: number; }
+
+const ALL_SIZES: Size[] = AXES.flatMap(h => AXES.map(w => ({ w, h })));
+
+function totalOf(s: Size): number { return Math.pow(2, s.w * s.h); }
+function isDeep(s: Size): boolean { return totalOf(s) > AUTO_MAX_STATES; }
+function sizeKey(s: Size): string { return `${s.w}x${s.h}`; }
+function sameSize(a: Size | null, b: Size | null): boolean {
+  return !!a && !!b && a.w === b.w && a.h === b.h;
+}
 
 const STORAGE_PREFIX = 'gol-census-v2:';
 const SAVE_THROTTLE_MS = 1500;
 
-function storageKey(n: number) { return `${STORAGE_PREFIX}${n}x${n}`; }
+function storageKey(s: Size) { return `${STORAGE_PREFIX}${sizeKey(s)}`; }
 
-function loadResult(n: number): CensusResult | null {
+function loadResult(s: Size): CensusResult | null {
   if (typeof localStorage === 'undefined') return null;
   try {
-    const raw = localStorage.getItem(storageKey(n));
+    const raw = localStorage.getItem(storageKey(s));
     if (!raw) return null;
     return JSON.parse(raw) as CensusResult;
   } catch {
@@ -42,9 +55,9 @@ function loadResult(n: number): CensusResult | null {
   }
 }
 
-function saveResult(n: number, r: CensusResult) {
+function saveResult(s: Size, r: CensusResult) {
   try {
-    localStorage.setItem(storageKey(n), JSON.stringify(r));
+    localStorage.setItem(storageKey(s), JSON.stringify(r));
   } catch {
     /* quota — ignore */
   }
@@ -60,17 +73,17 @@ function fmtCount(v: number): string {
   return v.toLocaleString();
 }
 
-function classifiedTotal(r: CensusResult): number {
-  return r.dies + r.stillLifes + oscTotal(r) + r.unresolved;
-}
-
 function oscTotal(r: CensusResult): number {
   return Object.values(r.periods).reduce((a, b) => a + b, 0);
 }
 
+function classifiedTotal(r: CensusResult): number {
+  return r.dies + r.stillLifes + oscTotal(r) + r.unresolved;
+}
+
 // ── Small cell-grid canvas for gallery / examples ─────────────────────────
 
-function MiniGrid({ state, n, cell = 12 }: { state: number; n: number; cell?: number }) {
+function MiniGrid({ state, w, h, cell = 12 }: { state: number; w: number; h: number; cell?: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -83,35 +96,35 @@ function MiniGrid({ state, n, cell = 12 }: { state: number; n: number; cell?: nu
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.strokeStyle = 'rgba(236,231,216,0.09)';
     ctx.lineWidth = 1;
-    for (let x = 0; x <= n; x++) {
+    for (let x = 0; x <= w; x++) {
       ctx.beginPath();
       ctx.moveTo(x * cell + 0.5, 0.5);
-      ctx.lineTo(x * cell + 0.5, n * cell + 0.5);
+      ctx.lineTo(x * cell + 0.5, h * cell + 0.5);
       ctx.stroke();
     }
-    for (let y = 0; y <= n; y++) {
+    for (let y = 0; y <= h; y++) {
       ctx.beginPath();
       ctx.moveTo(0.5, y * cell + 0.5);
-      ctx.lineTo(n * cell + 0.5, y * cell + 0.5);
+      ctx.lineTo(w * cell + 0.5, y * cell + 0.5);
       ctx.stroke();
     }
     // decode via exact float64 math — states above 2^32 outgrow JS bitwise ops
-    const rows = decodeState(n, state);
+    const rows = decodeState(w, h, state);
     ctx.fillStyle = '#ece7d8';
-    for (let y = 0; y < n; y++) {
-      for (let x = 0; x < n; x++) {
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
         if ((rows[y] >>> x) & 1) {
           ctx.fillRect(x * cell + 1, y * cell + 1, cell - 1, cell - 1);
         }
       }
     }
-  }, [state, n, cell]);
+  }, [state, w, h, cell]);
 
   return (
     <canvas
       ref={canvasRef}
-      width={n * cell + 1}
-      height={n * cell + 1}
+      width={w * cell + 1}
+      height={h * cell + 1}
       className="rounded-sm"
     />
   );
@@ -119,35 +132,45 @@ function MiniGrid({ state, n, cell = 12 }: { state: number; n: number; cell?: nu
 
 // ── Animated oscillator for the gallery ───────────────────────────────────
 //
-// Renders the actual cycle of a period-N oscillator by stepping the bounded
-// board on an interval, using the census core's own step function.
+// Steps the actual bounded cycle with the census core's own step function.
+// Click to chalk it onto the live board (page handles the tab flip).
 
-function OscillatorGalleryItem({ state, period, n }: { state: number; period: number; n: number }) {
+function OscillatorGalleryItem({
+  state, period, w, h, onOpen,
+}: {
+  state: number; period: number; w: number; h: number;
+  onOpen?: () => void;
+}) {
   const [frame, setFrame] = useState(state);
 
   useEffect(() => {
-    let rows = decodeState(n, state);
-    const block = Math.pow(2, n);
+    let rows = decodeState(w, h, state);
+    const block = Math.pow(2, w);
     const encode = (r: number[]) => r.reduce((s, row, y) => s + row * Math.pow(block, y), 0);
     setFrame(state);
     const id = setInterval(() => {
-      rows = stepBounded(n, rows);
+      rows = stepBounded(w, h, rows);
       setFrame(encode(rows));
     }, 400);
     return () => clearInterval(id);
-  }, [state, n]);
+  }, [state, w, h]);
 
   return (
-    <div className="flex flex-col items-center gap-1.5 p-2 rounded-lg border border-border bg-card">
-      <MiniGrid state={frame} n={n} cell={n >= 6 ? 10 : n >= 5 ? 12 : 16} />
-      <span className="text-[10px] font-medium text-muted-foreground tabular-nums">
-        {n}×{n} · period {period}
+    <button
+      onClick={onOpen}
+      disabled={!onOpen}
+      title="Chalk it onto the board"
+      className="group flex flex-col items-center gap-1.5 rounded-lg border border-border bg-card p-2 transition-colors enabled:cursor-pointer enabled:hover:border-primary/50"
+    >
+      <MiniGrid state={frame} w={w} h={h} cell={Math.max(w, h) >= 6 ? 10 : Math.max(w, h) >= 5 ? 12 : 16} />
+      <span className="text-[10px] font-medium text-muted-foreground tabular-nums transition-colors group-enabled:group-hover:text-primary">
+        {w}×{h} · period {period}
       </span>
-    </div>
+    </button>
   );
 }
 
-// ── Heatmap of oscillation % per grid dimension ───────────────────────────
+// ── Heatmap of oscillation % per board size ───────────────────────────────
 
 function oscPercent(r: CensusResult): number {
   const classified = classifiedTotal(r);
@@ -253,66 +276,74 @@ function ResultCard({ result }: { result: CensusResult }) {
 
 // ── Main component ────────────────────────────────────────────────────────
 
-export default function GolCensus() {
-  const [results, setResults] = useState<Record<number, CensusResult>>({});
-  const [deepN, setDeepN] = useState(5);
-  const [running, setRunning] = useState(false);
+interface GolCensusProps {
+  /** Chalk an oscillator's cells onto the main board (page flips the tab). */
+  onShowOnBoard?: (cells: { x: number; y: number }[]) => void;
+}
+
+export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
+  const [results, setResults] = useState<Record<string, CensusResult>>({});
+  const [sel, setSel] = useState<Size>({ w: 5, h: 5 });
+  const [runningSize, setRunningSize] = useState<Size | null>(null);
   const [rate, setRate] = useState<number | null>(null);
   const poolRef = useRef<CensusPool | null>(null);
-  const rateRef = useRef<{ t: number; processed: number } | null>(null);
+  const rateRef = useRef<{ t: number; classified: number } | null>(null);
   const lastSaveRef = useRef(0);
 
   const setResult = useCallback((r: CensusResult) => {
-    setResults(prev => ({ ...prev, [r.w]: r }));
+    setResults(prev => ({ ...prev, [sizeKey({ w: r.w, h: r.h })]: r }));
   }, []);
 
-  // ── Load persisted results; compute the instant sizes on the spot ──
+  // ── Load persisted results; compute the instant boards on the spot ──
   useEffect(() => {
-    const loaded: Record<number, CensusResult> = {};
-    for (const n of ALL_NS) {
-      const r = loadResult(n);
-      if (r) loaded[n] = r;
+    const loaded: Record<string, CensusResult> = {};
+    for (const s of ALL_SIZES) {
+      const r = loadResult(s);
+      if (r) loaded[sizeKey(s)] = r;
     }
     if (Object.keys(loaded).length) setResults(loaded);
 
-    // 1×1..4×4: ≤65k states each — the engine clears the lot in ~10ms on the
-    // main thread, so no worker ceremony. Deferred a tick to let paint land.
-    const missing = AUTO_NS.filter(n => !loaded[n]?.done);
-    if (missing.length === 0) return;
-    const t = setTimeout(() => {
-      for (const n of missing) {
-        const engine = createCensusEngine(n);
-        const t0 = performance.now();
-        const acc = engine.runChunk(0, engine.total);
-        const result: CensusResult = {
-          w: n,
-          h: n,
-          total: engine.total,
-          processed: engine.total,
-          dies: acc.dies,
-          stillLifes: acc.stillLifes,
-          unresolved: acc.unresolved,
-          periods: acc.periods,
-          oscExamples: acc.oscExamples,
-          stillLifeExamples: acc.stillLifeExamples,
-          done: true,
-          elapsedMs: performance.now() - t0,
-        };
-        saveResult(n, result);
-        setResult(result);
-      }
-    }, 0);
-    return () => clearTimeout(t);
+    // Every board ≤2^20 states runs synchronously — one per macrotask so the
+    // UI keeps painting while the matrix fills in.
+    const queue = ALL_SIZES.filter(s => !isDeep(s) && !loaded[sizeKey(s)]?.done);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const runNext = () => {
+      if (cancelled || queue.length === 0) return;
+      const s = queue.shift()!;
+      const engine = createCensusEngine(s.w, s.h);
+      const t0 = performance.now();
+      const acc = engine.runChunk(0, engine.total);
+      const result: CensusResult = {
+        w: s.w,
+        h: s.h,
+        total: engine.total,
+        processed: engine.total,
+        dies: acc.dies,
+        stillLifes: acc.stillLifes,
+        unresolved: acc.unresolved,
+        periods: acc.periods,
+        oscExamples: acc.oscExamples,
+        stillLifeExamples: acc.stillLifeExamples,
+        done: true,
+        elapsedMs: performance.now() - t0,
+      };
+      saveResult(s, result);
+      setResult(result);
+      timer = setTimeout(runNext, 0);
+    };
+    timer = setTimeout(runNext, 0);
+    return () => { cancelled = true; clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Deep runs (5×5+): worker pool with contiguous checkpoints ──
+  // ── Deep runs: worker pool with contiguous checkpoints ──
 
   const persistThrottled = useCallback((r: CensusResult, force = false) => {
     const now = performance.now();
     if (!force && now - lastSaveRef.current < SAVE_THROTTLE_MS) return;
     lastSaveRef.current = now;
-    saveResult(r.w, r);
+    saveResult({ w: r.w, h: r.h }, r);
   }, []);
 
   const trackRate = useCallback((r: CensusResult) => {
@@ -320,20 +351,20 @@ export default function GolCensus() {
     const classified = classifiedTotal(r);
     const prev = rateRef.current;
     if (prev && now - prev.t > 400) {
-      const inst = ((classified - prev.processed) / (now - prev.t)) * 1000;
+      const inst = ((classified - prev.classified) / (now - prev.t)) * 1000;
       setRate(old => (old === null ? inst : old * 0.7 + inst * 0.3));
-      rateRef.current = { t: now, processed: classified };
+      rateRef.current = { t: now, classified };
     } else if (!prev) {
-      rateRef.current = { t: now, processed: classified };
+      rateRef.current = { t: now, classified };
     }
   }, []);
 
   const startDeep = useCallback(() => {
     if (poolRef.current) return;
-    const n = deepN;
+    const s = sel;
     rateRef.current = null;
     setRate(null);
-    const pool = new CensusPool(n, loadResult(n), {
+    const pool = new CensusPool(s.w, s.h, loadResult(s), {
       onUpdate: (r) => {
         setResult(r);
         trackRate(r);
@@ -342,46 +373,58 @@ export default function GolCensus() {
       onDone: (r) => {
         setResult(r);
         persistThrottled(r, true);
-        setRunning(false);
+        setRunningSize(null);
         poolRef.current = null;
         setRate(null);
       },
     });
     poolRef.current = pool;
-    setRunning(true);
+    setRunningSize(s);
     pool.start();
-  }, [deepN, persistThrottled, setResult, trackRate]);
+  }, [sel, persistThrottled, setResult, trackRate]);
 
   const pauseDeep = useCallback(() => {
     const pool = poolRef.current;
     if (!pool) return;
     const snapshot = pool.stop();
     poolRef.current = null;
-    setRunning(false);
+    setRunningSize(null);
     setRate(null);
     setResult(snapshot);
     persistThrottled(snapshot, true);
   }, [persistThrottled, setResult]);
 
   const resetDeep = useCallback(() => {
-    if (running) return;
-    try { localStorage.removeItem(storageKey(deepN)); } catch { /* ignore */ }
+    if (runningSize) return;
+    try { localStorage.removeItem(storageKey(sel)); } catch { /* ignore */ }
     setResults(prev => {
       const next = { ...prev };
-      delete next[deepN];
+      delete next[sizeKey(sel)];
       return next;
     });
-  }, [deepN, running]);
+  }, [sel, runningSize]);
 
   // Pause (checkpointing) if the page unmounts mid-run.
   useEffect(() => () => {
     const pool = poolRef.current;
     if (pool) {
       const snapshot = pool.stop();
-      saveResult(snapshot.w, snapshot);
+      saveResult({ w: snapshot.w, h: snapshot.h }, snapshot);
       poolRef.current = null;
     }
   }, []);
+
+  const openOscillator = useCallback((w: number, h: number, state: number) => {
+    if (!onShowOnBoard) return;
+    const rows = decodeState(w, h, state);
+    const cells: { x: number; y: number }[] = [];
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if ((rows[y] >>> x) & 1) cells.push({ x, y });
+      }
+    }
+    onShowOnBoard(cells);
+  }, [onShowOnBoard]);
 
   // ── Derived ──
   //
@@ -389,175 +432,185 @@ export default function GolCensus() {
   // not the raw index cursor: pruning makes per-index cost swing ~1000×
   // across the space, so the cursor is a poor progress signal, while
   // classified grows with actual work and lands exactly on `total`.
-  const deepResult = results[deepN];
-  const deepTotal = Math.pow(2, deepN * deepN);
-  const deepClassified = deepResult ? classifiedTotal(deepResult) : 0;
-  const deepPct = (deepClassified / deepTotal) * 100;
-  const etaSeconds = rate && rate > 0 ? Math.round((deepTotal - deepClassified) / rate) : 0;
+  const selResult = results[sizeKey(sel)];
+  const selTotal = totalOf(sel);
+  const selClassified = selResult ? classifiedTotal(selResult) : 0;
+  const selPct = (selClassified / selTotal) * 100;
+  const selIsRunning = sameSize(runningSize, sel);
+  const etaSeconds = rate && rate > 0 ? Math.round((selTotal - selClassified) / rate) : 0;
 
-  const galleryItems = ALL_NS
-    .map(n => results[n])
-    .filter((r): r is CensusResult => !!r)
-    .flatMap(r => r.oscExamples.map(ex => ({ ...ex, n: r.w })))
+  const galleryItems = Object.values(results)
+    .flatMap(r => r.oscExamples.map(ex => ({ ...ex, w: r.w, h: r.h })))
     .sort((a, b) => b.period - a.period)
-    .slice(0, 8);
+    .slice(0, 10);
 
   return (
     <div className="flex flex-col gap-6">
       <div>
         <h2 className="ws-serif text-2xl font-semibold">The census</h2>
         <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
-          Every starting configuration on a bounded N×N board, simulated to its cycle and classified
-          as dies&nbsp;out, still&nbsp;life, or oscillator. Boards to 4×4 compute instantly;
-          5×5 and up run on every core this machine has.
+          Every starting configuration on a bounded W×H board, simulated to its cycle and
+          classified as dies&nbsp;out, still&nbsp;life, or oscillator. Boards to a million states
+          compute on arrival; bigger ones run on every core this machine has.
         </p>
       </div>
 
-      {/* Heatmap */}
+      {/* Heatmap matrix — width → columns, height ↓ rows. Also the picker. */}
       <div className="rounded-xl border border-border bg-card p-4">
-        <div className="flex items-baseline justify-between mb-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 mb-3">
           <h3 className="text-[11px] font-semibold uppercase tracking-[0.18em]">Oscillation heatmap</h3>
-          <span className="text-[10px] text-muted-foreground">% of configs ending in an oscillating cycle</span>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {ALL_NS.map(n => {
-            const r = results[n];
-            const hasData = r && classifiedTotal(r) > 0;
-            const pctVal = hasData ? oscPercent(r) : null;
-            const heat = pctVal !== null ? heatColor(pctVal) : null;
-            return (
-              <div
-                key={n}
-                className={`flex flex-col items-center justify-center rounded-lg w-20 h-20 shadow-sm ${heat ? '' : 'bg-muted text-muted-foreground'}`}
-                style={heat ? { background: heat.bg, color: heat.ink } : undefined}
-                title={
-                  hasData
-                    ? `${n}×${n}: ${pctVal!.toFixed(3)}% oscillate${r.done ? '' : ' (partial)'}`
-                    : `${n}×${n}: not yet counted`
-                }
-              >
-                <span className="text-xs font-semibold">{n}×{n}</span>
-                <span className="text-[11px] font-mono tabular-nums">
-                  {pctVal !== null ? `${pctVal.toFixed(2)}%${r.done ? '' : '…'}` : '—'}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* The long count — deep sizes on the worker pool */}
-      <div className="rounded-xl border border-border bg-card p-4 flex flex-col gap-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h3 className="text-[11px] font-semibold uppercase tracking-[0.18em]">The long count</h3>
-            <p className="text-xs text-muted-foreground mt-0.5 max-w-lg">
-              One worker per core sweeps the state space in resumable chunks — D4 symmetry
-              pruning, bit-parallel stepping, Brent cycle detection. Progress checkpoints to
-              this browser, so closing the page never loses a run.
-            </p>
-          </div>
-          <div className="flex items-center gap-1.5">
-            {running ? (
-              <Button size="sm" variant="secondary" className="h-8 gap-1.5" onClick={pauseDeep}>
-                <Pause className="h-3.5 w-3.5" /> Pause
-              </Button>
-            ) : (
-              <Button
-                size="sm"
-                className="h-8 gap-1.5"
-                onClick={startDeep}
-                disabled={deepResult?.done}
-              >
-                <Play className="h-3.5 w-3.5" />
-                {deepResult && !deepResult.done && deepResult.processed > 0 ? 'Resume' : 'Start'}
-              </Button>
-            )}
-            <Button size="sm" variant="ghost" className="h-8 gap-1.5" onClick={resetDeep} disabled={running}>
-              <RotateCcw className="h-3.5 w-3.5" /> Reset
-            </Button>
-          </div>
-        </div>
-
-        {/* Size chips — a stick of chalk per board */}
-        <div className="flex flex-wrap gap-2">
-          {DEEP_NS.map(n => {
-            const r = results[n];
-            const selected = n === deepN;
-            const status = r?.done
-              ? 'complete'
-              : r && r.processed > 0
-                ? `${((classifiedTotal(r) / Math.pow(2, n * n)) * 100).toFixed(1)}%`
-                : `${fmtCount(Math.pow(2, n * n))} states`;
-            return (
-              <button
-                key={n}
-                onClick={() => setDeepN(n)}
-                disabled={running}
-                className={`flex flex-col items-start rounded-md border px-3 py-1.5 text-left transition-colors disabled:opacity-60 ${
-                  selected
-                    ? 'border-primary/60 bg-primary/10 text-primary'
-                    : 'border-border text-muted-foreground hover:border-primary/30 hover:text-foreground'
-                }`}
-              >
-                <span className="text-xs font-semibold">{n}×{n}</span>
-                <span className="text-[10px] font-mono tabular-nums opacity-80">{status}</span>
-              </button>
-            );
-          })}
-          <span className="self-center text-[10px] text-muted-foreground pl-1">
-            8×8 would need 2⁶⁴ — past float64 and past patience. {MAX_N}×{MAX_N} is the wall.
+          <span className="text-[10px] text-muted-foreground">
+            % of configs ending in an oscillating cycle · select a board to inspect it
           </span>
         </div>
-
-        {deepResult && (
-          <div className="flex flex-col gap-1.5">
-            <div className="h-1.5 bg-muted/50 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-chart-1 transition-[width] duration-200"
-                style={{ width: `${Math.min(deepPct, 100)}%` }}
-              />
+        <div
+          className="grid gap-1"
+          style={{ gridTemplateColumns: `2rem repeat(${MAX_AXIS}, minmax(0, 1fr))` }}
+        >
+          <div className="flex items-end justify-center pb-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <span title="height ↓ / width →">h\w</span>
+          </div>
+          {AXES.map(w => (
+            <div key={`col-${w}`} className="flex items-end justify-center pb-1 text-[10px] font-mono text-muted-foreground">
+              {w}
             </div>
-            <div className="flex flex-wrap items-center justify-between gap-x-3 text-[10px] text-muted-foreground font-mono tabular-nums">
-              <span
-                title={`${deepClassified.toLocaleString()} of ${deepTotal.toLocaleString()} states classified · index cursor at ${(deepResult.processed).toLocaleString()}`}
-              >
-                {deepPct.toFixed(2)}% · {fmtCount(deepClassified)} / {fmtCount(deepTotal)} counted
-              </span>
-              <span className="flex items-center gap-3">
-                {running && rate !== null && rate > 0 && (
-                  <>
-                    <span>{fmtCount(Math.round(rate))} states/s · {poolRef.current?.workerCount ?? poolWorkerCount()} workers</span>
-                    <span>ETA {fmtEta(etaSeconds)}</span>
-                  </>
-                )}
-                {deepResult.done && (
-                  <span className="text-chart-4">
-                    complete in {fmtDuration(Math.max(1, Math.round(deepResult.elapsedMs / 1000)))}
-                  </span>
-                )}
-              </span>
+          ))}
+          {AXES.map(h => (
+            <div key={`row-${h}`} className="contents">
+              <div className="flex items-center justify-center text-[10px] font-mono text-muted-foreground">
+                {h}
+              </div>
+              {AXES.map(w => {
+                const s = { w, h };
+                const r = results[sizeKey(s)];
+                const hasData = r && classifiedTotal(r) > 0;
+                const pctVal = hasData ? oscPercent(r) : null;
+                const heat = pctVal !== null ? heatColor(pctVal) : null;
+                const selected = sameSize(sel, s);
+                const isRun = sameSize(runningSize, s);
+                return (
+                  <button
+                    key={sizeKey(s)}
+                    onClick={() => setSel(s)}
+                    className={`flex h-11 flex-col items-center justify-center rounded-md transition-shadow ${
+                      heat ? '' : 'bg-muted text-muted-foreground'
+                    } ${selected ? 'ring-2 ring-primary' : 'hover:ring-1 hover:ring-primary/40'}`}
+                    style={heat ? { background: heat.bg, color: heat.ink } : undefined}
+                    title={
+                      hasData
+                        ? `${w}×${h}: ${pctVal!.toFixed(3)}% oscillate${r.done ? '' : ' (partial)'}`
+                        : `${w}×${h}: ${fmtCount(totalOf(s))} states, not yet counted`
+                    }
+                  >
+                    <span className={`text-[10px] font-mono tabular-nums leading-none ${isRun ? 'animate-pulse' : ''}`}>
+                      {pctVal !== null ? `${pctVal.toFixed(2)}${r.done ? '' : '…'}` : '—'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* The long count — controls for the selected deep board */}
+      {isDeep(sel) && (
+        <div className="rounded-xl border border-border bg-card p-4 flex flex-col gap-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-[11px] font-semibold uppercase tracking-[0.18em]">
+                The long count — {sel.w}×{sel.h}
+                <span className="ml-2 font-mono normal-case tracking-normal text-muted-foreground">
+                  {fmtCount(selTotal)} states
+                </span>
+              </h3>
+              <p className="text-xs text-muted-foreground mt-0.5 max-w-lg">
+                One worker per core sweeps the state space in resumable chunks — symmetry
+                pruning, bit-parallel stepping, Brent cycle detection. Progress checkpoints
+                to this browser, so closing the page never loses a run.
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5">
+              {runningSize ? (
+                <Button size="sm" variant="secondary" className="h-8 gap-1.5" onClick={pauseDeep}>
+                  <Pause className="h-3.5 w-3.5" /> Pause {runningSize.w}×{runningSize.h}
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  className="h-8 gap-1.5"
+                  onClick={startDeep}
+                  disabled={selResult?.done}
+                >
+                  <Play className="h-3.5 w-3.5" />
+                  {selResult && !selResult.done && selResult.processed > 0 ? 'Resume' : 'Start'}
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" className="h-8 gap-1.5" onClick={resetDeep} disabled={!!runningSize}>
+                <RotateCcw className="h-3.5 w-3.5" /> Reset
+              </Button>
             </div>
           </div>
-        )}
-      </div>
 
-      {/* Per-size result cards */}
-      <div className="grid gap-3 sm:grid-cols-2">
-        {ALL_NS.map(n => {
-          const r = results[n];
-          if (!r || classifiedTotal(r) === 0) return null;
-          return <ResultCard key={n} result={r} />;
-        })}
-      </div>
+          {runningSize && !selIsRunning && (
+            <p className="text-[11px] text-muted-foreground">
+              {runningSize.w}×{runningSize.h} is mid-count — pause it to start {sel.w}×{sel.h}.
+            </p>
+          )}
+
+          {selResult && (
+            <div className="flex flex-col gap-1.5">
+              <div className="h-1.5 bg-muted/50 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-chart-1 transition-[width] duration-200"
+                  style={{ width: `${Math.min(selPct, 100)}%` }}
+                />
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-x-3 text-[10px] text-muted-foreground font-mono tabular-nums">
+                <span
+                  title={`${selClassified.toLocaleString()} of ${selTotal.toLocaleString()} states classified · index cursor at ${selResult.processed.toLocaleString()}`}
+                >
+                  {selPct.toFixed(2)}% · {fmtCount(selClassified)} / {fmtCount(selTotal)} counted
+                </span>
+                <span className="flex items-center gap-3">
+                  {selIsRunning && rate !== null && rate > 0 && (
+                    <>
+                      <span>{fmtCount(Math.round(rate))} states/s · {poolRef.current?.workerCount ?? poolWorkerCount()} workers</span>
+                      <span>ETA {fmtEta(etaSeconds)}</span>
+                    </>
+                  )}
+                  {selResult.done && (
+                    <span className="text-chart-4">
+                      complete in {fmtDuration(Math.max(1, Math.round(selResult.elapsedMs / 1000)))}
+                    </span>
+                  )}
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Selected board detail */}
+      {selResult && classifiedTotal(selResult) > 0 && <ResultCard result={selResult} />}
 
       {/* Longest-period oscillator gallery */}
       {galleryItems.length > 0 && (
         <div>
-          <h3 className="text-[11px] font-semibold uppercase tracking-[0.18em] mb-3">Longest-period oscillators found</h3>
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 mb-3">
+            <h3 className="text-[11px] font-semibold uppercase tracking-[0.18em]">Longest-period oscillators found</h3>
+            <span className="text-[10px] text-muted-foreground">select one to chalk it onto the board</span>
+          </div>
           <div className="flex flex-wrap gap-3">
             {galleryItems.map((it, i) => (
-              <OscillatorGalleryItem key={`${it.n}-${it.period}-${i}`} state={it.state} period={it.period} n={it.n} />
+              <OscillatorGalleryItem
+                key={`${it.w}x${it.h}-${it.period}-${i}`}
+                state={it.state}
+                period={it.period}
+                w={it.w}
+                h={it.h}
+                onOpen={onShowOnBoard ? () => openOscillator(it.w, it.h, it.state) : undefined}
+              />
             ))}
           </div>
         </div>

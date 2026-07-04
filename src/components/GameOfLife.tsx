@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useImperativeHandle, forwardRef } from 'react';
 import PatternSelector from './PatternSelector';
 import { parseLif } from '@/lib/lif';
 import { Button } from '@/components/ui/button';
@@ -407,7 +407,14 @@ function TrayDivider() {
 
 // ── React Component ──────────────────────────────────────────────────────
 
-const GameOfLife = () => {
+/** Imperative surface for the rest of the room (census → board handoff). */
+export interface GameOfLifeHandle {
+  /** Wipe the slate, chalk `cells` at the origin with the camera fitted, and
+   *  set the board running — the pattern lands as fresh yellow chalk. */
+  chalkPattern: (cells: { x: number; y: number }[]) => void;
+}
+
+const GameOfLife = forwardRef<GameOfLifeHandle>((_props, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<GOLEngine | null>(null);
@@ -608,6 +615,34 @@ const GameOfLife = () => {
     setZoomDisplay(Math.round(val * 10) / 10);
     redraw();
   }, [redraw]);
+
+  // ── Imperative handoff: census gallery → the board ──
+
+  const chalkPattern = useCallback((cells: { x: number; y: number }[]) => {
+    const engine = engineRef.current;
+    if (!engine || cells.length === 0) return;
+    let maxX = 0, maxY = 0;
+    for (const c of cells) {
+      if (c.x > maxX) maxX = c.x;
+      if (c.y > maxY) maxY = c.y;
+    }
+    // Camera home to the origin, zoomed so the pattern sits comfortably large.
+    const { w, h } = canvasSizeRef.current;
+    const fit = Math.min(
+      w > 0 ? w / (maxX + 13) : DEFAULT_ZOOM,
+      h > 0 ? h / (maxY + 13) : DEFAULT_ZOOM,
+    );
+    const zoom = Math.max(DEFAULT_ZOOM, Math.min(26, Math.floor(fit)));
+    cameraRef.current = { x: 0, y: 0, zoom };
+    setZoomDisplay(zoom);
+    engine.loadPattern(cells, 0, 0);
+    setGeneration(0);
+    setPopulation(engine.alive.size);
+    setRunning(true);
+    redraw();
+  }, [redraw]);
+
+  useImperativeHandle(ref, () => ({ chalkPattern }), [chalkPattern]);
 
   const handleSelectPattern = useCallback((content: string) => {
     const engine = engineRef.current;
@@ -903,6 +938,8 @@ const GameOfLife = () => {
       />
     </div>
   );
-};
+});
+
+GameOfLife.displayName = 'GameOfLife';
 
 export default GameOfLife;

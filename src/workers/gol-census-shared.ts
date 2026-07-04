@@ -1,6 +1,6 @@
 // Shared message/data types for the Game of Life census workers.
 //
-// A census enumerates every starting configuration of an N×N bounded grid and
+// A census enumerates every starting configuration of a W×H bounded grid and
 // classifies each as dies / still life / oscillator(period p). The engine
 // lives in gol-census-core.ts; workers are thin chunk executors driven by the
 // CensusPool coordinator (src/lib/census-pool.ts), which fans chunks out to
@@ -26,17 +26,17 @@ export interface CensusResult {
   elapsedMs: number;
 }
 
-/** Ask a worker to census the index slice [start, end) of an n×n board. */
+/** Ask a worker to census the index slice [start, end) of a w×h board. */
 export interface CensusChunkRequest {
-  n: number;
-  chunkId: number;
+  w: number;
+  h: number;
   start: number;
   end: number;
 }
 
 export interface CensusChunkResponse {
-  n: number;
-  chunkId: number;
+  w: number;
+  h: number;
   start: number;
   end: number;
   acc: ChunkAcc;

@@ -1,24 +1,29 @@
 // Game of Life census core — the CPU-optimized enumeration engine.
 //
 // Pure TypeScript, no DOM/worker APIs: runs identically in a web worker, on
-// the main thread (tiny boards, gallery animation), and under Node
+// the main thread (small boards, gallery animation), and under Node
 // (scripts/census-verify.ts), and is the piece to port server-side when the
 // workshop box grows compute.
 //
-// Board representation: N rows packed one-per-Int32Array element, bit x of
-// element y = cell (x, y). A state's census index is Σ rows[y]·2^(y·N) —
-// exact in a float64 up to N=7 (49 bits). N=8 would overflow 2^53, which is
-// why the engine stops at 7.
+// Board representation: H rows packed one-per-Int32Array element, bit x of
+// element y = cell (x, y), rows W bits wide. A state's census index is
+// Σ rows[y]·2^(y·W) — exact in a float64 up to W·H = 49 bits (7×7). Going
+// past that (8×8 = 2^64) needs two-word indices, not just faster hardware.
+//
+// W×H and H×W are distinct boards computed independently; the transpose
+// bijection commutes with the Life rule, so their censuses must agree —
+// scripts/census-verify.ts uses that as a cross-check.
 //
 // The three optimizations, in order of what they buy:
 //
-//  1. D4 symmetry pruning (~8× fewer simulations). The 8 square symmetries
-//     partition the state space into orbits whose members all share one fate.
-//     Only the orbit minimum (in index order) is simulated; its outcome is
-//     counted with weight 8/|stabilizer|. Rejection tests are lazy row
-//     comparisons from the most-significant row, so nearly all non-minima
-//     are dismissed in a handful of ops — plus two block-level fast paths
-//     (see runChunk) that discard half the space in O(1) per 2^N block.
+//  1. Symmetry pruning (~8× fewer simulations on squares, ~4× on
+//     rectangles). The board's symmetry group — D4 for W=H, the Klein group
+//     {I, flipH, flipV, 180°} otherwise — partitions the state space into
+//     orbits whose members all share one fate. Only the orbit minimum (in
+//     index order) is simulated; its outcome is counted with weight
+//     |group|/|stabilizer|. Rejection tests are lazy row comparisons from
+//     the most-significant row, plus two block-level fast paths (see
+//     runChunk) that discard half the space in O(1) per 2^W block.
 //
 //  2. Bit-parallel stepping (~10× over per-cell popcounts). One generation
 //     is ~28 bitwise ops per row via carry-save adders: 2-bit horizontal
@@ -46,7 +51,7 @@ export interface ChunkAcc {
   stillLifeExamples: number[];      // distinct still-life states, ≤ 12
 }
 
-export const MAX_N = 7;
+export const MAX_AXIS = 7;          // heatmap is 7×7; also keeps W·H ≤ 49 < 53 bits
 export const STILL_EXAMPLE_CAP = 12;
 
 export function emptyAcc(): ChunkAcc {
@@ -98,11 +103,11 @@ function popcount32(v: number): number {
  * Scratch arrays are caller-supplied so the hot path never allocates.
  */
 function stepRowsCore(
-  n: number, mask: number,
+  h: number, mask: number,
   src: Int32Array, dst: Int32Array,
   h0: Int32Array, h1: Int32Array, u0: Int32Array, u1: Int32Array,
 ): void {
-  for (let y = 0; y < n; y++) {
+  for (let y = 0; y < h; y++) {
     const v = src[y];
     const L = (v << 1) & mask;
     const R = v >>> 1;
@@ -112,11 +117,11 @@ function stepRowsCore(
     u0[y] = L ^ R;
     u1[y] = L & R;
   }
-  for (let y = 0; y < n; y++) {
+  for (let y = 0; y < h; y++) {
     const a0 = y > 0 ? h0[y - 1] : 0;
     const a1 = y > 0 ? h1[y - 1] : 0;
-    const c0 = y < n - 1 ? h0[y + 1] : 0;
-    const c1 = y < n - 1 ? h1[y + 1] : 0;
+    const c0 = y < h - 1 ? h0[y + 1] : 0;
+    const c1 = y < h - 1 ? h1[y + 1] : 0;
     const b0 = u0[y];
     const b1 = u1[y];
     const t = a0 ^ b0;
@@ -135,30 +140,30 @@ function stepRowsCore(
 // ── State index ⇄ rows ───────────────────────────────────────────────────
 
 /** Decode a census index (exact float64 integer) into row bitmasks. */
-export function decodeState(n: number, state: number): number[] {
-  const block = 1 << n;
+export function decodeState(w: number, h: number, state: number): number[] {
+  const block = Math.pow(2, w);
   const rows: number[] = [];
   let r = state;
-  for (let y = 0; y < n; y++) {
+  for (let y = 0; y < h; y++) {
     rows.push(r % block);
     r = Math.floor(r / block);
   }
   return rows;
 }
 
-export function statePopulation(n: number, state: number): number {
+export function statePopulation(w: number, h: number, state: number): number {
   let pop = 0;
-  for (const row of decodeState(n, state)) pop += popcount32(row);
+  for (const row of decodeState(w, h, state)) pop += popcount32(row);
   return pop;
 }
 
 /** One bounded generation for UI use (gallery animation). Allocates freely. */
-export function stepBounded(n: number, rows: number[]): number[] {
-  const mask = (1 << n) - 1;
+export function stepBounded(w: number, h: number, rows: number[]): number[] {
+  const mask = (1 << w) - 1;
   const src = Int32Array.from(rows);
-  const dst = new Int32Array(n);
-  const s = () => new Int32Array(n);
-  stepRowsCore(n, mask, src, dst, s(), s(), s(), s());
+  const dst = new Int32Array(h);
+  const s = () => new Int32Array(h);
+  stepRowsCore(h, mask, src, dst, s(), s(), s(), s());
   return [...dst];
 }
 
@@ -167,55 +172,60 @@ export function stepBounded(n: number, rows: number[]): number[] {
 const BRENT_CAP = 1 << 20;
 
 export interface CensusEngine {
-  n: number;
+  w: number;
+  h: number;
   total: number;
   /** Census a slice [start, end) of the index space. start must be a multiple
-   *  of 2^n (chunk sizes are; see census-pool). Uses symmetry pruning for n≥2. */
+   *  of 2^w (chunk sizes are; see census-pool). Uses symmetry pruning. */
   runChunk(start: number, end: number): ChunkAcc;
-  /** Symmetry-free reference path — for n=1 and for verification. */
+  /** Symmetry-free reference path — for single-row boards and verification. */
   runChunkBrute(start: number, end: number): ChunkAcc;
 }
 
-export function createCensusEngine(n: number): CensusEngine {
-  if (n < 1 || n > MAX_N) throw new Error(`census board must be 1..${MAX_N}, got ${n}`);
-  const mask = (1 << n) - 1;
-  const block = 1 << n;
-  const total = Math.pow(2, n * n);
+export function createCensusEngine(w: number, h: number): CensusEngine {
+  if (w < 1 || w > MAX_AXIS || h < 1 || h > MAX_AXIS) {
+    throw new Error(`census board axes must be 1..${MAX_AXIS}, got ${w}×${h}`);
+  }
+  const mask = (1 << w) - 1;
+  const block = 1 << w;
+  const total = Math.pow(2, w * h);
+  const square = w === h;
+  const groupSize = square ? 8 : 4;
   const pw: number[] = [];
-  for (let y = 0; y < n; y++) pw.push(Math.pow(2, y * n));
+  for (let y = 0; y < h; y++) pw.push(Math.pow(2, y * w));
 
   // Bit-reversal (horizontal mirror) lookup for one row.
   const rev = new Int32Array(block);
   for (let v = 0; v < block; v++) {
     let r = 0;
-    for (let b = 0; b < n; b++) if (v & (1 << b)) r |= 1 << (n - 1 - b);
+    for (let b = 0; b < w; b++) if (v & (1 << b)) r |= 1 << (w - 1 - b);
     rev[v] = r;
   }
 
   // Preallocated buffers — the hot loops never allocate.
-  const h0 = new Int32Array(n), h1 = new Int32Array(n), u0 = new Int32Array(n), u1 = new Int32Array(n);
-  const rows = new Int32Array(n);      // enumeration counter
-  const tort = new Int32Array(n);
-  const bufA = new Int32Array(n), bufB = new Int32Array(n);
-  const trans = new Int32Array(n);     // materialized transpose
+  const h0 = new Int32Array(h), h1 = new Int32Array(h), u0 = new Int32Array(h), u1 = new Int32Array(h);
+  const rows = new Int32Array(h);      // enumeration counter
+  const tort = new Int32Array(h);
+  const bufA = new Int32Array(h), bufB = new Int32Array(h);
+  const trans = new Int32Array(h);     // materialized transpose (square boards)
 
   let cycleRef: Int32Array = bufA;     // in-cycle state left by classify()
 
   const step = (src: Int32Array, dst: Int32Array) =>
-    stepRowsCore(n, mask, src, dst, h0, h1, u0, u1);
+    stepRowsCore(h, mask, src, dst, h0, h1, u0, u1);
 
   function copy(src: Int32Array, dst: Int32Array): void {
-    for (let y = 0; y < n; y++) dst[y] = src[y];
+    for (let y = 0; y < h; y++) dst[y] = src[y];
   }
 
   function eq(a: Int32Array, b: Int32Array): boolean {
-    for (let y = 0; y < n; y++) if (a[y] !== b[y]) return false;
+    for (let y = 0; y < h; y++) if (a[y] !== b[y]) return false;
     return true;
   }
 
   function encode(a: Int32Array): number {
     let s = 0;
-    for (let y = 0; y < n; y++) s += a[y] * pw[y];
+    for (let y = 0; y < h; y++) s += a[y] * pw[y];
     return s;
   }
 
@@ -249,23 +259,24 @@ export function createCensusEngine(n: number): CensusEngine {
 
   /**
    * Orbit-minimum test for the state in `rows`, given the two facts the block
-   * loop already established: rows[0] ≥ rows[n-1] (vertical mirror can't be
-   * smaller unless equal-leading) and rev[rows[n-1]] ≥ rows[n-1] (`hDeep`
+   * loop already established: rows[0] ≥ rows[h-1] (vertical mirror can't be
+   * smaller unless equal-leading) and rev[rows[h-1]] ≥ rows[h-1] (`hDeep`
    * signals equality). Returns 0 when some symmetry image is strictly
-   * smaller (skip), else the orbit weight 8/|stabilizer|.
+   * smaller (skip), else the orbit weight |group|/|stabilizer|. The
+   * transpose coset only exists on square boards.
    *
-   * All comparisons run lazily from the most-significant row (y = n-1), so a
+   * All comparisons run lazily from the most-significant row (y = h-1), so a
    * random non-minimum is usually rejected after one or two row compares.
    */
   function canonicalWeight(hDeep: boolean): number {
-    const top = rows[n - 1];
+    const top = rows[h - 1];
     let stab = 1;
 
-    // V — vertical mirror: M[y] = rows[n-1-y]. Leading rows equal iff rows[0] === top.
+    // V — vertical mirror: M[y] = rows[h-1-y]. Leading rows equal iff rows[0] === top.
     if (rows[0] === top) {
       let c = 0;
-      for (let y = n - 2; y >= 0; y--) {
-        const t = rows[n - 1 - y], o = rows[y];
+      for (let y = h - 2; y >= 0; y--) {
+        const t = rows[h - 1 - y], o = rows[y];
         if (t !== o) { c = t < o ? -1 : 1; break; }
       }
       if (c < 0) return 0;
@@ -275,7 +286,7 @@ export function createCensusEngine(n: number): CensusEngine {
     // H — horizontal mirror: M[y] = rev[rows[y]]. Leading rows equal iff hDeep.
     if (hDeep) {
       let c = 0;
-      for (let y = n - 2; y >= 0; y--) {
+      for (let y = h - 2; y >= 0; y--) {
         const t = rev[rows[y]], o = rows[y];
         if (t !== o) { c = t < o ? -1 : 1; break; }
       }
@@ -283,14 +294,14 @@ export function createCensusEngine(n: number): CensusEngine {
       if (c === 0) stab++;
     }
 
-    // HV — 180° rotation: M[y] = rev[rows[n-1-y]]. Leading row is rev[rows[0]].
+    // HV — 180° rotation: M[y] = rev[rows[h-1-y]]. Leading row is rev[rows[0]].
     {
       const lead = rev[rows[0]];
       if (lead < top) return 0;
       if (lead === top) {
         let c = 0;
-        for (let y = n - 2; y >= 0; y--) {
-          const t = rev[rows[n - 1 - y]], o = rows[y];
+        for (let y = h - 2; y >= 0; y--) {
+          const t = rev[rows[h - 1 - y]], o = rows[y];
           if (t !== o) { c = t < o ? -1 : 1; break; }
         }
         if (c < 0) return 0;
@@ -298,15 +309,17 @@ export function createCensusEngine(n: number): CensusEngine {
       }
     }
 
+    if (!square) return 4 / stab;
+
     // The transpose coset {T, VT, HT, HVT} — materialize T once, compare lazily.
-    for (let x = 0; x < n; x++) {
+    for (let x = 0; x < h; x++) {
       let r = 0;
-      for (let y = 0; y < n; y++) r |= ((rows[y] >>> x) & 1) << y;
+      for (let y = 0; y < h; y++) r |= ((rows[y] >>> x) & 1) << y;
       trans[x] = r;
     }
     { // T
       let c = 0;
-      for (let y = n - 1; y >= 0; y--) {
+      for (let y = h - 1; y >= 0; y--) {
         const t = trans[y], o = rows[y];
         if (t !== o) { c = t < o ? -1 : 1; break; }
       }
@@ -315,8 +328,8 @@ export function createCensusEngine(n: number): CensusEngine {
     }
     { // VT
       let c = 0;
-      for (let y = n - 1; y >= 0; y--) {
-        const t = trans[n - 1 - y], o = rows[y];
+      for (let y = h - 1; y >= 0; y--) {
+        const t = trans[h - 1 - y], o = rows[y];
         if (t !== o) { c = t < o ? -1 : 1; break; }
       }
       if (c < 0) return 0;
@@ -324,7 +337,7 @@ export function createCensusEngine(n: number): CensusEngine {
     }
     { // HT
       let c = 0;
-      for (let y = n - 1; y >= 0; y--) {
+      for (let y = h - 1; y >= 0; y--) {
         const t = rev[trans[y]], o = rows[y];
         if (t !== o) { c = t < o ? -1 : 1; break; }
       }
@@ -333,8 +346,8 @@ export function createCensusEngine(n: number): CensusEngine {
     }
     { // HVT
       let c = 0;
-      for (let y = n - 1; y >= 0; y--) {
-        const t = rev[trans[n - 1 - y]], o = rows[y];
+      for (let y = h - 1; y >= 0; y--) {
+        const t = rev[trans[h - 1 - y]], o = rows[y];
         if (t !== o) { c = t < o ? -1 : 1; break; }
       }
       if (c < 0) return 0;
@@ -347,16 +360,16 @@ export function createCensusEngine(n: number): CensusEngine {
 
   function decodeInto(state: number): void {
     let r = state;
-    for (let y = 0; y < n; y++) {
+    for (let y = 0; y < h; y++) {
       rows[y] = r % block;
       r = Math.floor(r / block);
     }
   }
 
-  /** Advance rows[1..] to the next 2^n block (rows[0] resets to 0). */
+  /** Advance rows[1..] to the next 2^w block (rows[0] resets to 0). */
   function nextBlock(): void {
     rows[0] = 0;
-    for (let y = 1; y < n; y++) {
+    for (let y = 1; y < h; y++) {
       if (++rows[y] <= mask) return;
       rows[y] = 0;
     }
@@ -369,7 +382,7 @@ export function createCensusEngine(n: number): CensusEngine {
         acc.unresolved += weight;
       } else if (period === 1) {
         let zero = true;
-        for (let y = 0; y < n; y++) if (cycleRef[y] !== 0) { zero = false; break; }
+        for (let y = 0; y < h; y++) if (cycleRef[y] !== 0) { zero = false; break; }
         if (zero) {
           acc.dies += weight;
         } else {
@@ -379,7 +392,7 @@ export function createCensusEngine(n: number): CensusEngine {
       } else {
         acc.periods[period] = (acc.periods[period] ?? 0) + weight;
         let popn = 0;
-        for (let y = 0; y < n; y++) popn += popcount32(cycleRef[y]);
+        for (let y = 0; y < h; y++) popn += popcount32(cycleRef[y]);
         const cur = oscBest.get(period);
         if (!cur || popn > cur.population) {
           oscBest.set(period, { period, state: encode(cycleRef), population: popn });
@@ -395,7 +408,9 @@ export function createCensusEngine(n: number): CensusEngine {
   }
 
   function runChunk(start: number, end: number): ChunkAcc {
-    if (n === 1) return runChunkBrute(start, end);
+    // Single-row boards: rows[0] is both the inner counter and the "top" row,
+    // so the block structure below degenerates — brute is instant at ≤2^7.
+    if (h === 1) return runChunkBrute(start, end);
     if (start % block !== 0) throw new Error('chunk start must be block-aligned');
 
     const acc = emptyAcc();
@@ -406,11 +421,11 @@ export function createCensusEngine(n: number): CensusEngine {
     decodeInto(start);
     let i = start;
     while (i < end) {
-      const top = rows[n - 1];
+      const top = rows[h - 1];
       const rt = rev[top];
 
       // Block fast path 1: if the mirrored top row is smaller, EVERY state in
-      // this block has a smaller H-image — the whole 2^n block is non-minimal.
+      // this block has a smaller H-image — the whole 2^w block is non-minimal.
       if (rt < top) {
         i += block;
         nextBlock();
@@ -423,8 +438,8 @@ export function createCensusEngine(n: number): CensusEngine {
       i += top;
       for (let j = top; j < block; j++, i++) {
         rows[0] = j;
-        const w = canonicalWeight(hDeep);
-        if (w !== 0) count(w);
+        const weight = canonicalWeight(hDeep);
+        if (weight !== 0) count(weight);
       }
       nextBlock();
     }
@@ -440,8 +455,8 @@ export function createCensusEngine(n: number): CensusEngine {
     decodeInto(start);
     for (let i = start; i < end; i++) {
       count(1);
-      // increment rows as a base-2^n counter
-      for (let y = 0; y < n; y++) {
+      // increment rows as a base-2^w counter
+      for (let y = 0; y < h; y++) {
         if (++rows[y] <= mask) break;
         rows[y] = 0;
       }
@@ -449,5 +464,5 @@ export function createCensusEngine(n: number): CensusEngine {
     return finalize(acc, oscBest, stills);
   }
 
-  return { n, total, runChunk, runChunkBrute };
+  return { w, h, total, runChunk, runChunkBrute };
 }
