@@ -35,6 +35,7 @@ interface GAConfig {
   share_strength: number;
   repair_every: number;
   run_mut_rate: number;
+  spin_ops: number;
   parallel_runs: number;
 }
 
@@ -56,6 +57,7 @@ const DEFAULT_CONFIG: GAConfig = {
   share_strength: 0,
   repair_every: 0, // Lamarckian repair is non-GA; off by default
   run_mut_rate: 0.35,
+  spin_ops: 40_000,
   parallel_runs: 1,
 };
 
@@ -185,6 +187,8 @@ const KNOB_GROUPS: KnobGroup[] = [
         min: 1,   max: 200,        step: 1,  integer: true },
       { key: 'max_prog_len',    label: 'max length', hint: 'Upper bound on gene size',
         min: 20,  max: 2000,       step: 1,  integer: true },
+      { key: 'spin_ops',        label: 'spin cap',   hint: 'Truncate an eval after N ops with no output — silent loops otherwise burn the full 250k-op budget. 0 disables',
+        min: 0,   max: 250_000,    step: 5000, integer: true },
     ],
   },
   {
@@ -213,7 +217,7 @@ const KNOB_GROUPS: KnobGroup[] = [
     title: 'loops',
     glyph: '[…]',
     knobs: [
-      { key: 'bracket_mut_rate', label: 'bracket rate', hint: 'Per-child chance of inserting/deleting a balanced [...] pair',
+      { key: 'bracket_mut_rate', label: 'bracket rate', hint: 'Per-child chance of a structural loop mutation: insert/delete a balanced [...] pair, peel one iteration ([B] → B[B]), or flatten a loop to straight-line copies',
         min: 0, max: 1, step: 0.01 },
     ],
   },

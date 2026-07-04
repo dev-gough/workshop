@@ -45,6 +45,10 @@ export interface GAConfig {
   // the honest counterpart of repair's step-size lesson: big random moves
   // through byte space, with selection (not the target) deciding survival.
   run_mut_rate: number;
+  // Spin detection: truncate an eval after this many ops with no output
+  // (silent loops otherwise burn the full 250k-op cap — ~100x a healthy
+  // eval — and dominate wall time in converged populations). 0 disables.
+  spin_ops: number;
   // Workshop-only knob (not passed to runner.py): when > 1, "Start run"
   // spawns N independent runner processes racing for the same target. First
   // one to emit a 'found' event wins; siblings get killed and marked
@@ -75,6 +79,7 @@ export const DEFAULT_CONFIG: GAConfig = {
   share_strength: 0,
   repair_every: 0,
   run_mut_rate: 0.35,
+  spin_ops: 40_000,
   parallel_runs: 1,
 };
 
@@ -106,6 +111,7 @@ export const CONFIG_BOUNDS: Record<keyof GAConfig, NumericRange> = {
   share_strength:     { min: 0,     max: 2 },
   repair_every:       { min: 0,     max: 1_000_000,  integer: true },
   run_mut_rate:       { min: 0,     max: 1 },
+  spin_ops:           { min: 0,     max: 250_000,    integer: true },
   parallel_runs:      { min: 1,     max: 4,          integer: true },
 };
 
@@ -152,6 +158,7 @@ function configToCliArgs(cfg: GAConfig): string[] {
     '--share-strength',     String(cfg.share_strength),
     '--repair-every',       String(cfg.repair_every),
     '--run-mut-rate',       String(cfg.run_mut_rate),
+    '--spin-ops',           String(cfg.spin_ops),
   ];
 }
 
