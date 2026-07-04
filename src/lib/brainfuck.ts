@@ -88,14 +88,16 @@ interface NumericRange {
 // also exported so the UI can pull them rather than duplicating constants.
 export const CONFIG_BOUNDS: Record<keyof GAConfig, NumericRange> = {
   pop_size:           { min: 10,    max: 500,        integer: true },
-  max_generations:    { min: 100,   max: 10_000_000, integer: true },
+  // 100M cap: at PyPy's ~3.8k gens/s that's a deliberate overnight run,
+  // not an accidental one. (Was 10M when CPython made even that ~8h.)
+  max_generations:    { min: 100,   max: 100_000_000, integer: true },
   max_prog_len:       { min: 20,    max: 2000,       integer: true },
   min_prog_len:       { min: 1,     max: 200,        integer: true },
   crossover_rate:     { min: 0,     max: 1 },
   mutation_rate:      { min: 0,     max: 1 },
   mut_prob:           { min: 0,     max: 1 },
   macro_mut_rate:     { min: 0,     max: 1 },
-  restart_every:      { min: 0,     max: 10_000_000, integer: true },
+  restart_every:      { min: 0,     max: 100_000_000, integer: true },
   restart_keep_frac:  { min: 0,     max: 1 },
   bracket_mut_rate:   { min: 0,     max: 1 },
   islands:            { min: 1,     max: 10,         integer: true },

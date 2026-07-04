@@ -179,8 +179,8 @@ const KNOB_GROUPS: KnobGroup[] = [
     knobs: [
       { key: 'pop_size',        label: 'population', hint: 'Programs alive each generation',
         min: 10,  max: 500,        step: 1,  integer: true },
-      { key: 'max_generations', label: 'max gens',   hint: 'Hard ceiling on the run',
-        min: 100, max: 10_000_000, step: 100, integer: true },
+      { key: 'max_generations', label: 'max gens',   hint: 'Hard ceiling on the run (~3.8k gens/s under PyPy)',
+        min: 100, max: 100_000_000, step: 100, integer: true },
       { key: 'min_prog_len',    label: 'min length', hint: 'Lower bound on gene size',
         min: 1,   max: 200,        step: 1,  integer: true },
       { key: 'max_prog_len',    label: 'max length', hint: 'Upper bound on gene size',
@@ -222,7 +222,7 @@ const KNOB_GROUPS: KnobGroup[] = [
     glyph: ',',
     knobs: [
       { key: 'restart_every',     label: 'restart every', hint: 'Reseed bottom of pop every N gens (0 = off)',
-        min: 0, max: 10_000_000, step: 10_000, integer: true },
+        min: 0, max: 100_000_000, step: 10_000, integer: true },
       { key: 'restart_keep_frac', label: 'elites kept',   hint: 'Top fraction of pop preserved across restarts',
         min: 0, max: 1, step: 0.01 },
     ],

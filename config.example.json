@@ -14,7 +14,7 @@
   },
 
   "paths": {
-    "_comment": "musicDirectory is the root for /projects/barfoo and the soulseek staging area (which writes to <musicDirectory>/.slskd-downloads). brainfuckRepo defaults to vendor/brainfuck-genetic (the git submodule); pythonBin defaults to <brainfuckRepo>/.venv/bin/python.",
+    "_comment": "musicDirectory is the root for /projects/barfoo and the soulseek staging area (which writes to <musicDirectory>/.slskd-downloads). brainfuckRepo defaults to vendor/brainfuck-genetic (the git submodule); pythonBin defaults to <brainfuckRepo>/.venv/bin/python — but point it at pypy3 if available: the GA runner is pure Python with tight interpreter loops and runs ~11x faster under PyPy (measured 330 -> 3,805 gens/s on PyPy 7.3.15).",
     "musicDirectory": null,
     "brainfuckRepo": "vendor/brainfuck-genetic",
     "pythonBin": "vendor/brainfuck-genetic/.venv/bin/python"
