@@ -59,25 +59,23 @@ const Header = () => {
 	];
 
 	return (
-		<header className={`${scopeClass ?? ''} sticky top-0 z-50 w-full bg-background/95 md:bg-background/60 md:backdrop-blur-xl border-b border-border/40`}>
+		<header className={`${scopeClass ?? ''} sticky top-0 z-50 w-full bg-background/95 md:bg-background/60 md:backdrop-blur-xl border-b border-border/60`}>
 			<div className="container mx-auto flex h-14 items-center px-4">
-				{/* Logo */}
+				{/* Logo — brass plate + serif wordmark (hallway hardware) */}
 				<Link href="/" className="group flex items-center gap-2.5 mr-8">
-					<div className="relative w-7 h-7 rounded-lg bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center shadow-sm shadow-primary/20 group-hover:shadow-primary/40 transition-shadow">
-						<span className="text-xs font-black text-primary-foreground tracking-tighter">D</span>
-					</div>
-					<span className="text-base font-semibold tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
+					<span className="hdr-plate">D</span>
+					<span className="ws-serif text-[17px] font-semibold tracking-tight text-foreground">
 						Devy&apos;s Workshop
 					</span>
 				</Link>
 
-				{/* Desktop nav */}
-				<nav className="hidden md:flex items-center gap-0.5">
+				{/* Desktop nav — engraved corridor signs, brass underline for the active one */}
+				<nav className="hidden md:flex items-center gap-1">
 					{navLinks.map((link) => (
 						<Link
 							key={link.href}
 							href={link.href}
-							className="relative px-3 py-1.5 text-sm font-medium rounded-md transition-colors"
+							className="relative px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] transition-colors"
 						>
 							<span className={isActive(link.href) ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}>
 								{link.label}
@@ -85,7 +83,8 @@ const Header = () => {
 							{isActive(link.href) && (
 								<motion.div
 									layoutId="nav-indicator"
-									className="absolute inset-0 rounded-md bg-primary/10 -z-10"
+									className="absolute bottom-0 left-3 right-3 h-[2px] rounded-full"
+									style={{ background: 'var(--hall-brass, var(--color-brand-maroon))' }}
 									transition={{ type: 'spring', stiffness: 400, damping: 30 }}
 								/>
 							)}
@@ -180,10 +179,8 @@ const Header = () => {
 											style={{ willChange: 'transform' }}
 										>
 											<div className="px-5 pt-5 pb-3 border-b border-border/40 flex items-center justify-between">
-												<DialogPrimitive.Title className="flex items-center gap-2.5 text-base font-semibold">
-													<div className="w-7 h-7 rounded-lg bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
-														<span className="text-xs font-black text-primary-foreground tracking-tighter">D</span>
-													</div>
+												<DialogPrimitive.Title className="ws-serif flex items-center gap-2.5 text-base font-semibold">
+													<span className="hdr-plate">D</span>
 													Devy&apos;s Workshop
 												</DialogPrimitive.Title>
 												<DialogPrimitive.Close asChild>
