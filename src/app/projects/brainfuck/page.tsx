@@ -319,6 +319,7 @@ interface Benchmark {
   version_label: string | null;
   batch_id: string | null;
   suite: string | null; // 'throughput' | 'solve' (null on pre-migration rows)
+  lanes: number | null;  // racing lanes for this row (null/1 = single process)
   target: string;
   pop_size: number;
   max_generations: number;
@@ -335,7 +336,7 @@ interface Benchmark {
   completed_at: string | null;
 }
 
-interface BenchmarkPresetItem { target: string; popSize: number; maxGen: number }
+interface BenchmarkPresetItem { target: string; popSize: number; maxGen: number; lanes?: number }
 
 function fmtTime(iso: string | null): string {
   if (!iso) return '';
@@ -1277,7 +1278,7 @@ export default function BrainfuckPage() {
                 <div className="space-y-3">
                   <p className="text-[11px] text-muted-foreground leading-relaxed">
                     {benchSuite === 'solve'
-                      ? 'Solve-rate suite: repeated default-config runs per target — did it solve, and at what generation. The metric that makes algorithm changes comparable.'
+                      ? 'Solve-rate suite: repeated racing runs per target (first lane to solve wins the row) — did it solve, and at what generation.'
                       : 'Throughput suite: timed silent runs measuring raw evals/s at a few operating points.'}
                     {' '}Auto-tagged with the current BF repo commit.
                   </p>
@@ -1312,6 +1313,9 @@ export default function BrainfuckPage() {
                             target <span className="text-foreground/90">&quot;{c.target}&quot;</span>
                             {' · '}pop <span className="text-foreground/90">{c.popSize}</span>
                             {' · '}gens <span className="text-foreground/90">{c.maxGen.toLocaleString()}</span>
+                            {(c.lanes ?? 1) > 1 && (
+                              <span className="text-primary/70"> · ×{c.lanes} lanes</span>
+                            )}
                           </div>
                         ))
                       )}
@@ -1578,6 +1582,7 @@ function BenchmarkBatchCard({
           isSolve ? 'bg-ok/10 text-ok' : 'bg-foreground/[0.06] text-muted-foreground'
         }`}>
           {isSolve ? 'solve' : 'evals/s'}
+          {(group.rows[0]?.lanes ?? 1) > 1 ? ` ×${group.rows[0].lanes}` : ''}
         </span>
         {group.versionLabel && (
           <span className="px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[10px] font-medium">
@@ -1657,6 +1662,7 @@ function BenchmarkConfigRow({ b, onDelete }: { b: Benchmark; onDelete: () => voi
         )}
         <span className="text-[10px] text-muted-foreground tabular-nums whitespace-nowrap">
           pop {b.pop_size} · {b.max_generations.toLocaleString()} cap
+          {(b.lanes ?? 1) > 1 && <span className="text-primary/70"> · ×{b.lanes}</span>}
         </span>
       </div>
       <div className="text-right tabular-nums font-mono text-foreground/90">{evalsPerSec}</div>

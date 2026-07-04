@@ -247,7 +247,9 @@ interface ActiveLane {
 }
 let activeLanes: ActiveLane[] = [];
 let activeBenchmarkId: number | null = null;
-let activeChild: ChildProcess | null = null;
+// All lanes of the currently-running benchmark row (1 for throughput rows,
+// SOLVE_LANES for solve rows racing to the first find).
+let activeBenchLanes: ChildProcess[] = [];
 // IDs that were intentionally killed because a sibling won the race. The
 // child's exit handler checks this set and writes 'superseded' rather than
 // the default 'stopped' for SIGTERM exits.
@@ -292,7 +294,7 @@ export async function startRun(
 ): Promise<{ ids: number[]; raceId: string | null }> {
   await bootstrap();
 
-  if (activeLanes.length > 0 || activeChild) {
+  if (activeLanes.length > 0 || activeBenchLanes.length > 0) {
     throw new Error(
       activeBenchmarkId != null
         ? 'A benchmark is in progress. Wait for it to finish before starting a new run.'
@@ -559,15 +561,22 @@ export const BENCHMARK_PRESET: { target: string; popSize: number; maxGen: number
 // be routine, 8 the former ceiling, 12 (with a space, far from lowercase
 // ASCII) hard enough that flat-repair alone can't close it under the
 // 300-char budget — the discriminator for future operator work.
-export const SOLVE_PRESET: { target: string; popSize: number; maxGen: number }[] = [
-  { target: 'devy',         popSize: 100, maxGen: 200_000 },
-  { target: 'devy',         popSize: 100, maxGen: 200_000 },
-  { target: 'devy',         popSize: 100, maxGen: 200_000 },
-  { target: 'sparqsys',     popSize: 100, maxGen: 500_000 },
-  { target: 'sparqsys',     popSize: 100, maxGen: 500_000 },
-  { target: 'sparqsys',     popSize: 100, maxGen: 500_000 },
-  { target: 'the tape lab', popSize: 100, maxGen: 300_000 },
-  { target: 'the tape lab', popSize: 100, maxGen: 300_000 },
+//
+// Solve rows race SOLVE_LANES independent runner processes; the first lane
+// to solve wins and the row records its generations/wall (per-attempt solve
+// probability ~67-100% makes a race-of-4 miss vanishingly rare, which is
+// how the interactive rig is meant to be driven). Throughput rows stay
+// single-lane — racing shares cores and would corrupt evals/s.
+export const SOLVE_LANES = 4;
+export const SOLVE_PRESET: { target: string; popSize: number; maxGen: number; lanes: number }[] = [
+  { target: 'devy',         popSize: 100, maxGen: 200_000, lanes: SOLVE_LANES },
+  { target: 'devy',         popSize: 100, maxGen: 200_000, lanes: SOLVE_LANES },
+  { target: 'devy',         popSize: 100, maxGen: 200_000, lanes: SOLVE_LANES },
+  { target: 'sparqsys',     popSize: 100, maxGen: 250_000, lanes: SOLVE_LANES },
+  { target: 'sparqsys',     popSize: 100, maxGen: 250_000, lanes: SOLVE_LANES },
+  { target: 'sparqsys',     popSize: 100, maxGen: 250_000, lanes: SOLVE_LANES },
+  { target: 'the tape lab', popSize: 100, maxGen: 300_000, lanes: SOLVE_LANES },
+  { target: 'the tape lab', popSize: 100, maxGen: 300_000, lanes: SOLVE_LANES },
 ];
 
 export type BenchmarkSuite = 'throughput' | 'solve';
@@ -577,6 +586,7 @@ interface BatchQueueItem {
   target: string;
   popSize: number;
   maxGen: number;
+  lanes: number;
 }
 
 let benchmarkBatchQueue: BatchQueueItem[] = [];
@@ -588,7 +598,7 @@ export async function startBenchmarkBatch(
 ): Promise<{ batchId: string; rowIds: number[] }> {
   await bootstrap();
 
-  if (activeChild || activeLanes.length > 0) {
+  if (activeBenchLanes.length > 0 || activeLanes.length > 0) {
     throw new Error(
       activeLanes.length > 0
         ? 'A run is in progress. Stop it before starting a benchmark.'
@@ -605,13 +615,14 @@ export async function startBenchmarkBatch(
   // immediately (queued ones too).
   const rowIds: number[] = [];
   for (const cfg of preset) {
+    const lanes = 'lanes' in cfg ? (cfg as { lanes: number }).lanes : 1;
     const { rows } = await pool.query(
       `INSERT INTO brainfuck_benchmarks
          (version_hash, version_subject, version_label, batch_id, suite,
-          target, pop_size, max_generations, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued')
+          target, pop_size, max_generations, lanes, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'queued')
        RETURNING id`,
-      [version.hash, version.subject, label, batchId, suite, cfg.target, cfg.popSize, cfg.maxGen],
+      [version.hash, version.subject, label, batchId, suite, cfg.target, cfg.popSize, cfg.maxGen, lanes],
     );
     rowIds.push(rows[0].id);
   }
@@ -621,6 +632,7 @@ export async function startBenchmarkBatch(
     target: preset[i].target,
     popSize: preset[i].popSize,
     maxGen: preset[i].maxGen,
+    lanes: 'lanes' in preset[i] ? (preset[i] as { lanes: number }).lanes : 1,
   }));
 
   spawnNextBenchmarkInBatch();
@@ -647,7 +659,7 @@ function spawnNextBenchmarkInBatch(): void {
   const next = benchmarkBatchQueue.shift();
   if (!next) {
     activeBenchmarkId = null;
-    activeChild = null;
+    activeBenchLanes = [];
     return;
   }
 
@@ -657,64 +669,100 @@ function spawnNextBenchmarkInBatch(): void {
     [next.rowId],
   ).catch((e) => console.error('[brainfuck] mark running', e));
 
-  const child = spawn(
-    PYTHON,
-    [
-      RUNNER,
-      '--benchmark',
-      '--target', next.target,
-      '--max-gen', String(next.maxGen),
-      '--pop-size', String(next.popSize),
-    ],
-    { cwd: CWD, stdio: ['ignore', 'pipe', 'pipe'] },
-  );
+  // Race `next.lanes` identical runner processes. The first lane to exit
+  // with found=true wins the row and its siblings are killed; if nobody
+  // finds, the row records the best-fitness lane's stats with found=false.
+  // The next config spawns only after ALL lanes have exited so two rows
+  // never overlap on the CPU.
+  const lanes = Math.max(1, next.lanes);
+  let winner: BenchmarkEvent | null = null;
+  const alsoRan: BenchmarkEvent[] = [];
+  const errors: string[] = [];
+  let exited = 0;
+
+  const finishRow = () => {
+    finalizeBenchmarkRow(next.rowId, winner, alsoRan, errors)
+      .catch((e) => console.error('[brainfuck] finalizeBenchmarkRow', e))
+      .finally(() => spawnNextBenchmarkInBatch());
+  };
 
   activeBenchmarkId = next.rowId;
-  activeChild = child;
+  activeBenchLanes = [];
 
-  if (child.pid) {
-    pool.query(`UPDATE brainfuck_benchmarks SET pid = $1 WHERE id = $2`, [child.pid, next.rowId])
-      .catch((e) => console.error('[brainfuck] write pid', e));
-  }
+  for (let lane = 0; lane < lanes; lane++) {
+    const child = spawn(
+      PYTHON,
+      [
+        RUNNER,
+        '--benchmark',
+        '--target', next.target,
+        '--max-gen', String(next.maxGen),
+        '--pop-size', String(next.popSize),
+      ],
+      { cwd: CWD, stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    activeBenchLanes.push(child);
 
-  let benchmarkResult: BenchmarkEvent | null = null;
-  let benchmarkError: string | null = null;
-
-  const rl = readline.createInterface({ input: child.stdout!, crlfDelay: Infinity });
-  rl.on('line', (line) => {
-    const trimmed = line.trim();
-    if (!trimmed) return;
-    try {
-      const evt = JSON.parse(trimmed) as Event;
-      if (evt.type === 'benchmark') benchmarkResult = evt;
-      else if (evt.type === 'error') benchmarkError = evt.message;
-    } catch {
-      /* ignore non-JSON lines */
+    if (lane === 0 && child.pid) {
+      pool.query(`UPDATE brainfuck_benchmarks SET pid = $1 WHERE id = $2`, [child.pid, next.rowId])
+        .catch((e) => console.error('[brainfuck] write pid', e));
     }
-  });
 
-  let stderrBuf = '';
-  child.stderr!.on('data', (chunk: Buffer) => {
-    stderrBuf += chunk.toString();
-    if (stderrBuf.length > 4096) stderrBuf = stderrBuf.slice(-4096);
-  });
+    let laneResult: BenchmarkEvent | null = null;
+    let laneError: string | null = null;
 
-  child.on('exit', (code, signal) => {
-    finalizeBenchmark(next.rowId, code, signal, benchmarkResult, benchmarkError, stderrBuf)
-      .catch((e) => console.error('[brainfuck] finalizeBenchmark', e))
-      .finally(() => spawnNextBenchmarkInBatch());
-  });
+    const rl = readline.createInterface({ input: child.stdout!, crlfDelay: Infinity });
+    rl.on('line', (line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      try {
+        const evt = JSON.parse(trimmed) as Event;
+        if (evt.type === 'benchmark') laneResult = evt;
+        else if (evt.type === 'error') laneError = evt.message;
+      } catch {
+        /* ignore non-JSON lines */
+      }
+    });
+
+    let stderrBuf = '';
+    child.stderr!.on('data', (chunk: Buffer) => {
+      stderrBuf += chunk.toString();
+      if (stderrBuf.length > 4096) stderrBuf = stderrBuf.slice(-4096);
+    });
+
+    child.on('exit', (code) => {
+      exited++;
+      if (laneResult) {
+        if (laneResult.found && winner === null) {
+          winner = laneResult;
+          // First find wins — cancel the rest of the race.
+          for (const sibling of activeBenchLanes) {
+            if (sibling !== child && sibling.exitCode === null && !sibling.killed) {
+              sibling.kill('SIGTERM');
+            }
+          }
+        } else {
+          alsoRan.push(laneResult);
+        }
+      } else if (laneError || stderrBuf || code !== 0) {
+        errors.push(laneError ?? stderrBuf ?? `exit code ${code}`);
+      }
+      if (exited === lanes) finishRow();
+    });
+  }
 }
 
-async function finalizeBenchmark(
+async function finalizeBenchmarkRow(
   id: number,
-  code: number | null,
-  signal: NodeJS.Signals | null,
-  result: BenchmarkEvent | null,
-  errMsg: string | null,
-  stderr: string,
+  winner: BenchmarkEvent | null,
+  alsoRan: BenchmarkEvent[],
+  errors: string[],
 ): Promise<void> {
-  if (signal === 'SIGTERM' || signal === 'SIGKILL') {
+  // User stop: no winner and the stop flag is up — killed lanes produce no
+  // benchmark event, so alsoRan only holds lanes that finished before the
+  // stop. (A raced sibling killed AFTER a win still resolves 'completed'
+  // via the winner branch below.)
+  if (winner === null && benchmarkBatchStopped) {
     await pool.query(
       `UPDATE brainfuck_benchmarks SET status = 'stopped', completed_at = NOW()
        WHERE id = $1 AND status = 'running'`,
@@ -722,6 +770,15 @@ async function finalizeBenchmark(
     );
     return;
   }
+
+  // Winner, else the best also-ran (highest fitness; all found=false).
+  const result =
+    winner ??
+    alsoRan.reduce<BenchmarkEvent | null>(
+      (best, r) => (best === null || r.best_fitness > best.best_fitness ? r : best),
+      null,
+    );
+
   if (result) {
     await pool.query(
       `UPDATE brainfuck_benchmarks
@@ -748,19 +805,21 @@ async function finalizeBenchmark(
     );
     return;
   }
-  // No result event arrived — child crashed or exited abnormally.
+  // No lane produced a result event — crash or abnormal exit.
   await pool.query(
     `UPDATE brainfuck_benchmarks SET status = 'failed', error = $2, completed_at = NOW()
      WHERE id = $1 AND status = 'running'`,
-    [id, errMsg ?? stderr ?? `exit code ${code}`],
+    [id, errors[0] ?? 'no benchmark result'],
   );
 }
 
 export function stopBenchmark(id: number): boolean {
-  if (activeBenchmarkId !== id || !activeChild) return false;
+  if (activeBenchmarkId !== id || activeBenchLanes.length === 0) return false;
   // Tell the post-exit handler not to spawn the next config in the batch.
   benchmarkBatchStopped = true;
-  activeChild.kill('SIGTERM');
+  for (const child of activeBenchLanes) {
+    if (child.exitCode === null && !child.killed) child.kill('SIGTERM');
+  }
   return true;
 }
 

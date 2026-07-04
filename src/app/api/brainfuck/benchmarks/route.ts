@@ -9,7 +9,7 @@ const MAX_LABEL_LENGTH = 64;
 export async function GET() {
   try {
     const { rows } = await pool.query(
-      `SELECT id, version_hash, version_subject, version_label, batch_id, suite,
+      `SELECT id, version_hash, version_subject, version_label, batch_id, suite, lanes,
               target, pop_size, max_generations,
               generations, evaluations, wall_seconds,
               evals_per_sec, gens_per_sec,

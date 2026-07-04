@@ -12,7 +12,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
       return NextResponse.json({ error: 'invalid id' }, { status: 400 });
     }
     const { rows } = await pool.query(
-      `SELECT id, version_hash, version_subject, version_label,
+      `SELECT id, version_hash, version_subject, version_label, suite, lanes,
               target, pop_size, max_generations,
               generations, evaluations, wall_seconds,
               evals_per_sec, gens_per_sec,
