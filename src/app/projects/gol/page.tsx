@@ -18,6 +18,13 @@ export default function GameOfLifePage() {
   useHeaderConfig({ scopeClass: 'gol-theme' });
 
   const [tab, setTab] = useState<Tab>('board');
+  // Once visited, the census stays mounted (hidden) so a deep multi-core run
+  // keeps crunching while the visitor is back on the board.
+  const [censusVisited, setCensusVisited] = useState(false);
+  const selectTab = (t: Tab) => {
+    if (t === 'census') setCensusVisited(true);
+    setTab(t);
+  };
 
   return (
     <PageTransition>
@@ -28,8 +35,8 @@ export default function GameOfLifePage() {
           <GameOfLife />
         </div>
 
-        {tab === 'census' && (
-          <div className="absolute inset-0 overflow-y-auto">
+        {censusVisited && (
+          <div className={tab === 'census' ? 'absolute inset-0 overflow-y-auto' : 'hidden'}>
             <div className="mx-auto max-w-5xl px-4 pb-14 pt-28 sm:px-6">
               <GolCensus />
             </div>
@@ -51,7 +58,7 @@ export default function GameOfLifePage() {
             {TABS.map(t => (
               <button
                 key={t.id}
-                onClick={() => setTab(t.id)}
+                onClick={() => selectTab(t.id)}
                 className={`border-b-2 pb-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] transition-colors ${
                   tab === t.id
                     ? 'border-primary text-primary'

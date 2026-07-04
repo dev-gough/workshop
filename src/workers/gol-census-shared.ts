@@ -1,52 +1,44 @@
-// Shared message/data types for the Game of Life census worker.
+// Shared message/data types for the Game of Life census workers.
 //
-// A census enumerates every starting configuration of a W×H bounded grid and
-// classifies each as dies / still life / oscillator(period N). Large sizes
-// (e.g. 5×5, 2^25 states) run in resumable chunks; `acc` carries the partial
-// accumulators back into a follow-up request so a run can be paused/resumed or
-// checkpointed to localStorage across page loads.
+// A census enumerates every starting configuration of an N×N bounded grid and
+// classifies each as dies / still life / oscillator(period p). The engine
+// lives in gol-census-core.ts; workers are thin chunk executors driven by the
+// CensusPool coordinator (src/lib/census-pool.ts), which fans chunks out to
+// one worker per core and checkpoints the merged prefix to localStorage.
 
-export interface OscExample {
-  period: number;
-  state: number;      // packed bitboard (bit y*w + x)
-  population: number;
-}
+import type { ChunkAcc, OscExample } from './gol-census-core';
+
+export type { ChunkAcc, OscExample };
 
 /** Serialisable partial/complete result for one grid size. */
 export interface CensusResult {
   w: number;
   h: number;
-  total: number;               // 2^(w*h)
-  processed: number;           // states classified so far
+  total: number;               // 2^(w*h) — exact float64 up to 7×7
+  processed: number;           // contiguous prefix of the index space covered
   dies: number;
   stillLifes: number;
+  unresolved: number;          // safety-cap trips (expected 0)
   periods: Record<number, number>; // period(>=2) → count
   oscExamples: OscExample[];   // best example per period, period-desc
-  stillLifeExamples: number[]; // packed still-life states (up to 12)
+  stillLifeExamples: number[]; // distinct still-life states (up to 12)
   done: boolean;
   elapsedMs: number;
 }
 
-/** Accumulator snapshot handed back to the worker to resume a chunked run. */
-export interface CensusAcc {
-  dies: number;
-  stillLifes: number;
-  periods: Record<number, number>;
-  oscExamples: OscExample[];
-  stillLifeExamples: number[];
-  elapsedMs: number;
+/** Ask a worker to census the index slice [start, end) of an n×n board. */
+export interface CensusChunkRequest {
+  n: number;
+  chunkId: number;
+  start: number;
+  end: number;
 }
 
-export interface CensusRequest {
-  w: number;
-  h: number;
-  total: number;        // 2^(w*h)
-  startFrom?: number;   // resume from this state index (default 0)
-  chunkSize?: number;   // if set, stop & checkpoint after this many states
-  acc?: CensusAcc;      // partial accumulators to resume from
+export interface CensusChunkResponse {
+  n: number;
+  chunkId: number;
+  start: number;
+  end: number;
+  acc: ChunkAcc;
+  ms: number;                  // worker-side compute time for this chunk
 }
-
-export type CensusWorkerMessage =
-  | { type: 'progress'; result: CensusResult }
-  | { type: 'checkpoint'; result: CensusResult }
-  | { type: 'done'; result: CensusResult };
