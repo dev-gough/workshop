@@ -14,6 +14,7 @@ import { useAudio } from '@/components/AudioProvider';
 import { useHeaderConfig } from '@/components/header-config';
 import { fmtBytes as fmtBytesShared, fmtSpeed, fmtTime } from '@/lib/format';
 import { ProgressBar } from '@/components/ui/ProgressBar';
+import LedgerTab from './_components/ledger';
 
 // ── Types ──
 
@@ -96,21 +97,6 @@ interface BrowseDir {
   name: string;
   fileCount: number;
   files: SearchFile[];
-}
-
-interface StatsData {
-  downloads: {
-    summary: { total: string; completed: string; staging: string; failed: string; total_bytes: string; avg_speed: string; unique_sources: string };
-    topSources: { username: string; count: string; total_bytes: string }[];
-    daily: { date: string; count: string }[];
-    recent: DownloadRecord[];
-  };
-  uploads: {
-    summary: { total: string; completed: string; total_bytes: string; avg_speed: string; unique_users: string };
-    topUsers: { username: string; count: string; total_bytes: string }[];
-    daily: { date: string; count: string }[];
-    recent: DownloadRecord[];
-  };
 }
 
 interface SearchHistoryItem {
@@ -1179,177 +1165,6 @@ function TransfersTab({ liveDownloads, liveUploads, staging, refetchStaging }: {
           )}
         </div>
       </div>
-    </div>
-  );
-}
-
-// ── Ledger tab (stats) ──
-
-function LedgerTab() {
-  const [stats, setStats] = useState<StatsData | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setLoading(true);
-    fetch('/api/soulseek/stats').then(r => r.json()).then(d => { setStats(d); setLoading(false); }).catch(() => setLoading(false));
-  }, []);
-
-  if (loading) return (
-    <div className="flex items-center justify-center gap-3 py-16 text-muted-foreground">
-      <span className="slsk-lamp text-primary slsk-lamp-live" /> Opening the ledger…
-    </div>
-  );
-
-  if (!stats) return (
-    <div className="text-center py-16 text-muted-foreground">
-      <p className="text-sm">No ledger entries yet</p>
-    </div>
-  );
-
-  const dl = stats.downloads.summary;
-  const ul = stats.uploads.summary;
-
-  return (
-    <div className="space-y-6">
-      {/* Summary tiles */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <StatTile label="Files in" value={dl.completed} color="text-primary" />
-        <StatTile label="Files out" value={ul.completed} color="text-accent" />
-        <StatTile label="Pulled down" value={fmtBytes(parseInt(dl.total_bytes))} color="text-primary" />
-        <StatTile label="Sent up" value={fmtBytes(parseInt(ul.total_bytes))} color="text-accent" />
-        <StatTile label="Peers" value={String(parseInt(dl.unique_sources || '0') + parseInt(ul.unique_users || '0'))} color="text-foreground" />
-      </div>
-
-      {/* Speed stats */}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="rounded-lg border border-border/70 bg-card/60 p-4">
-          <div className={`${EYEBROW} text-primary mb-1`}>▼ avg down speed</div>
-          <div className="text-lg font-mono tabular-nums text-foreground">{fmtSpeed(parseFloat(dl.avg_speed))}</div>
-        </div>
-        <div className="rounded-lg border border-border/70 bg-card/60 p-4">
-          <div className={`${EYEBROW} text-accent mb-1`}>▲ avg up speed</div>
-          <div className="text-lg font-mono tabular-nums text-foreground">{fmtSpeed(parseFloat(ul.avg_speed))}</div>
-        </div>
-      </div>
-
-      {/* Daily activity chart */}
-      {(stats.downloads.daily.length > 0 || stats.uploads.daily.length > 0) && (
-        <div className="rounded-lg border border-border/70 bg-card/60 p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className={`${EYEBROW} text-muted-foreground`}>Wire traffic — 30 days</div>
-            <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-              <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-[2px] bg-primary/80" /> down</span>
-              <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-[2px] bg-accent/80" /> up</span>
-            </div>
-          </div>
-          <DailyChart downloads={stats.downloads.daily} uploads={stats.uploads.daily} />
-        </div>
-      )}
-
-      {/* Top peers */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {stats.downloads.topSources.length > 0 && (
-          <div className="rounded-lg border border-border/70 bg-card/60 p-4 space-y-3">
-            <div className={`${EYEBROW} text-primary`}>Best sources</div>
-            {stats.downloads.topSources.map((s, i) => (
-              <div key={s.username} className="flex items-center gap-2 text-xs">
-                <span className="text-muted-foreground font-mono tabular-nums w-4">{i + 1}</span>
-                <User className="h-3 w-3 text-muted-foreground" />
-                <span className="text-foreground flex-1">{s.username}</span>
-                <span className="text-muted-foreground font-mono tabular-nums">{s.count} files</span>
-                <span className="text-muted-foreground font-mono tabular-nums">{fmtBytes(parseInt(s.total_bytes))}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        {stats.uploads.topUsers.length > 0 && (
-          <div className="rounded-lg border border-border/70 bg-card/60 p-4 space-y-3">
-            <div className={`${EYEBROW} text-accent`}>Best customers</div>
-            {stats.uploads.topUsers.map((s, i) => (
-              <div key={s.username} className="flex items-center gap-2 text-xs">
-                <span className="text-muted-foreground font-mono tabular-nums w-4">{i + 1}</span>
-                <User className="h-3 w-3 text-muted-foreground" />
-                <span className="text-foreground flex-1">{s.username}</span>
-                <span className="text-muted-foreground font-mono tabular-nums">{s.count} files</span>
-                <span className="text-muted-foreground font-mono tabular-nums">{fmtBytes(parseInt(s.total_bytes))}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Recent activity */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {stats.downloads.recent.length > 0 && (
-          <div className="rounded-lg border border-border/70 bg-card/60 p-4 space-y-3">
-            <div className={`${EYEBROW} text-muted-foreground`}>Recent downloads</div>
-            {stats.downloads.recent.map(d => (
-              <div key={d.id} className="flex items-center gap-2 text-xs">
-                <ArrowDown className="h-3 w-3 text-primary shrink-0" />
-                <span className="text-foreground truncate flex-1 font-mono">{d.filename}</span>
-                <span className="text-muted-foreground font-mono tabular-nums">{fmtTime(d.created_at)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        {stats.uploads.recent.length > 0 && (
-          <div className="rounded-lg border border-border/70 bg-card/60 p-4 space-y-3">
-            <div className={`${EYEBROW} text-muted-foreground`}>Recent uploads</div>
-            {stats.uploads.recent.map(u => (
-              <div key={u.id} className="flex items-center gap-2 text-xs">
-                <ArrowUp className="h-3 w-3 text-accent shrink-0" />
-                <span className="text-foreground">{u.username}</span>
-                <span className="text-muted-foreground truncate flex-1 font-mono">{u.filename}</span>
-                <span className="text-muted-foreground font-mono tabular-nums">{fmtTime(u.created_at)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function StatTile({ label, value, color }: { label: string; value: string; color: string }) {
-  return (
-    <div className="rounded-lg border border-border/70 bg-card/60 p-4 space-y-1">
-      <span className={`${EYEBROW} ${color}`}>{label}</span>
-      <p className="text-xl font-bold font-mono tabular-nums text-foreground">{value}</p>
-    </div>
-  );
-}
-
-function DailyChart({ downloads, uploads }: { downloads: { date: string; count: string }[]; uploads: { date: string; count: string }[] }) {
-  // Merge into a single timeline
-  const dates = new Set<string>();
-  downloads.forEach(d => dates.add(d.date));
-  uploads.forEach(d => dates.add(d.date));
-  const sortedDates = [...dates].sort();
-
-  if (sortedDates.length === 0) return null;
-
-  const dlMap = Object.fromEntries(downloads.map(d => [d.date, parseInt(d.count)]));
-  const ulMap = Object.fromEntries(uploads.map(d => [d.date, parseInt(d.count)]));
-
-  const maxVal = Math.max(
-    ...sortedDates.map(d => Math.max(dlMap[d] || 0, ulMap[d] || 0)),
-    1
-  );
-
-  return (
-    <div className="flex items-end gap-0.5 h-24">
-      {sortedDates.map(date => {
-        const dlCount = dlMap[date] || 0;
-        const ulCount = ulMap[date] || 0;
-        const dlH = (dlCount / maxVal) * 100;
-        const ulH = (ulCount / maxVal) * 100;
-        return (
-          <div key={date} className="flex-1 flex gap-px items-end h-full" title={`${date}: ${dlCount} dl / ${ulCount} ul`}>
-            <div className="flex-1 bg-primary/70 rounded-t-sm" style={{ height: `${Math.max(dlH, 2)}%` }} />
-            <div className="flex-1 bg-accent/70 rounded-t-sm" style={{ height: `${Math.max(ulH, 2)}%` }} />
-          </div>
-        );
-      })}
     </div>
   );
 }

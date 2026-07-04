@@ -474,6 +474,10 @@
   --slsk-signal: hsl(158 72% 52%);  /* down-wire / connected */
   --slsk-copper: hsl(28 72% 58%);   /* up-wire / lossless */
   --slsk-fault:  hsl(352 78% 62%);
+  /* Chart inks: same hues one shade deeper — the lamp colors are too hot
+     for filled marks on the dark surface (validated pair, CVD ΔE 27). */
+  --slsk-signal-deep: #2ba176;
+  --slsk-copper-deep: #b97131;
 
   /* Remap the shared tokens so utilities + shadcn/lucide follow suit. */
   --color-background:        var(--slsk-bg);
@@ -495,8 +499,8 @@
   --color-accent-foreground: hsl(160 25% 5%);
   --color-destructive:       var(--slsk-fault);
   --color-destructive-foreground: hsl(160 25% 5%);
-  --color-chart-1:           var(--slsk-signal);
-  --color-chart-2:           var(--slsk-copper);
+  --color-chart-1:           var(--slsk-signal-deep);
+  --color-chart-2:           var(--slsk-copper-deep);
 
   font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
   color: var(--slsk-ink);
@@ -531,6 +535,36 @@
 @keyframes slsk-travel { to { background-position-x: -14px; } }
 .slsk-wire-live { animation: slsk-travel 0.9s linear infinite; }
 .slsk-wire-out  { animation-direction: reverse; }
+
+/* Operator's call ticket — the ledger charts' tooltip. A slip of exchange
+   paper: squared corners, copper hairline, and a punched-tape perforation
+   running down the left edge. Positioned by the chart wrapper. */
+.slsk-ticket {
+  position: absolute;
+  top: 6px;
+  z-index: 10;
+  pointer-events: none;
+  transform: translateX(-50%);
+  min-width: 156px;
+  padding: 7px 10px 8px 16px;
+  border: 1px solid hsl(28 72% 58% / 0.35);
+  border-radius: 3px;
+  background:
+    /* punched-tape holes down the left edge */
+    radial-gradient(circle 1.6px at 8px 50%, var(--slsk-bg) 1.5px, transparent 1.7px) left center / 16px 9px repeat-y,
+    linear-gradient(hsl(160 16% 7.5% / 0.97), hsl(160 16% 7.5% / 0.97));
+  box-shadow: 0 6px 20px hsl(160 30% 2% / 0.6), 0 0 0 1px hsl(158 30% 10%);
+}
+.slsk-ticket::before {
+  /* tear line separating the punch strip from the writing area */
+  content: '';
+  position: absolute;
+  left: 13px;
+  top: 4px;
+  bottom: 4px;
+  width: 1px;
+  background-image: repeating-linear-gradient(180deg, hsl(158 12% 22%) 0 3px, transparent 3px 6px);
+}
 
 /* ─────────────────────────────────────────────────────────────
    Hallway scope — the homepage corridor. A neutral gallery shell

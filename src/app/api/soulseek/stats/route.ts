@@ -3,6 +3,17 @@ import pool from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
+// Daily traffic counts only what actually moved (completed), so the charts
+// and the summary tiles tell the same story.
+const DAILY = (table: string) => `
+  SELECT to_char(DATE(created_at), 'YYYY-MM-DD') AS date,
+         COUNT(*) AS count,
+         COALESCE(SUM(size_bytes), 0) AS bytes
+  FROM ${table}
+  WHERE created_at > NOW() - INTERVAL '90 days' AND status = 'completed'
+  GROUP BY DATE(created_at) ORDER BY 1
+`;
+
 export async function GET() {
   try {
     const [
@@ -12,8 +23,9 @@ export async function GET() {
       topUploadUsers,
       dailyDownloads,
       dailyUploads,
-      recentDownloads,
-      recentUploads,
+      hourlyUploads,
+      topRecords,
+      formats,
     ] = await Promise.all([
       pool.query(`
         SELECT
@@ -38,30 +50,31 @@ export async function GET() {
       pool.query(`
         SELECT username, COUNT(*) as count, COALESCE(SUM(size_bytes), 0) as total_bytes
         FROM soulseek_downloads WHERE status = 'completed'
-        GROUP BY username ORDER BY count DESC LIMIT 10
+        GROUP BY username ORDER BY SUM(size_bytes) DESC NULLS LAST LIMIT 10
       `),
       pool.query(`
-        SELECT username, COUNT(*) as count, COALESCE(SUM(size_bytes), 0) as total_bytes
+        SELECT username, COUNT(*) as count, COALESCE(SUM(size_bytes), 0) as total_bytes,
+               MAX(created_at) as last_at
         FROM soulseek_uploads WHERE status = 'completed'
-        GROUP BY username ORDER BY count DESC LIMIT 10
+        GROUP BY username ORDER BY SUM(size_bytes) DESC NULLS LAST LIMIT 10
+      `),
+      pool.query(DAILY('soulseek_downloads')),
+      pool.query(DAILY('soulseek_uploads')),
+      pool.query(`
+        SELECT EXTRACT(HOUR FROM created_at)::int AS hour, COUNT(*) AS count
+        FROM soulseek_uploads WHERE status = 'completed'
+        GROUP BY 1 ORDER BY 1
       `),
       pool.query(`
-        SELECT DATE(created_at) as date, COUNT(*) as count
-        FROM soulseek_downloads
-        WHERE created_at > NOW() - INTERVAL '30 days'
-        GROUP BY DATE(created_at) ORDER BY date
+        SELECT artist, album, COUNT(*) as count, COALESCE(SUM(size_bytes), 0) as total_bytes
+        FROM soulseek_uploads WHERE status = 'completed' AND artist IS NOT NULL
+        GROUP BY artist, album ORDER BY count DESC, SUM(size_bytes) DESC LIMIT 8
       `),
       pool.query(`
-        SELECT DATE(created_at) as date, COUNT(*) as count
-        FROM soulseek_uploads
-        WHERE created_at > NOW() - INTERVAL '30 days'
-        GROUP BY DATE(created_at) ORDER BY date
-      `),
-      pool.query(`
-        SELECT * FROM soulseek_downloads ORDER BY created_at DESC LIMIT 10
-      `),
-      pool.query(`
-        SELECT * FROM soulseek_uploads ORDER BY created_at DESC LIMIT 10
+        SELECT LOWER(SUBSTRING(filename FROM '\\.([A-Za-z0-9]+)$')) AS ext,
+               COUNT(*) as count, COALESCE(SUM(size_bytes), 0) as bytes
+        FROM soulseek_uploads WHERE status = 'completed'
+        GROUP BY 1 ORDER BY count DESC
       `),
     ]);
 
@@ -70,13 +83,14 @@ export async function GET() {
         summary: downloadSummary.rows[0],
         topSources: topDownloadSources.rows,
         daily: dailyDownloads.rows,
-        recent: recentDownloads.rows,
       },
       uploads: {
         summary: uploadSummary.rows[0],
         topUsers: topUploadUsers.rows,
         daily: dailyUploads.rows,
-        recent: recentUploads.rows,
+        hourly: hourlyUploads.rows,
+        topRecords: topRecords.rows,
+        formats: formats.rows,
       },
     });
   } catch (error) {
