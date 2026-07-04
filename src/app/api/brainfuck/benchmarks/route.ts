@@ -17,7 +17,8 @@ export async function GET() {
               started_at, completed_at
        FROM brainfuck_benchmarks
        ORDER BY started_at DESC
-       LIMIT 100`,
+       LIMIT 400`, // 24-row ladder batches: LIMIT 100 would split a batch at
+                   // the boundary and corrupt its card's solved-n/m aggregates
     );
     return NextResponse.json({
       benchmarks: rows,

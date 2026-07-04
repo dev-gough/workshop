@@ -1319,21 +1319,36 @@ export default function BrainfuckPage() {
                       Configs in each batch
                     </div>
                     <div className="font-mono text-[11px] text-foreground/70 space-y-0.5">
-                      {(benchSuite === 'solve' ? solvePreset : benchPreset).length === 0 ? (
-                        <span className="italic text-muted-foreground">loading…</span>
-                      ) : (
-                        (benchSuite === 'solve' ? solvePreset : benchPreset).map((c, i) => (
+                      {(() => {
+                        const list = benchSuite === 'solve' ? solvePreset : benchPreset;
+                        if (list.length === 0) {
+                          return <span className="italic text-muted-foreground">loading…</span>;
+                        }
+                        // Collapse consecutive identical configs (rep runs of
+                        // one ladder rung) into a single "×N" line.
+                        const grouped: { c: BenchmarkPresetItem; n: number }[] = [];
+                        for (const c of list) {
+                          const last = grouped[grouped.length - 1];
+                          if (last && last.c.target === c.target && last.c.popSize === c.popSize
+                            && last.c.maxGen === c.maxGen && (last.c.lanes ?? 1) === (c.lanes ?? 1)) {
+                            last.n++;
+                          } else {
+                            grouped.push({ c, n: 1 });
+                          }
+                        }
+                        return grouped.map(({ c, n }, i) => (
                           <div key={i}>
                             <span className="text-primary">{i + 1}.</span>{' '}
-                            target <span className="text-foreground/90">&quot;{c.target}&quot;</span>
+                            <span className="text-foreground/90">&quot;{c.target}&quot;</span>
+                            {n > 1 && <span className="text-foreground/90"> ×{n}</span>}
                             {' · '}pop <span className="text-foreground/90">{c.popSize}</span>
-                            {' · '}gens <span className="text-foreground/90">{c.maxGen.toLocaleString()}</span>
+                            {' · '}<span className="text-foreground/90">{c.maxGen.toLocaleString()}</span> cap
                             {(c.lanes ?? 1) > 1 && (
                               <span className="text-primary/70"> · ×{c.lanes} lanes</span>
                             )}
                           </div>
-                        ))
-                      )}
+                        ));
+                      })()}
                     </div>
                   </div>
 
@@ -1628,24 +1643,101 @@ function BenchmarkBatchCard({
           <span className="text-[10px]">{fmtTime(group.startedAt)}</span>
         </div>
       </div>
-      <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-3 gap-y-1 px-3 py-2 text-[11px] items-center">
-        <div className="text-[9px] uppercase tracking-wider text-muted-foreground font-medium">
-          Config
+      {isSolve ? (
+        <SolveTargetAggList rows={group.rows} onDelete={onDelete} />
+      ) : (
+        <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-3 gap-y-1 px-3 py-2 text-[11px] items-center">
+          <div className="text-[9px] uppercase tracking-wider text-muted-foreground font-medium">
+            Config
+          </div>
+          <div className="text-[9px] uppercase tracking-wider text-muted-foreground font-medium text-right">
+            Evals/s
+          </div>
+          <div className="text-[9px] uppercase tracking-wider text-muted-foreground font-medium text-right">
+            Gens/s
+          </div>
+          <div className="text-[9px] uppercase tracking-wider text-muted-foreground font-medium text-right">
+            Wall
+          </div>
+          <div></div>
+          {group.rows.map((r) => (
+            <BenchmarkConfigRow key={r.id} b={r} onDelete={() => onDelete(r.id)} />
+          ))}
         </div>
-        <div className="text-[9px] uppercase tracking-wider text-muted-foreground font-medium text-right">
-          Evals/s
-        </div>
-        <div className="text-[9px] uppercase tracking-wider text-muted-foreground font-medium text-right">
-          Gens/s
-        </div>
-        <div className="text-[9px] uppercase tracking-wider text-muted-foreground font-medium text-right">
-          Wall
-        </div>
-        <div></div>
-        {group.rows.map((r) => (
-          <BenchmarkConfigRow key={r.id} b={r} onDelete={() => onDelete(r.id)} />
-        ))}
-      </div>
+      )}
+    </div>
+  );
+}
+
+// Solve batches show one line per ladder rung — reps averaged — instead of
+// every row (8 rungs × 3 reps would dwarf the card). Click a rung to unfold
+// its individual reps (with their delete buttons).
+function SolveTargetAggList({
+  rows, onDelete,
+}: { rows: Benchmark[]; onDelete: (id: number) => void }) {
+  const [openTarget, setOpenTarget] = useState<string | null>(null);
+
+  // Group consecutive same-target rows (the queue preserves ladder order).
+  const groups: { target: string; rows: Benchmark[] }[] = [];
+  for (const r of rows) {
+    const last = groups[groups.length - 1];
+    if (last && last.target === r.target) last.rows.push(r);
+    else groups.push({ target: r.target, rows: [r] });
+  }
+
+  return (
+    <div className="px-3 py-2 space-y-0.5 text-[11px]">
+      {groups.map((g) => {
+        const finished = g.rows.filter((r) => r.status === 'completed' && r.found != null);
+        const solved = finished.filter((r) => r.found);
+        const running = g.rows.some((r) => r.status === 'running' || r.status === 'queued');
+        const avgGens = solved.length
+          ? Math.round(solved.reduce((s, r) => s + r.generations, 0) / solved.length)
+          : null;
+        const avgWall = finished.length
+          ? finished.reduce((s, r) => s + (r.wall_seconds ?? 0), 0) / finished.length
+          : null;
+        // Nothing solved: the closest miss is the informative number.
+        const bestFit = !solved.length && finished.length
+          ? Math.max(...finished.map((r) => r.best_fitness ?? 0))
+          : null;
+        const open = openTarget === g.target;
+        return (
+          <div key={g.target}>
+            <button
+              onClick={() => setOpenTarget((cur) => (cur === g.target ? null : g.target))}
+              className="flex w-full items-center gap-2 rounded px-1 py-1 text-left hover:bg-foreground/5 transition-colors"
+            >
+              {open ? <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+                    : <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />}
+              <span className="min-w-0 flex-1 truncate font-mono text-foreground/90">
+                &quot;{g.target}&quot;
+              </span>
+              {running && <Loader className="h-3 w-3 shrink-0 animate-spin text-chart-4" />}
+              <span className="flex shrink-0 items-center gap-2 font-mono text-[10px] tabular-nums text-muted-foreground">
+                {finished.length > 0 && (
+                  <span className={solved.length === finished.length ? 'text-ok'
+                    : solved.length === 0 ? 'text-warn' : 'text-foreground/80'}>
+                    {solved.length}/{finished.length}
+                  </span>
+                )}
+                {avgGens != null && <span>avg {avgGens.toLocaleString()} gen</span>}
+                {bestFit != null && (
+                  <span>best {bestFit}/{256 * g.target.length}</span>
+                )}
+                {avgWall != null && <span>{avgWall.toFixed(1)}s</span>}
+              </span>
+            </button>
+            {open && (
+              <div className="ml-5 grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-x-3 gap-y-1 border-l border-border/40 py-1 pl-2">
+                {g.rows.map((r) => (
+                  <BenchmarkConfigRow key={r.id} b={r} onDelete={() => onDelete(r.id)} />
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

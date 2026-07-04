@@ -568,16 +568,34 @@ export const BENCHMARK_PRESET: { target: string; popSize: number; maxGen: number
 // how the interactive rig is meant to be driven). Throughput rows stay
 // single-lane — racing shares cores and would corrupt evals/s.
 export const SOLVE_LANES = 4;
-export const SOLVE_PRESET: { target: string; popSize: number; maxGen: number; lanes: number }[] = [
-  { target: 'devy',         popSize: 100, maxGen: 200_000, lanes: SOLVE_LANES },
-  { target: 'devy',         popSize: 100, maxGen: 200_000, lanes: SOLVE_LANES },
-  { target: 'devy',         popSize: 100, maxGen: 200_000, lanes: SOLVE_LANES },
-  { target: 'sparqsys',     popSize: 100, maxGen: 250_000, lanes: SOLVE_LANES },
-  { target: 'sparqsys',     popSize: 100, maxGen: 250_000, lanes: SOLVE_LANES },
-  { target: 'sparqsys',     popSize: 100, maxGen: 250_000, lanes: SOLVE_LANES },
-  { target: 'the tape lab', popSize: 100, maxGen: 300_000, lanes: SOLVE_LANES },
-  { target: 'the tape lab', popSize: 100, maxGen: 300_000, lanes: SOLVE_LANES },
+export const SOLVE_REPS = 3;
+
+// The ladder: 4 → 20 chars, three reps each (the UI averages reps per
+// target). Longer rungs mix in spaces and punctuation — bytes far from
+// the lowercase cluster stress different loop structures than all-letter
+// targets do. Caps scale with expected difficulty so a capped rep stays
+// affordable (~1-3 min at PyPy speed) without silently truncating runs
+// that were about to land.
+const SOLVE_LADDER: { target: string; maxGen: number }[] = [
+  { target: 'devy',                 maxGen: 100_000 },  //  4 ch
+  { target: 'genome',               maxGen: 150_000 },  //  6 ch
+  { target: 'sparqsys',             maxGen: 250_000 },  //  8 ch
+  { target: 'brainfuck!',           maxGen: 250_000 },  // 10 ch, punctuation
+  { target: 'the tape lab',         maxGen: 300_000 },  // 12 ch, spaces
+  { target: 'genetic splice',       maxGen: 400_000 },  // 14 ch
+  { target: 'hall of machines',     maxGen: 500_000 },  // 16 ch
+  { target: 'evolution eats tapes', maxGen: 750_000 },  // 20 ch
 ];
+
+export const SOLVE_PRESET: { target: string; popSize: number; maxGen: number; lanes: number }[] =
+  SOLVE_LADDER.flatMap((rung) =>
+    Array.from({ length: SOLVE_REPS }, () => ({
+      target: rung.target,
+      popSize: 100,
+      maxGen: rung.maxGen,
+      lanes: SOLVE_LANES,
+    })),
+  );
 
 export type BenchmarkSuite = 'throughput' | 'solve';
 
