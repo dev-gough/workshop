@@ -24,6 +24,9 @@ export interface CensusResult {
   stillLifeExamples: number[]; // distinct still-life states (up to 12)
   done: boolean;
   elapsedMs: number;
+  /** Set when the result was derived from its finished transpose (W×H ↔ H×W
+   *  is a bijection that commutes with the Life rule) rather than computed. */
+  via?: 'transpose';
 }
 
 /** Ask a worker to census the index slice [start, end) of a w×h board. */

@@ -24,7 +24,10 @@ import { usePlaneFate, type PlaneFate } from '@/lib/plane-fate-client';
 // Boards up to 2^20 states compute synchronously on mount (the engine clears
 // ~7M states/s/core). Anything bigger is "the long count": a CensusPool fans
 // block-aligned chunks out to one worker per core, checkpointing the merged
-// contiguous prefix to localStorage so a page close never loses work.
+// contiguous prefix to localStorage AND the workshop DB (/api/gol/census) so
+// a page close never loses work and any browser can pick a run back up.
+// Server writes are monotonic — the row with the most progress always wins —
+// so two browsers checkpointing the same board can't clobber each other.
 
 const AXES = Array.from({ length: MAX_AXIS }, (_, i) => i + 1);
 const AUTO_MAX_STATES = Math.pow(2, 20);
@@ -62,6 +65,71 @@ function saveResult(s: Size, r: CensusResult) {
   } catch {
     /* quota — ignore */
   }
+}
+
+// ── Server persistence (shared across browsers) ───────────────────────────
+
+const API_URL = '/api/gol/census';
+const SERVER_SAVE_MS = 10_000;
+
+/** Pick the further-along of two checkpoints; ties keep `a`. */
+function better(a: CensusResult | null | undefined, b: CensusResult | null | undefined): CensusResult | null {
+  if (!a) return b ?? null;
+  if (!b) return a;
+  if (b.done !== a.done) return b.done ? b : a;
+  return b.processed > a.processed ? b : a;
+}
+
+async function fetchServerResults(): Promise<CensusResult[]> {
+  try {
+    const res = await fetch(API_URL);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data?.results) ? data.results : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Fire-and-forget upsert; keepalive so a checkpoint survives page close. */
+function pushServer(r: CensusResult): void {
+  fetch(API_URL, {
+    method: 'PUT',
+    keepalive: true,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(r),
+  }).catch(() => { /* offline — localStorage still has it */ });
+}
+
+// ── Transpose reuse ───────────────────────────────────────────────────────
+//
+// Transposing the board is a bijection on states that commutes with the Life
+// rule (the same fact census-verify uses as a cross-check), so a FINISHED
+// W×H census is the H×W census with every example state transposed. Partial
+// results don't transfer — the contiguous index prefix isn't transpose-
+// invariant — so only done boards are mirrored.
+
+function transposeState(w: number, h: number, state: number): number {
+  const rows = decodeState(w, h, state);
+  let out = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      // cell (x, y) → (y, x) on the h-wide board; exact float64 ≤ 2^49
+      if ((rows[y] >>> x) & 1) out += Math.pow(2, x * h + y);
+    }
+  }
+  return out;
+}
+
+function transposeResult(r: CensusResult): CensusResult {
+  return {
+    ...r,
+    w: r.h,
+    h: r.w,
+    oscExamples: r.oscExamples.map(ex => ({ ...ex, state: transposeState(r.w, r.h, ex.state) })),
+    stillLifeExamples: r.stillLifeExamples.map(s => transposeState(r.w, r.h, s)),
+    via: 'transpose',
+  };
 }
 
 // Counts up to 5.6×10¹⁴ (7×7) — compact above the readable threshold.
@@ -317,6 +385,14 @@ function ResultCard({ result }: { result: CensusResult }) {
         <h3 className="text-[11px] font-semibold uppercase tracking-[0.18em]">
           {result.w}×{result.h} board
           {!result.done && <span className="ml-2 normal-case tracking-normal text-muted-foreground">in progress</span>}
+          {result.via === 'transpose' && (
+            <span
+              className="ml-2 normal-case tracking-normal text-muted-foreground"
+              title={`Transposing the board commutes with the Life rule, so the finished ${result.h}×${result.w} census is this census — no recount needed. Reset to recompute it independently.`}
+            >
+              mirrored from {result.h}×{result.w}
+            </span>
+          )}
         </h3>
         <span
           className="text-[10px] text-muted-foreground font-mono tabular-nums"
@@ -386,10 +462,30 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
   const poolRef = useRef<CensusPool | null>(null);
   const rateRef = useRef<{ t: number; classified: number } | null>(null);
   const lastSaveRef = useRef(0);
+  const lastServerSaveRef = useRef(0);
 
   const setResult = useCallback((r: CensusResult) => {
     setResults(prev => ({ ...prev, [sizeKey({ w: r.w, h: r.h })]: r }));
   }, []);
+
+  /** Merge a server/derived result into memory — never regresses progress. */
+  const adoptResult = useCallback((r: CensusResult) => {
+    setResults(prev => {
+      const k = sizeKey({ w: r.w, h: r.h });
+      const win = better(prev[k], r);
+      return !win || win === prev[k] ? prev : { ...prev, [k]: win };
+    });
+  }, []);
+
+  /** Adopt into memory + localStorage + server, monotonic in all three. */
+  const adoptEverywhere = useCallback((r: CensusResult) => {
+    const s = { w: r.w, h: r.h };
+    const win = better(loadResult(s), r);
+    if (!win) return;
+    saveResult(s, win);
+    adoptResult(win);
+    pushServer(win);
+  }, [adoptResult]);
 
   // ── Load persisted results; compute the instant boards on the spot ──
   useEffect(() => {
@@ -427,12 +523,44 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
       };
       saveResult(s, result);
       setResult(result);
+      pushServer(result); // server guard dedupes; skipped entirely on revisits
       timer = setTimeout(runNext, 0);
     };
     timer = setTimeout(runNext, 0);
     return () => { cancelled = true; clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── Server sync: merge the shared DB with this browser's checkpoints ──
+  //
+  // For every size the further-along of {localStorage, server} wins and is
+  // written back to whichever side was behind. Then any finished board whose
+  // transpose is missing (or partial) fills it in for free.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const server = await fetchServerResults();
+      if (cancelled) return;
+      const merged = new Map<string, CensusResult>();
+      for (const s of ALL_SIZES) {
+        const local = loadResult(s);
+        const remote = server.find(r => r.w === s.w && r.h === s.h) ?? null;
+        const win = better(local, remote);
+        if (!win) continue;
+        merged.set(sizeKey(s), win);
+        if (win !== local) saveResult(s, win);
+        if (win !== remote) pushServer(win);
+        adoptResult(win);
+      }
+      for (const s of ALL_SIZES) {
+        const src = merged.get(sizeKey(s));
+        if (!src?.done || s.w === s.h) continue;
+        const twin = merged.get(sizeKey({ w: s.h, h: s.w }));
+        if (!twin?.done) adoptEverywhere(transposeResult(src));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [adoptResult, adoptEverywhere]);
 
   // ── Deep runs: worker pool with contiguous checkpoints ──
 
@@ -441,6 +569,10 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
     if (!force && now - lastSaveRef.current < SAVE_THROTTLE_MS) return;
     lastSaveRef.current = now;
     saveResult({ w: r.w, h: r.h }, r);
+    if (force || now - lastServerSaveRef.current >= SERVER_SAVE_MS) {
+      lastServerSaveRef.current = now;
+      pushServer(r);
+    }
   }, []);
 
   const trackRate = useCallback((r: CensusResult) => {
@@ -461,7 +593,9 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
     const s = sel;
     rateRef.current = null;
     setRate(null);
-    const pool = new CensusPool(s.w, s.h, loadResult(s), {
+    // Resume from the in-memory result — it already holds the best of
+    // {localStorage, server} after the mount sync.
+    const pool = new CensusPool(s.w, s.h, results[sizeKey(s)] ?? loadResult(s), {
       onUpdate: (r) => {
         setResult(r);
         trackRate(r);
@@ -470,6 +604,7 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
       onDone: (r) => {
         setResult(r);
         persistThrottled(r, true);
+        if (r.w !== r.h) adoptEverywhere(transposeResult(r));
         setRunningSize(null);
         poolRef.current = null;
         setRate(null);
@@ -478,7 +613,7 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
     poolRef.current = pool;
     setRunningSize(s);
     pool.start();
-  }, [sel, persistThrottled, setResult, trackRate]);
+  }, [sel, results, persistThrottled, setResult, trackRate, adoptEverywhere]);
 
   const pauseDeep = useCallback(() => {
     const pool = poolRef.current;
@@ -494,6 +629,7 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
   const resetDeep = useCallback(() => {
     if (runningSize) return;
     try { localStorage.removeItem(storageKey(sel)); } catch { /* ignore */ }
+    fetch(`${API_URL}?w=${sel.w}&h=${sel.h}`, { method: 'DELETE' }).catch(() => { /* offline */ });
     setResults(prev => {
       const next = { ...prev };
       delete next[sizeKey(sel)];
@@ -507,6 +643,7 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
     if (pool) {
       const snapshot = pool.stop();
       saveResult({ w: snapshot.w, h: snapshot.h }, snapshot);
+      pushServer(snapshot); // keepalive — survives the page closing
       poolRef.current = null;
     }
   }, []);
@@ -537,6 +674,7 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
   const etaSeconds = rate && rate > 0 ? Math.round((selTotal - selClassified) / rate) : 0;
 
   const galleryItems = Object.values(results)
+    .filter(r => r.via !== 'transpose') // mirrored boards would duplicate every specimen
     .flatMap(r => r.oscExamples.map(ex => ({ ...ex, w: r.w, h: r.h })))
     .sort((a, b) => b.period - a.period)
     .slice(0, 10);
@@ -626,7 +764,8 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
               <p className="text-xs text-muted-foreground mt-0.5 max-w-lg">
                 One worker per core sweeps the state space in resumable chunks — symmetry
                 pruning, bit-parallel stepping, Brent cycle detection. Progress checkpoints
-                to this browser, so closing the page never loses a run.
+                to the workshop database, so any browser can resume a run — and a finished
+                board fills in its transpose for free.
               </p>
             </div>
             <div className="flex items-center gap-1.5">
