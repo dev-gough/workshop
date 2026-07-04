@@ -300,9 +300,9 @@ function PlaneFateBadge({ w, h, state, boundedPeriod }: {
 // Click to chalk it onto the live board (page handles the tab flip).
 
 function OscillatorGalleryItem({
-  state, period, w, h, onOpen,
+  state, period, population, w, h, onOpen,
 }: {
-  state: number; period: number; w: number; h: number;
+  state: number; period: number; population: number; w: number; h: number;
   onOpen?: () => void;
 }) {
   const [frame, setFrame] = useState(state);
@@ -328,7 +328,7 @@ function OscillatorGalleryItem({
     >
       <MiniGrid state={frame} w={w} h={h} cell={Math.max(w, h) >= 6 ? 10 : Math.max(w, h) >= 5 ? 12 : 16} />
       <span className="text-[10px] font-medium text-muted-foreground tabular-nums transition-colors group-enabled:group-hover:text-primary">
-        {w}×{h} · period {period}
+        {w}×{h} · p{period} · {population} cells
       </span>
       <PlaneFateBadge w={w} h={h} state={state} boundedPeriod={period} />
     </button>
@@ -362,6 +362,9 @@ function pct(nu: number, total: number): string {
 }
 
 const PERIOD_CHIP_CAP = 14;
+const GALLERY_PREVIEW = 24;   // specimens shown before "show all"
+
+type GallerySort = 'period' | 'cells';
 
 function ResultCard({ result }: { result: CensusResult }) {
   const osc = oscTotal(result);
@@ -459,6 +462,10 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
   const [sel, setSel] = useState<Size>({ w: 5, h: 5 });
   const [runningSize, setRunningSize] = useState<Size | null>(null);
   const [rate, setRate] = useState<number | null>(null);
+  const [galleryBoard, setGalleryBoard] = useState('all'); // 'all' | sizeKey
+  const [gallerySort, setGallerySort] = useState<GallerySort>('period');
+  const [galleryAsc, setGalleryAsc] = useState(false);
+  const [galleryExpanded, setGalleryExpanded] = useState(false);
   const poolRef = useRef<CensusPool | null>(null);
   const rateRef = useRef<{ t: number; classified: number } | null>(null);
   const lastSaveRef = useRef(0);
@@ -673,11 +680,36 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
   const selIsRunning = sameSize(runningSize, sel);
   const etaSeconds = rate && rate > 0 ? Math.round((selTotal - selClassified) / rate) : 0;
 
-  const galleryItems = Object.values(results)
-    .filter(r => r.via !== 'transpose') // mirrored boards would duplicate every specimen
+  // ── Oscillator gallery pool ──
+  //
+  // The census keeps one specimen per (board, period) — the most-populous
+  // example — so this is every oscillator it can show. "All boards" skips
+  // mirrored results (they'd duplicate every specimen of their transpose);
+  // filtering to a specific W×H uses that board's own examples, mirrored or
+  // not, so both orientations of a rectangle are individually browsable.
+  const boardOptions = Object.values(results)
+    .filter(r => r.oscExamples.length > 0)
+    .sort((a, b) => a.w * a.h - b.w * b.h || a.h - b.h)
+    .map(r => ({ key: sizeKey({ w: r.w, h: r.h }), w: r.w, h: r.h, count: r.oscExamples.length }));
+  const boardFilter = boardOptions.some(o => o.key === galleryBoard) ? galleryBoard : 'all';
+
+  const specimens = Object.values(results)
+    .filter(r => (boardFilter === 'all' ? r.via !== 'transpose' : sizeKey({ w: r.w, h: r.h }) === boardFilter))
     .flatMap(r => r.oscExamples.map(ex => ({ ...ex, w: r.w, h: r.h })))
-    .sort((a, b) => b.period - a.period)
-    .slice(0, 10);
+    .sort((a, b) => {
+      const dir = galleryAsc ? 1 : -1;
+      const primary = gallerySort === 'period' ? a.period - b.period : a.population - b.population;
+      if (primary !== 0) return primary * dir;
+      // ties: the other key desc, then smaller boards first — stable, scan-friendly
+      const secondary = gallerySort === 'period' ? b.population - a.population : b.period - a.period;
+      return secondary || a.w * a.h - b.w * b.h || a.w - b.w || a.state - b.state;
+    });
+  const shownSpecimens = galleryExpanded ? specimens : specimens.slice(0, GALLERY_PREVIEW);
+
+  const toggleSort = (key: GallerySort) => {
+    if (gallerySort === key) setGalleryAsc(v => !v);
+    else { setGallerySort(key); setGalleryAsc(false); }
+  };
 
   return (
     <div className="flex flex-col gap-6">
@@ -832,27 +864,71 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
       {/* Selected board detail */}
       {selResult && classifiedTotal(selResult) > 0 && <ResultCard result={selResult} />}
 
-      {/* Longest-period oscillator gallery */}
-      {galleryItems.length > 0 && (
+      {/* Oscillator gallery — every retained specimen, filterable + sortable */}
+      {boardOptions.length > 0 && (
         <div>
-          <div className="flex flex-wrap items-baseline justify-between gap-x-3 mb-3">
-            <h3 className="text-[11px] font-semibold uppercase tracking-[0.18em]">Longest-period oscillators found</h3>
-            <span className="text-[10px] text-muted-foreground">
-              badge = fate on the infinite plane · select one to chalk it onto the board
-            </span>
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 mb-1.5">
+            <h3 className="text-[11px] font-semibold uppercase tracking-[0.18em]">
+              Oscillator gallery
+              <span className="ml-2 font-mono normal-case tracking-normal text-muted-foreground tabular-nums">
+                {specimens.length} specimen{specimens.length === 1 ? '' : 's'}
+              </span>
+            </h3>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <select
+                value={boardFilter}
+                onChange={e => setGalleryBoard(e.target.value)}
+                title="Show only one board size's specimens"
+                className="h-6 rounded border border-border bg-card px-1.5 text-[10px] font-mono text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
+              >
+                <option value="all">all boards</option>
+                {boardOptions.map(o => (
+                  <option key={o.key} value={o.key}>
+                    {o.w}×{o.h} · {o.count}
+                  </option>
+                ))}
+              </select>
+              {(['period', 'cells'] as const).map(key => (
+                <button
+                  key={key}
+                  onClick={() => toggleSort(key)}
+                  title={key === 'period' ? 'Sort by cycle length' : 'Sort by live-cell count'}
+                  className={`h-6 rounded border px-2 text-[10px] font-mono transition-colors ${
+                    gallerySort === key
+                      ? 'border-primary/50 bg-primary/10 text-primary'
+                      : 'border-border text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {key} {gallerySort === key ? (galleryAsc ? '↑' : '↓') : ''}
+                </button>
+              ))}
+            </div>
           </div>
+          <p className="text-[10px] text-muted-foreground mb-3">
+            one specimen per period per board (the census keeps the most-populous example) ·
+            badge = fate on the infinite plane · select one to chalk it onto the board
+          </p>
           <div className="flex flex-wrap gap-3">
-            {galleryItems.map((it, i) => (
+            {shownSpecimens.map(it => (
               <OscillatorGalleryItem
-                key={`${it.w}x${it.h}-${it.period}-${i}`}
+                key={`${it.w}x${it.h}-${it.period}`}
                 state={it.state}
                 period={it.period}
+                population={it.population}
                 w={it.w}
                 h={it.h}
                 onOpen={onShowOnBoard ? () => openOscillator(it.w, it.h, it.state) : undefined}
               />
             ))}
           </div>
+          {specimens.length > GALLERY_PREVIEW && (
+            <button
+              onClick={() => setGalleryExpanded(v => !v)}
+              className="mt-3 h-7 rounded border border-border px-3 text-[10px] font-mono text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
+            >
+              {galleryExpanded ? 'show fewer' : `show all ${specimens.length}`}
+            </button>
+          )}
         </div>
       )}
     </div>
