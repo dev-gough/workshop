@@ -371,18 +371,27 @@ export function SplitwiserRoom({ splitwiser, className }: { splitwiser: SwActivi
 
 export function SoulseekRoom({ soulseek, className }: { soulseek: SlskStats | null; className?: string }) {
   const s = soulseek?.downloads.summary;
+  const u = soulseek?.uploads?.summary;
   const top = soulseek?.downloads.topSources[0];
 
+  // Miniature of the wire room: green-black exchange wall, emerald down-wire,
+  // copper up-wire (colors match .slsk-theme in globals.css).
   return (
     <Door href="/projects/soulseek" number="RM 10" room="Soulseek Wire" className={className}>
-      <div className="flex h-full flex-col justify-center gap-1.5 bg-[hsl(215_28%_8%)] p-4 pb-9">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-400">On the wire</p>
+      <div className="flex h-full flex-col justify-center gap-2 bg-[hsl(160_20%_5%)] p-4 pb-9">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[hsl(158_72%_52%)]">The wire room</p>
         {s ? (
           <>
-            <p className="text-sm text-zinc-200">
-              <span className="font-mono font-semibold text-emerald-400">↓ {fmtBytes(Number(s.total_bytes))}</span>
-              <span className="text-zinc-500"> · {s.completed} files · {s.unique_sources} peers</span>
-            </p>
+            <div className="flex items-center gap-2 text-[hsl(158_72%_52%)]">
+              <span className="shrink-0 font-mono text-xs font-semibold tabular-nums">▼ {fmtBytes(Number(s.total_bytes))}</span>
+              <span className="shrink-0 text-[10px] text-zinc-500">{s.completed} files in</span>
+              <span className="slsk-wire min-w-0 flex-1 opacity-50" />
+            </div>
+            <div className="flex items-center gap-2 text-[hsl(28_72%_58%)]">
+              <span className="shrink-0 font-mono text-xs font-semibold tabular-nums">▲ {fmtBytes(Number(u?.total_bytes ?? 0))}</span>
+              <span className="shrink-0 text-[10px] text-zinc-500">{u?.completed ?? 0} files out</span>
+              <span className="slsk-wire min-w-0 flex-1 opacity-50" />
+            </div>
             {top && (
               <p className="truncate text-[11px] text-zinc-500">
                 best peer: <span className="text-zinc-300">{top.username}</span> ({top.count} files)

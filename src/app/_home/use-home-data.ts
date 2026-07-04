@@ -97,6 +97,9 @@ export interface SlskStats {
     summary: { total: string; completed: string; total_bytes: string; unique_sources: string };
     topSources: { username: string; count: string; total_bytes: string }[];
   };
+  uploads?: {
+    summary: { total: string; completed: string; total_bytes: string; unique_users: string };
+  };
 }
 
 export interface HomeData {

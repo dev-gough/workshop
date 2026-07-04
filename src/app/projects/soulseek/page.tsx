@@ -3,20 +3,17 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Search, Download, Upload, FolderOpen, BarChart3,
-  ChevronRight, ChevronDown, Clock, User, Zap,
-  CheckCircle, XCircle, Loader, Music, ArrowDown,
-  ArrowUp, RefreshCw, Trash2,
-  Check, X, Edit3, Play, File, Folder,
-  HardDrive, Users, TrendingUp, Activity, ExternalLink,
+  Search, Download, FolderOpen, ChevronRight, ChevronDown,
+  Clock, User, Zap, CheckCircle, Loader, Music, ArrowDown,
+  ArrowUp, Trash2, Check, X, Edit3, File, Folder, ExternalLink,
 } from 'lucide-react';
 import Link from 'next/link';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
 import { useAudio } from '@/components/AudioProvider';
+import { useHeaderConfig } from '@/components/header-config';
 import { fmtBytes as fmtBytesShared, fmtSpeed, fmtTime } from '@/lib/format';
 import { ProgressBar } from '@/components/ui/ProgressBar';
-import { ConnectionBadge } from '@/components/ui/ConnectionBadge';
 
 // ── Types ──
 
@@ -139,20 +136,20 @@ function fmtDuration(seconds?: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+// Quality reads in room colors: copper = lossless, signal green = top-rate lossy.
 function qualityBadge(file: SearchFile): { label: string; color: string } {
   const ext = file.filename.split('.').pop()?.toLowerCase() || '';
   if (ext === 'flac' || file.bitDepth) {
     const depth = file.bitDepth || 16;
     const rate = file.sampleRate ? Math.round(file.sampleRate / 1000) : 44.1;
-    return { label: `FLAC ${depth}/${rate}`, color: 'text-amber-400 bg-amber-400/10' };
+    return { label: `FLAC ${depth}/${rate}`, color: 'text-accent bg-accent/10' };
   }
   if (file.bitRate) {
-    if (file.bitRate >= 320) return { label: `${ext.toUpperCase()} 320`, color: 'text-emerald-400 bg-emerald-400/10' };
-    if (file.bitRate >= 256) return { label: `${ext.toUpperCase()} ${file.bitRate}`, color: 'text-blue-400 bg-blue-400/10' };
-    if (file.bitRate >= 192) return { label: `${ext.toUpperCase()} ${file.bitRate}`, color: 'text-cyan-400 bg-cyan-400/10' };
-    return { label: `${ext.toUpperCase()} ${file.bitRate}`, color: 'text-zinc-400 bg-zinc-400/10' };
+    if (file.bitRate >= 320) return { label: `${ext.toUpperCase()} 320`, color: 'text-primary bg-primary/10' };
+    if (file.bitRate >= 192) return { label: `${ext.toUpperCase()} ${file.bitRate}`, color: 'text-foreground/70 bg-muted/70' };
+    return { label: `${ext.toUpperCase()} ${file.bitRate}`, color: 'text-muted-foreground bg-muted/60' };
   }
-  return { label: ext.toUpperCase(), color: 'text-zinc-500 bg-zinc-500/10' };
+  return { label: ext.toUpperCase(), color: 'text-muted-foreground bg-muted/60' };
 }
 
 function basename(filepath: string): string {
@@ -160,35 +157,140 @@ function basename(filepath: string): string {
 }
 
 function transferStateLabel(state: string): { label: string; color: string } {
-  if (state.includes('Completed') && state.includes('Succeeded')) return { label: 'Done', color: 'text-emerald-400' };
-  if (state.includes('InProgress')) return { label: 'Downloading', color: 'text-blue-400' };
-  if (state.includes('Queued') || state.includes('Initializing')) return { label: 'Queued', color: 'text-amber-400' };
-  if (state.includes('Cancelled')) return { label: 'Cancelled', color: 'text-zinc-500' };
-  if (state.includes('Errored') || state.includes('Rejected')) return { label: 'Error', color: 'text-red-400' };
-  return { label: state.split(',')[0] || state, color: 'text-zinc-400' };
+  if (state.includes('Completed') && state.includes('Succeeded')) return { label: 'Done', color: 'text-primary' };
+  if (state.includes('InProgress')) return { label: 'On the wire', color: 'text-primary' };
+  if (state.includes('Queued') || state.includes('Initializing')) return { label: 'Hold', color: 'text-accent' };
+  if (state.includes('Cancelled')) return { label: 'Dropped', color: 'text-muted-foreground' };
+  if (state.includes('Errored') || state.includes('Rejected')) return { label: 'Fault', color: 'text-destructive' };
+  return { label: state.split(',')[0] || state, color: 'text-muted-foreground' };
+}
+
+function isActive(t: Transfer): boolean {
+  return !t.state.includes('Completed');
+}
+
+function isMoving(t: Transfer): boolean {
+  return t.state.includes('InProgress');
 }
 
 // ── Tab definitions ──
 
-type TabId = 'search' | 'downloads' | 'uploads' | 'browse' | 'stats';
-const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
-  { id: 'search', label: 'Search', icon: Search },
-  { id: 'downloads', label: 'Downloads', icon: Download },
-  { id: 'uploads', label: 'Uploads', icon: Upload },
-  { id: 'browse', label: 'Browse', icon: FolderOpen },
-  { id: 'stats', label: 'Stats', icon: BarChart3 },
+type TabId = 'search' | 'transfers' | 'ledger';
+const TABS: { id: TabId; label: string }[] = [
+  { id: 'search', label: 'Search' },
+  { id: 'transfers', label: 'Transfers' },
+  { id: 'ledger', label: 'Ledger' },
 ];
 
-// ── Components ──
+// ── Small room hardware ──
+
+const EYEBROW = 'text-[10px] font-semibold uppercase tracking-[0.2em]';
 
 function QualityTag({ file }: { file: SearchFile }) {
   const badge = qualityBadge(file);
-  return <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${badge.color}`}>{badge.label}</span>;
+  return <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-sm ${badge.color}`}>{badge.label}</span>;
 }
 
-// ── Search Tab ──
+function EmptySlot({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="text-center py-6 text-muted-foreground text-sm rounded-lg border border-dashed border-border/70 bg-card/30">
+      {children}
+    </div>
+  );
+}
+
+function LineLamp({ connected }: { connected: boolean | null }) {
+  return (
+    <div className="flex items-center gap-2.5 rounded-md border border-border bg-card px-3.5 py-2">
+      <span className={`slsk-lamp ${connected ? 'text-primary slsk-lamp-live' : connected === false ? 'text-destructive' : 'slsk-lamp-off'}`} />
+      <div className="leading-tight">
+        <p className={`${EYEBROW} !text-[9px] text-muted-foreground`}>Line</p>
+        <p className="font-mono text-[11px] tabular-nums text-foreground">
+          {connected == null ? 'checking…' : connected ? 'CONNECTED' : 'NO CARRIER'}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/** The exchange's two wires — live from the SSE feed on every tab. */
+function WireMeter({ liveDownloads, liveUploads }: {
+  liveDownloads: Record<string, Transfer[]>;
+  liveUploads: Record<string, Transfer[]>;
+}) {
+  const rows: { dir: 'down' | 'up'; transfers: Transfer[] }[] = [
+    { dir: 'down', transfers: Object.values(liveDownloads).flat().filter(isActive) },
+    { dir: 'up', transfers: Object.values(liveUploads).flat().filter(isActive) },
+  ];
+  return (
+    <div className="rounded-lg border border-border bg-card/60 px-4 py-3 space-y-2.5">
+      {rows.map(({ dir, transfers }) => {
+        const moving = transfers.filter(isMoving);
+        const speed = moving.reduce((sum, t) => sum + (t.averageSpeed || 0), 0);
+        const color = dir === 'down' ? 'text-primary' : 'text-accent';
+        const live = transfers.length > 0;
+        return (
+          <div key={dir} className="flex items-center gap-3">
+            <span className={`${EYEBROW} w-24 shrink-0 ${color}`}>
+              {dir === 'down' ? '▼ down wire' : '▲ up wire'}
+            </span>
+            <span className={`slsk-lamp ${live ? `${color} slsk-lamp-live` : 'slsk-lamp-off'}`} />
+            <span className="font-mono text-xs tabular-nums text-foreground w-40 shrink-0">
+              {live ? `${transfers.length} live · ${fmtSpeed(speed)}` : 'idle'}
+            </span>
+            <div className={`slsk-wire flex-1 ${live ? `${color} slsk-wire-live` : 'text-border'} ${dir === 'up' ? 'slsk-wire-out' : ''}`} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Search tab (network search + peer browse) ──
 
 function SearchTab({ libraryArtists, initialSearch }: { libraryArtists: Set<string>; initialSearch: string | null }) {
+  const [mode, setMode] = useState<'network' | 'peer'>('network');
+  const [peerSeed, setPeerSeed] = useState<{ name: string; key: number } | null>(null);
+  const seedCounter = useRef(0);
+
+  const browsePeer = (name: string) => {
+    seedCounter.current += 1;
+    setPeerSeed({ name, key: seedCounter.current });
+    setMode('peer');
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Mode toggle — network-wide search, or patch straight into one peer */}
+      <div className="flex w-fit rounded-md border border-border bg-muted/40 p-0.5">
+        {(['network', 'peer'] as const).map(m => (
+          <button
+            key={m}
+            onClick={() => setMode(m)}
+            className={`px-3 py-1.5 rounded-[5px] text-[10px] font-semibold uppercase tracking-[0.14em] transition-colors ${
+              mode === m ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {m === 'network' ? 'Network' : 'One peer'}
+          </button>
+        ))}
+      </div>
+
+      <div className={mode === 'network' ? '' : 'hidden'}>
+        <NetworkSearch libraryArtists={libraryArtists} initialSearch={initialSearch} onBrowsePeer={browsePeer} />
+      </div>
+      <div className={mode === 'peer' ? '' : 'hidden'}>
+        <PeerBrowse seed={peerSeed} />
+      </div>
+    </div>
+  );
+}
+
+function NetworkSearch({ libraryArtists, initialSearch, onBrowsePeer }: {
+  libraryArtists: Set<string>;
+  initialSearch: string | null;
+  onBrowsePeer: (username: string) => void;
+}) {
   const [query, setQuery] = useState('');
   const [searchId, setSearchId] = useState<string | null>(null);
   const [results, setResults] = useState<SearchResult | null>(null);
@@ -327,14 +429,14 @@ function SearchTab({ libraryArtists, initialSearch }: { libraryArtists: Set<stri
               onChange={e => setQuery(e.target.value)}
               onFocus={() => history.length > 0 && setShowHistory(true)}
               onKeyDown={e => e.key === 'Enter' && handleSearch()}
-              placeholder="Search for music..."
-              className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-muted/40 border border-border/60 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/50 transition-colors"
+              placeholder="Put a call out on the network…"
+              className="w-full pl-10 pr-4 py-2.5 rounded-md bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/50 transition-colors"
             />
           </div>
           <button
             onClick={() => handleSearch()}
             disabled={searching || !query.trim()}
-            className="px-5 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+            className="px-5 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
           >
             {searching ? <Loader className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
             Search
@@ -348,27 +450,27 @@ function SearchTab({ libraryArtists, initialSearch }: { libraryArtists: Set<stri
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -4 }}
-              className="absolute z-20 top-full mt-1 w-full rounded-lg bg-card border border-border/60 shadow-xl overflow-hidden"
+              className="absolute z-20 top-full mt-1 w-full rounded-md bg-popover border border-border shadow-xl overflow-hidden"
             >
-              <div className="p-2 border-b border-border/40">
-                <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Recent Searches</span>
+              <div className="p-2 border-b border-border/60">
+                <span className={`${EYEBROW} text-muted-foreground`}>Call log</span>
               </div>
               {history.slice(0, 8).map(h => (
                 <button
                   key={h.id}
                   onClick={() => { handleSearch(h.query); setShowHistory(false); }}
-                  className="w-full flex items-center justify-between px-3 py-2 text-sm text-foreground hover:bg-muted/40 transition-colors"
+                  className="w-full flex items-center justify-between px-3 py-2 text-sm text-foreground hover:bg-muted/60 transition-colors"
                 >
                   <div className="flex items-center gap-2">
                     <Clock className="h-3 w-3 text-muted-foreground" />
                     <span>{h.query}</span>
                   </div>
-                  <span className="text-xs text-muted-foreground">{h.result_count} results</span>
+                  <span className="text-xs font-mono tabular-nums text-muted-foreground">{h.result_count} results</span>
                 </button>
               ))}
               <button
                 onClick={() => setShowHistory(false)}
-                className="w-full px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground text-center border-t border-border/40"
+                className="w-full px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground text-center border-t border-border/60"
               >
                 Close
               </button>
@@ -382,14 +484,14 @@ function SearchTab({ libraryArtists, initialSearch }: { libraryArtists: Set<stri
 
       {/* File type filter */}
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Formats:</span>
+        <span className={`${EYEBROW} text-muted-foreground`}>Formats:</span>
         {FILE_TYPES.map(ext => (
           <button
             key={ext}
             onClick={() => toggleType(ext)}
-            className={`text-[11px] font-mono px-2 py-0.5 rounded transition-colors ${
+            className={`text-[11px] font-mono px-2 py-0.5 rounded-sm transition-colors ${
               enabledTypes.has(ext)
-                ? ext === 'flac' ? 'bg-amber-400/15 text-amber-400' : 'bg-muted/60 text-foreground'
+                ? ext === 'flac' ? 'bg-accent/15 text-accent' : 'bg-muted/70 text-foreground'
                 : 'bg-transparent text-muted-foreground/40 line-through'
             }`}
           >
@@ -400,11 +502,11 @@ function SearchTab({ libraryArtists, initialSearch }: { libraryArtists: Set<stri
 
       {/* Search status */}
       {searching && (
-        <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-muted/30 border border-border/40">
-          <Loader className="h-4 w-4 animate-spin text-primary" />
+        <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-card/60 border border-border">
+          <span className="slsk-lamp text-primary slsk-lamp-live" />
           <span className="text-sm text-muted-foreground">
-            Searching the network...
-            {results && <span className="text-foreground ml-1">{results.responseCount} users, {results.fileCount} files</span>}
+            Ringing the network…
+            {results && <span className="text-foreground font-mono tabular-nums ml-1">{results.responseCount} peers, {results.fileCount} files</span>}
           </span>
         </div>
       )}
@@ -413,8 +515,8 @@ function SearchTab({ libraryArtists, initialSearch }: { libraryArtists: Set<stri
       {results && sortedResponses.length > 0 && (
         <div className="space-y-1">
           <div className="flex items-center justify-between px-1">
-            <span className="text-xs text-muted-foreground">
-              {results.responseCount} users · {results.fileCount} files
+            <span className="text-xs font-mono tabular-nums text-muted-foreground">
+              {results.responseCount} peers · {results.fileCount} files
             </span>
           </div>
 
@@ -422,24 +524,34 @@ function SearchTab({ libraryArtists, initialSearch }: { libraryArtists: Set<stri
             {sortedResponses.map(response => {
               const expanded = expandedUsers.has(response.username);
               return (
-                <div key={response.username} className="rounded-lg border border-border/40 bg-card/60 overflow-hidden">
-                  {/* User header */}
-                  <button
+                <div key={response.username} className="rounded-lg border border-border/70 bg-card/60 overflow-hidden">
+                  {/* Peer header */}
+                  <div
+                    role="button"
+                    tabIndex={0}
                     onClick={() => toggleUser(response.username)}
-                    className="w-full flex items-center gap-3 px-3 py-2 hover:bg-muted/30 transition-colors"
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') toggleUser(response.username); }}
+                    className="w-full flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors cursor-pointer"
                   >
                     {expanded ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
                     <User className="h-3.5 w-3.5 text-muted-foreground" />
                     <span className="text-sm font-medium">{response.username}</span>
                     <div className="flex items-center gap-3 ml-auto text-xs text-muted-foreground">
                       {response.hasFreeUploadSlot && (
-                        <span className="text-emerald-400 flex items-center gap-1"><Zap className="h-3 w-3" /> Free slot</span>
+                        <span className="text-primary flex items-center gap-1"><Zap className="h-3 w-3" /> Free slot</span>
                       )}
-                      <span>{fmtSpeed(response.uploadSpeed)}</span>
-                      <span>Q:{response.queueLength}</span>
-                      <span>{response.fileCount} files</span>
+                      <span className="font-mono tabular-nums">{fmtSpeed(response.uploadSpeed)}</span>
+                      <span className="font-mono tabular-nums">Q:{response.queueLength}</span>
+                      <span className="font-mono tabular-nums">{response.fileCount} files</span>
+                      <button
+                        onClick={e => { e.stopPropagation(); onBrowsePeer(response.username); }}
+                        className="p-1 rounded hover:bg-accent/15 text-accent transition-colors"
+                        title="Browse this peer's full share"
+                      >
+                        <FolderOpen className="h-3.5 w-3.5" />
+                      </button>
                     </div>
-                  </button>
+                  </div>
 
                   {/* File list */}
                   <AnimatePresence>
@@ -450,7 +562,7 @@ function SearchTab({ libraryArtists, initialSearch }: { libraryArtists: Set<stri
                         exit={{ height: 0 }}
                         className="overflow-hidden"
                       >
-                        <div className="border-t border-border/30">
+                        <div className="border-t border-border/60">
                           <div className="max-h-96 overflow-y-auto">
                             {(() => {
                               // Group files by parent folder
@@ -470,13 +582,13 @@ function SearchTab({ libraryArtists, initialSearch }: { libraryArtists: Set<stri
                                 const folderInLibrary = folderParts.some(p => libraryArtists.has(p.toLowerCase()));
 
                                 return (
-                                  <div key={folder} className="border-b border-border/20 last:border-b-0">
+                                  <div key={folder} className="border-b border-border/40 last:border-b-0">
                                     {/* Folder header */}
-                                    <div className="flex items-center gap-2 px-3 py-1.5 bg-muted/20">
-                                      <Folder className="h-3 w-3 text-amber-400 shrink-0" />
+                                    <div className="flex items-center gap-2 px-3 py-1.5 bg-muted/40">
+                                      <Folder className="h-3 w-3 text-accent shrink-0" />
                                       <span className="text-xs font-medium text-foreground truncate flex-1" title={folder}>{folderDisplay}</span>
-                                      {folderInLibrary && <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-violet-400/10 text-violet-400 shrink-0">In Library</span>}
-                                      <span className="text-[10px] text-muted-foreground">{files.length} files</span>
+                                      {folderInLibrary && <span className="text-[9px] font-semibold uppercase tracking-[0.08em] px-1.5 py-0.5 rounded-sm border border-primary/40 bg-primary/5 text-primary shrink-0">In Library</span>}
+                                      <span className="text-[10px] font-mono tabular-nums text-muted-foreground">{files.length} files</span>
                                       {(() => {
                                         const key = `${response.username}:${folder}`;
                                         const active = downloadingKeys.has(key);
@@ -484,12 +596,12 @@ function SearchTab({ libraryArtists, initialSearch }: { libraryArtists: Set<stri
                                           <button
                                             onClick={() => handleDownload(response.username, files, key)}
                                             disabled={active}
-                                            className={`text-xs px-2 py-0.5 rounded flex items-center gap-1 transition-colors ${
-                                              active ? 'bg-emerald-500/20 text-emerald-400' : 'bg-primary/10 text-primary hover:bg-primary/20'
+                                            className={`text-xs px-2 py-0.5 rounded-sm flex items-center gap-1 transition-colors ${
+                                              active ? 'bg-primary/20 text-primary' : 'bg-primary/10 text-primary hover:bg-primary/20'
                                             }`}
                                           >
                                             {active ? <Loader className="h-2.5 w-2.5 animate-spin" /> : <Download className="h-2.5 w-2.5" />}
-                                            {active ? 'Queued' : 'All'}
+                                            {active ? 'Patched' : 'All'}
                                           </button>
                                         );
                                       })()}
@@ -501,20 +613,20 @@ function SearchTab({ libraryArtists, initialSearch }: { libraryArtists: Set<stri
                                       return (
                                       <div
                                         key={i}
-                                        className="flex items-center gap-2 px-3 pl-8 py-1 hover:bg-muted/20 transition-colors text-xs group"
+                                        className="flex items-center gap-2 px-3 pl-8 py-1 hover:bg-muted/30 transition-colors text-xs group"
                                       >
                                         <Music className="h-3 w-3 text-muted-foreground shrink-0" />
                                         <span className="text-foreground truncate flex-1 min-w-0 font-mono" title={file.filename}>
                                           {basename(file.filename)}
                                         </span>
                                         <QualityTag file={file} />
-                                        {file.length ? <span className="text-muted-foreground w-10 text-right">{fmtDuration(file.length)}</span> : null}
-                                        <span className="text-muted-foreground w-14 text-right">{fmtBytes(file.size)}</span>
+                                        {file.length ? <span className="text-muted-foreground font-mono tabular-nums w-10 text-right">{fmtDuration(file.length)}</span> : null}
+                                        <span className="text-muted-foreground font-mono tabular-nums w-14 text-right">{fmtBytes(file.size)}</span>
                                         <button
                                           onClick={() => handleDownload(response.username, [file], fileKey)}
                                           disabled={fileActive}
                                           className={`p-1 rounded transition-all ${
-                                            fileActive ? 'opacity-100 text-emerald-400' : 'opacity-0 group-hover:opacity-100 text-primary hover:bg-primary/20'
+                                            fileActive ? 'opacity-100 text-primary' : 'opacity-0 group-hover:opacity-100 text-primary hover:bg-primary/20'
                                           }`}
                                         >
                                           {fileActive ? <CheckCircle className="h-3 w-3" /> : <Download className="h-3 w-3" />}
@@ -541,7 +653,7 @@ function SearchTab({ libraryArtists, initialSearch }: { libraryArtists: Set<stri
       {results && !searching && sortedResponses.length === 0 && (
         <div className="text-center py-12 text-muted-foreground">
           <Search className="h-8 w-8 mx-auto mb-3 opacity-30" />
-          <p className="text-sm">No results found</p>
+          <p className="text-sm">Nobody answered</p>
         </div>
       )}
 
@@ -556,381 +668,25 @@ function SearchTab({ libraryArtists, initialSearch }: { libraryArtists: Set<stri
   );
 }
 
-// ── Downloads Tab ──
+// ── Peer browse (inside Search tab) ──
 
-const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
-
-function Pagination({ page, totalPages, pageSize, onPageChange, onPageSizeChange }: {
-  page: number; totalPages: number; pageSize: number;
-  onPageChange: (p: number) => void; onPageSizeChange: (s: number) => void;
-}) {
-  if (totalPages <= 1 && pageSize === PAGE_SIZE_OPTIONS[0]) return null;
-  return (
-    <div className="flex items-center justify-between pt-2">
-      <div className="flex items-center gap-1">
-        <span className="text-[10px] text-muted-foreground mr-1">Per page:</span>
-        {PAGE_SIZE_OPTIONS.map(s => (
-          <button key={s} onClick={() => onPageSizeChange(s)}
-            className={`text-[11px] px-1.5 py-0.5 rounded transition-colors ${pageSize === s ? 'bg-muted/60 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-          >{s}</button>
-        ))}
-      </div>
-      {totalPages > 1 && (
-        <div className="flex items-center gap-1">
-          <button onClick={() => onPageChange(page - 1)} disabled={page === 0}
-            className="text-xs px-2 py-0.5 rounded text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
-          >Prev</button>
-          <span className="text-[11px] text-muted-foreground tabular-nums">{page + 1} / {totalPages}</span>
-          <button onClick={() => onPageChange(page + 1)} disabled={page >= totalPages - 1}
-            className="text-xs px-2 py-0.5 rounded text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
-          >Next</button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DownloadsTab({ liveDownloads }: { liveDownloads: Record<string, Transfer[]> }) {
-  const [staging, setStaging] = useState<StagingItem[]>([]);
-  const [completed, setCompleted] = useState<DownloadRecord[]>([]);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editArtist, setEditArtist] = useState('');
-  const [editAlbum, setEditAlbum] = useState('');
-
-  // Pagination state
-  const [activePage, setActivePage] = useState(0);
-  const [activePageSize, setActivePageSize] = useState(10);
-  const [completedPage, setCompletedPage] = useState(0);
-  const [completedPageSize, setCompletedPageSize] = useState(10);
-
-  // Fetch staging and completed
-  const fetchData = useCallback(async () => {
-    try {
-      const [stg, comp] = await Promise.all([
-        fetch('/api/soulseek/ingest').then(r => r.json()),
-        fetch('/api/soulseek/downloads?status=completed&limit=100').then(r => r.json()),
-      ]);
-      setStaging(stg.staging || []);
-      setCompleted(comp.downloads || []);
-    } catch {}
-  }, []);
-
-  useEffect(() => { fetchData(); }, [fetchData]);
-  useEffect(() => { const i = setInterval(fetchData, 15000); return () => clearInterval(i); }, [fetchData]);
-
-  const handleApprove = async (item: StagingItem) => {
-    const artist = editingId === item.id ? editArtist : item.artist;
-    const album = editingId === item.id ? editAlbum : item.album;
-    try {
-      await fetch('/api/soulseek/ingest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: item.id, artist, album }),
-      });
-      setEditingId(null);
-      fetchData();
-    } catch {}
-  };
-
-  const handleReject = async (item: StagingItem) => {
-    try {
-      await fetch('/api/soulseek/ingest', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: item.id }),
-      });
-      fetchData();
-    } catch {}
-  };
-
-  // Flatten live transfers
-  const activeTransfers = Object.entries(liveDownloads).flatMap(([username, transfers]) =>
-    transfers.filter(t => !t.state.includes('Completed')).map(t => ({ ...t, username }))
-  );
-
-  return (
-    <div className="space-y-6">
-      {/* Active Downloads */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-          <Activity className="h-3.5 w-3.5" />
-          Active Downloads
-          {activeTransfers.length > 0 && <span className="text-foreground">({activeTransfers.length})</span>}
-        </div>
-        {activeTransfers.length === 0 ? (
-          <div className="text-center py-6 text-muted-foreground text-sm rounded-lg border border-border/30 bg-card/30">
-            No active downloads
-          </div>
-        ) : (
-          <div className="space-y-1">
-            <div style={{ minHeight: activePageSize * 52 }}>
-              {activeTransfers.slice(activePage * activePageSize, (activePage + 1) * activePageSize).map(t => {
-                const stateInfo = transferStateLabel(t.state);
-                return (
-                  <div key={t.id} className="rounded-lg border border-border/40 bg-card/60 px-3 py-2 space-y-1.5 mb-1">
-                    <div className="flex items-center gap-2 text-xs">
-                      <User className="h-3 w-3 text-muted-foreground" />
-                      <span className="text-muted-foreground">{t.username}</span>
-                      <span className="text-foreground font-mono truncate flex-1">{basename(t.filename)}</span>
-                      <span className={stateInfo.color}>{stateInfo.label}</span>
-                      <span className="text-muted-foreground">{fmtSpeed(t.averageSpeed)}</span>
-                      <span className="text-muted-foreground">{fmtBytes(t.bytesTransferred)} / {fmtBytes(t.size)}</span>
-                    </div>
-                    <ProgressBar percent={t.percentComplete} />
-                  </div>
-                );
-              })}
-            </div>
-            <Pagination
-              page={activePage} totalPages={Math.ceil(activeTransfers.length / activePageSize)}
-              pageSize={activePageSize}
-              onPageChange={setActivePage}
-              onPageSizeChange={s => { setActivePageSize(s); setActivePage(0); }}
-            />
-          </div>
-        )}
-      </div>
-
-      {/* Staging (Review) */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-          <Edit3 className="h-3.5 w-3.5" />
-          Staging — Review Before Ingestion
-          {staging.length > 0 && <span className="text-amber-400">({staging.length})</span>}
-        </div>
-        {staging.length === 0 ? (
-          <div className="text-center py-6 text-muted-foreground text-sm rounded-lg border border-border/30 bg-card/30">
-            No files awaiting review
-          </div>
-        ) : (
-          <div className="space-y-1">
-            {staging.map(item => {
-              const isEditing = editingId === item.id;
-              return (
-                <div key={item.id} className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2.5 space-y-2">
-                  <div className="flex items-center gap-3">
-                    {/* Cover art */}
-                    {item.coverImage ? (
-                      <div className="w-10 h-10 rounded bg-cover bg-center shadow shrink-0" style={{ backgroundImage: `url(${item.coverImage})` }} />
-                    ) : (
-                      <div className="w-10 h-10 rounded bg-muted/60 flex items-center justify-center shrink-0">
-                        <Music className="h-4 w-4 text-muted-foreground" />
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">{item.cleanedName || item.filename}</p>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <span>from {item.username}</span>
-                        <span>{fmtBytes(item.size_bytes)}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    {isEditing ? (
-                      <>
-                        <input
-                          value={editArtist}
-                          onChange={e => setEditArtist(e.target.value)}
-                          placeholder="Artist"
-                          className="flex-1 px-2 py-1 rounded bg-muted/50 border border-border/60 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
-                        />
-                        <input
-                          value={editAlbum}
-                          onChange={e => setEditAlbum(e.target.value)}
-                          placeholder="Album"
-                          className="flex-1 px-2 py-1 rounded bg-muted/50 border border-border/60 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
-                        />
-                      </>
-                    ) : (
-                      <>
-                        <span className="text-xs text-muted-foreground">Artist:</span>
-                        <span className="text-xs text-foreground">{item.artist || '—'}</span>
-                        <span className="text-xs text-muted-foreground ml-2">Album:</span>
-                        <span className="text-xs text-foreground">{item.album || '—'}</span>
-                      </>
-                    )}
-
-                    <div className="flex items-center gap-1 ml-auto">
-                      {!isEditing && (
-                        <button
-                          onClick={() => { setEditingId(item.id); setEditArtist(item.artist || ''); setEditAlbum(item.album || ''); }}
-                          className="p-1 rounded hover:bg-muted/40 text-muted-foreground hover:text-foreground transition-colors"
-                          title="Edit metadata"
-                        >
-                          <Edit3 className="h-3 w-3" />
-                        </button>
-                      )}
-                      {isEditing && (
-                        <button
-                          onClick={() => setEditingId(null)}
-                          className="p-1 rounded hover:bg-muted/40 text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      )}
-                      <button
-                        onClick={() => handleApprove(item)}
-                        className="p-1 rounded hover:bg-emerald-500/20 text-emerald-400 transition-colors"
-                        title="Approve & ingest"
-                      >
-                        <Check className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        onClick={() => handleReject(item)}
-                        className="p-1 rounded hover:bg-red-500/20 text-red-400 transition-colors"
-                        title="Reject & delete"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Completed */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-          <CheckCircle className="h-3.5 w-3.5" />
-          Completed
-        </div>
-        {completed.length === 0 ? (
-          <div className="text-center py-6 text-muted-foreground text-sm rounded-lg border border-border/30 bg-card/30">
-            No completed downloads yet
-          </div>
-        ) : (
-          <>
-            <div className="rounded-lg border border-border/40 bg-card/60 overflow-hidden" style={{ minHeight: completedPageSize * 33 }}>
-              {completed.slice(completedPage * completedPageSize, (completedPage + 1) * completedPageSize).map((dl, i) => (
-                <div key={dl.id} className={`flex items-center gap-2 px-3 py-2 text-xs ${i > 0 ? 'border-t border-border/20' : ''}`}>
-                  <CheckCircle className="h-3 w-3 text-emerald-400 shrink-0" />
-                  <span className="font-mono text-foreground truncate flex-1">{dl.filename}</span>
-                  <span className="text-muted-foreground">{dl.artist} — {dl.album}</span>
-                  <span className="text-muted-foreground">{fmtBytes(dl.size_bytes)}</span>
-                  {dl.completed_at && <span className="text-muted-foreground">{fmtTime(dl.completed_at)}</span>}
-                  {dl.artist && dl.album && (
-                    <Link
-                      href={`/projects/barfoo`}
-                      className="p-1 rounded hover:bg-primary/20 text-primary transition-colors"
-                      title="Play in Barfoo"
-                    >
-                      <ExternalLink className="h-3 w-3" />
-                    </Link>
-                  )}
-                </div>
-              ))}
-            </div>
-            <Pagination
-              page={completedPage} totalPages={Math.ceil(completed.length / completedPageSize)}
-              pageSize={completedPageSize}
-              onPageChange={setCompletedPage}
-              onPageSizeChange={s => { setCompletedPageSize(s); setCompletedPage(0); }}
-            />
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Uploads Tab ──
-
-function UploadsTab({ liveUploads }: { liveUploads: Record<string, Transfer[]> }) {
-  const [history, setHistory] = useState<DownloadRecord[]>([]);
-
-  useEffect(() => {
-    fetch('/api/soulseek/uploads?limit=50').then(r => r.json()).then(d => setHistory(d.uploads || [])).catch(() => {});
-  }, []);
-
-  const activeUploads = Object.entries(liveUploads).flatMap(([username, transfers]) =>
-    transfers.filter(t => !t.state.includes('Completed')).map(t => ({ ...t, username }))
-  );
-
-  return (
-    <div className="space-y-6">
-      {/* Active Uploads */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-          <ArrowUp className="h-3.5 w-3.5" />
-          Active Uploads
-          {activeUploads.length > 0 && <span className="text-foreground">({activeUploads.length})</span>}
-        </div>
-        {activeUploads.length === 0 ? (
-          <div className="text-center py-6 text-muted-foreground text-sm rounded-lg border border-border/30 bg-card/30">
-            No active uploads
-          </div>
-        ) : (
-          <div className="space-y-1">
-            {activeUploads.map(t => {
-              const stateInfo = transferStateLabel(t.state);
-              return (
-                <div key={t.id} className="rounded-lg border border-border/40 bg-card/60 px-3 py-2 space-y-1.5">
-                  <div className="flex items-center gap-2 text-xs">
-                    <User className="h-3 w-3 text-muted-foreground" />
-                    <span className="text-muted-foreground">{t.username}</span>
-                    <span className="text-foreground font-mono truncate flex-1">{basename(t.filename)}</span>
-                    <span className={stateInfo.color}>{stateInfo.label}</span>
-                    <span className="text-muted-foreground">{fmtSpeed(t.averageSpeed)}</span>
-                  </div>
-                  <ProgressBar percent={t.percentComplete} color="bg-emerald-500" />
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Upload History */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-          <Clock className="h-3.5 w-3.5" />
-          Upload History
-        </div>
-        {history.length === 0 ? (
-          <div className="text-center py-6 text-muted-foreground text-sm rounded-lg border border-border/30 bg-card/30">
-            No upload history yet
-          </div>
-        ) : (
-          <div className="rounded-lg border border-border/40 bg-card/60 overflow-hidden">
-            {history.map((ul, i) => (
-              <div key={ul.id} className={`flex items-center gap-2 px-3 py-2 text-xs ${i > 0 ? 'border-t border-border/20' : ''}`}>
-                <ArrowUp className="h-3 w-3 text-emerald-400 shrink-0" />
-                <User className="h-3 w-3 text-muted-foreground shrink-0" />
-                <span className="text-foreground">{ul.username}</span>
-                <span className="font-mono text-muted-foreground truncate flex-1">{ul.filename}</span>
-                <span className="text-muted-foreground">{fmtBytes(ul.size_bytes)}</span>
-                {ul.speed_bytes_per_sec > 0 && <span className="text-muted-foreground">{fmtSpeed(ul.speed_bytes_per_sec)}</span>}
-                <span className="text-muted-foreground">{fmtTime(ul.created_at)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Browse Tab ──
-
-function BrowseTab() {
+function PeerBrowse({ seed }: { seed: { name: string; key: number } | null }) {
   const [username, setUsername] = useState('');
   const [dirs, setDirs] = useState<BrowseDir[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
+  const [browsedUser, setBrowsedUser] = useState('');
 
-  const handleBrowse = async () => {
-    if (!username.trim()) return;
+  const runBrowse = useCallback(async (name: string) => {
+    if (!name.trim()) return;
     setLoading(true);
     setError(null);
     setDirs([]);
     setExpandedDirs(new Set());
+    setBrowsedUser(name.trim());
     try {
-      const res = await fetch(`/api/soulseek/browse?username=${encodeURIComponent(username.trim())}`);
+      const res = await fetch(`/api/soulseek/browse?username=${encodeURIComponent(name.trim())}`);
       if (!res.ok) throw new Error('Failed to browse user');
       const data = await res.json();
       setDirs(data.directories || []);
@@ -938,7 +694,14 @@ function BrowseTab() {
       setError(String(err));
     }
     setLoading(false);
-  };
+  }, []);
+
+  // A seed arrives when a peer's "browse" jack is clicked in search results.
+  useEffect(() => {
+    if (!seed) return;
+    setUsername(seed.name);
+    runBrowse(seed.name);
+  }, [seed, runBrowse]);
 
   const toggleDir = (name: string) => {
     setExpandedDirs(prev => {
@@ -949,22 +712,12 @@ function BrowseTab() {
     });
   };
 
-  const handleDownloadFile = async (file: SearchFile) => {
+  const handleDownloadFiles = async (files: SearchFile[]) => {
     try {
       await fetch('/api/soulseek/downloads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: username.trim(), files: [{ filename: file.filename, size: file.size }] }),
-      });
-    } catch {}
-  };
-
-  const handleDownloadDir = async (dir: BrowseDir) => {
-    try {
-      await fetch('/api/soulseek/downloads', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: username.trim(), files: dir.files.map(f => ({ filename: f.filename, size: f.size })) }),
+        body: JSON.stringify({ username: browsedUser, files: files.map(f => ({ filename: f.filename, size: f.size })) }),
       });
     } catch {}
   };
@@ -978,15 +731,15 @@ function BrowseTab() {
             type="text"
             value={username}
             onChange={e => setUsername(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleBrowse()}
-            placeholder="Enter a Soulseek username..."
-            className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-muted/40 border border-border/60 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 transition-colors"
+            onKeyDown={e => e.key === 'Enter' && runBrowse(username)}
+            placeholder="Patch into a peer by username…"
+            className="w-full pl-10 pr-4 py-2.5 rounded-md bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 transition-colors"
           />
         </div>
         <button
-          onClick={handleBrowse}
+          onClick={() => runBrowse(username)}
           disabled={loading || !username.trim()}
-          className="px-5 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+          className="px-5 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
         >
           {loading ? <Loader className="h-4 w-4 animate-spin" /> : <FolderOpen className="h-4 w-4" />}
           Browse
@@ -994,15 +747,15 @@ function BrowseTab() {
       </div>
 
       {error && (
-        <div className="px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400">
+        <div className="px-4 py-3 rounded-lg bg-destructive/10 border border-destructive/25 text-sm text-destructive">
           {error}
         </div>
       )}
 
       {loading && (
         <div className="flex items-center gap-3 px-4 py-6 justify-center text-muted-foreground">
-          <Loader className="h-4 w-4 animate-spin" />
-          <span className="text-sm">Fetching file list from {username}...</span>
+          <span className="slsk-lamp text-accent slsk-lamp-live" />
+          <span className="text-sm">Pulling the file list from {username}…</span>
         </div>
       )}
 
@@ -1012,36 +765,39 @@ function BrowseTab() {
             const expanded = expandedDirs.has(dir.name);
             const dirName = dir.name.replace(/\\/g, '/').split('/').filter(Boolean).slice(-2).join('/');
             return (
-              <div key={dir.name} className="rounded-lg border border-border/40 bg-card/60 overflow-hidden">
-                <button
+              <div key={dir.name} className="rounded-lg border border-border/70 bg-card/60 overflow-hidden">
+                <div
+                  role="button"
+                  tabIndex={0}
                   onClick={() => toggleDir(dir.name)}
-                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/30 transition-colors text-xs"
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') toggleDir(dir.name); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/40 transition-colors text-xs cursor-pointer"
                 >
                   {expanded ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />}
-                  <Folder className="h-3.5 w-3.5 text-amber-400" />
+                  <Folder className="h-3.5 w-3.5 text-accent" />
                   <span className="text-foreground font-mono truncate flex-1 text-left">{dirName}</span>
-                  <span className="text-muted-foreground">{dir.fileCount} files</span>
+                  <span className="text-muted-foreground font-mono tabular-nums">{dir.fileCount} files</span>
                   <button
-                    onClick={(e) => { e.stopPropagation(); handleDownloadDir(dir); }}
+                    onClick={(e) => { e.stopPropagation(); handleDownloadFiles(dir.files); }}
                     className="p-1 rounded hover:bg-primary/20 text-primary transition-colors"
                     title="Download directory"
                   >
                     <Download className="h-3 w-3" />
                   </button>
-                </button>
+                </div>
                 <AnimatePresence>
                   {expanded && (
                     <motion.div initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }} className="overflow-hidden">
-                      <div className="border-t border-border/30 max-h-60 overflow-y-auto">
+                      <div className="border-t border-border/60 max-h-60 overflow-y-auto">
                         {dir.files.map((file, i) => (
-                          <div key={i} className="flex items-center gap-2 px-3 py-1.5 hover:bg-muted/20 transition-colors text-xs group pl-8">
+                          <div key={i} className="flex items-center gap-2 px-3 py-1.5 hover:bg-muted/30 transition-colors text-xs group pl-8">
                             <File className="h-3 w-3 text-muted-foreground shrink-0" />
                             <span className="font-mono text-foreground truncate flex-1">{basename(file.filename)}</span>
                             <QualityTag file={file} />
-                            {file.length ? <span className="text-muted-foreground">{fmtDuration(file.length)}</span> : null}
-                            <span className="text-muted-foreground">{fmtBytes(file.size)}</span>
+                            {file.length ? <span className="text-muted-foreground font-mono tabular-nums">{fmtDuration(file.length)}</span> : null}
+                            <span className="text-muted-foreground font-mono tabular-nums">{fmtBytes(file.size)}</span>
                             <button
-                              onClick={() => handleDownloadFile(file)}
+                              onClick={() => handleDownloadFiles([file])}
                               className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-primary/20 text-primary transition-all"
                             >
                               <Download className="h-3 w-3" />
@@ -1061,17 +817,375 @@ function BrowseTab() {
       {!loading && dirs.length === 0 && !error && (
         <div className="text-center py-16 text-muted-foreground">
           <FolderOpen className="h-10 w-10 mx-auto mb-4 opacity-20" />
-          <p className="text-sm">Browse a user's shared files</p>
-          <p className="text-xs mt-1 opacity-60">Enter their Soulseek username above</p>
+          <p className="text-sm">Browse a peer&apos;s shared files</p>
+          <p className="text-xs mt-1 opacity-60">Enter their username, or hit the folder icon on any search result</p>
         </div>
       )}
     </div>
   );
 }
 
-// ── Stats Tab ──
+// ── Transfers tab (down wire + up wire) ──
 
-function StatsTab() {
+const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
+
+function Pagination({ page, totalPages, pageSize, onPageChange, onPageSizeChange }: {
+  page: number; totalPages: number; pageSize: number;
+  onPageChange: (p: number) => void; onPageSizeChange: (s: number) => void;
+}) {
+  if (totalPages <= 1 && pageSize === PAGE_SIZE_OPTIONS[0]) return null;
+  return (
+    <div className="flex items-center justify-between pt-2">
+      <div className="flex items-center gap-1">
+        <span className="text-[10px] text-muted-foreground mr-1">Per page:</span>
+        {PAGE_SIZE_OPTIONS.map(s => (
+          <button key={s} onClick={() => onPageSizeChange(s)}
+            className={`text-[11px] px-1.5 py-0.5 rounded-sm transition-colors ${pageSize === s ? 'bg-muted/70 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+          >{s}</button>
+        ))}
+      </div>
+      {totalPages > 1 && (
+        <div className="flex items-center gap-1">
+          <button onClick={() => onPageChange(page - 1)} disabled={page === 0}
+            className="text-xs px-2 py-0.5 rounded-sm text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+          >Prev</button>
+          <span className="text-[11px] text-muted-foreground tabular-nums">{page + 1} / {totalPages}</span>
+          <button onClick={() => onPageChange(page + 1)} disabled={page >= totalPages - 1}
+            className="text-xs px-2 py-0.5 rounded-sm text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+          >Next</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SectionHead({ tone, children }: { tone: 'down' | 'up' | 'hold' | 'plain'; children: React.ReactNode }) {
+  const color = tone === 'down' ? 'text-primary' : tone === 'up' ? 'text-accent' : tone === 'hold' ? 'text-accent' : 'text-muted-foreground';
+  return <div className={`flex items-center gap-2 ${EYEBROW} ${color}`}>{children}</div>;
+}
+
+function TransfersTab({ liveDownloads, liveUploads, staging, refetchStaging }: {
+  liveDownloads: Record<string, Transfer[]>;
+  liveUploads: Record<string, Transfer[]>;
+  staging: StagingItem[];
+  refetchStaging: () => void;
+}) {
+  const [completed, setCompleted] = useState<DownloadRecord[]>([]);
+  const [uploadHistory, setUploadHistory] = useState<DownloadRecord[]>([]);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editArtist, setEditArtist] = useState('');
+  const [editAlbum, setEditAlbum] = useState('');
+
+  // Pagination state
+  const [activePage, setActivePage] = useState(0);
+  const [activePageSize, setActivePageSize] = useState(10);
+  const [completedPage, setCompletedPage] = useState(0);
+  const [completedPageSize, setCompletedPageSize] = useState(10);
+  const [sentPage, setSentPage] = useState(0);
+  const [sentPageSize, setSentPageSize] = useState(10);
+
+  const fetchHistories = useCallback(async () => {
+    try {
+      const [comp, ul] = await Promise.all([
+        fetch('/api/soulseek/downloads?status=completed&limit=100').then(r => r.json()),
+        fetch('/api/soulseek/uploads?limit=50').then(r => r.json()),
+      ]);
+      setCompleted(comp.downloads || []);
+      setUploadHistory(ul.uploads || []);
+    } catch {}
+  }, []);
+
+  useEffect(() => { fetchHistories(); }, [fetchHistories]);
+  useEffect(() => { const i = setInterval(fetchHistories, 15000); return () => clearInterval(i); }, [fetchHistories]);
+
+  const handleApprove = async (item: StagingItem) => {
+    const artist = editingId === item.id ? editArtist : item.artist;
+    const album = editingId === item.id ? editAlbum : item.album;
+    try {
+      await fetch('/api/soulseek/ingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: item.id, artist, album }),
+      });
+      setEditingId(null);
+      refetchStaging();
+      fetchHistories();
+    } catch {}
+  };
+
+  const handleReject = async (item: StagingItem) => {
+    try {
+      await fetch('/api/soulseek/ingest', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: item.id }),
+      });
+      refetchStaging();
+    } catch {}
+  };
+
+  const activeDownloads = Object.entries(liveDownloads).flatMap(([username, transfers]) =>
+    transfers.filter(isActive).map(t => ({ ...t, username }))
+  );
+  const activeUploads = Object.entries(liveUploads).flatMap(([username, transfers]) =>
+    transfers.filter(isActive).map(t => ({ ...t, username }))
+  );
+
+  return (
+    <div className="space-y-8">
+      {/* ══ DOWN WIRE ══ */}
+      <div className="space-y-5">
+        {/* Active downloads */}
+        <div className="space-y-2">
+          <SectionHead tone="down">
+            <ArrowDown className="h-3.5 w-3.5" />
+            Down wire
+            {activeDownloads.length > 0 && <span className="font-mono tabular-nums text-foreground">({activeDownloads.length})</span>}
+          </SectionHead>
+          {activeDownloads.length === 0 ? (
+            <EmptySlot>The down wire is quiet</EmptySlot>
+          ) : (
+            <div className="space-y-1">
+              <div style={{ minHeight: Math.min(activeDownloads.length, activePageSize) * 52 }}>
+                {activeDownloads.slice(activePage * activePageSize, (activePage + 1) * activePageSize).map(t => {
+                  const stateInfo = transferStateLabel(t.state);
+                  return (
+                    <div key={t.id} className="rounded-lg border border-border/70 bg-card/60 px-3 py-2 space-y-1.5 mb-1">
+                      <div className="flex items-center gap-2 text-xs">
+                        <User className="h-3 w-3 text-muted-foreground" />
+                        <span className="text-muted-foreground">{t.username}</span>
+                        <span className="text-foreground font-mono truncate flex-1">{basename(t.filename)}</span>
+                        <span className={stateInfo.color}>{stateInfo.label}</span>
+                        <span className="text-muted-foreground font-mono tabular-nums">{fmtSpeed(t.averageSpeed)}</span>
+                        <span className="text-muted-foreground font-mono tabular-nums">{fmtBytes(t.bytesTransferred)} / {fmtBytes(t.size)}</span>
+                      </div>
+                      <ProgressBar percent={t.percentComplete} color="bg-primary" />
+                    </div>
+                  );
+                })}
+              </div>
+              <Pagination
+                page={activePage} totalPages={Math.ceil(activeDownloads.length / activePageSize)}
+                pageSize={activePageSize}
+                onPageChange={setActivePage}
+                onPageSizeChange={s => { setActivePageSize(s); setActivePage(0); }}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Staging (review before ingest) */}
+        <div className="space-y-2">
+          <SectionHead tone="hold">
+            <Edit3 className="h-3.5 w-3.5" />
+            Switchboard hold — review before ingest
+            {staging.length > 0 && <span className="font-mono tabular-nums">({staging.length})</span>}
+          </SectionHead>
+          {staging.length === 0 ? (
+            <EmptySlot>Nothing waiting on the switchboard</EmptySlot>
+          ) : (
+            <div className="space-y-1">
+              {staging.map(item => {
+                const isEditing = editingId === item.id;
+                return (
+                  <div key={item.id} className="rounded-lg border border-accent/25 bg-accent/5 px-3 py-2.5 space-y-2">
+                    <div className="flex items-center gap-3">
+                      {/* Cover art */}
+                      {item.coverImage ? (
+                        <div className="w-10 h-10 rounded-sm bg-cover bg-center shadow shrink-0" style={{ backgroundImage: `url(${item.coverImage})` }} />
+                      ) : (
+                        <div className="w-10 h-10 rounded-sm bg-muted/70 flex items-center justify-center shrink-0">
+                          <Music className="h-4 w-4 text-muted-foreground" />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-foreground truncate">{item.cleanedName || item.filename}</p>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <span>from {item.username}</span>
+                          <span className="font-mono tabular-nums">{fmtBytes(item.size_bytes)}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {isEditing ? (
+                        <>
+                          <input
+                            value={editArtist}
+                            onChange={e => setEditArtist(e.target.value)}
+                            placeholder="Artist"
+                            className="flex-1 px-2 py-1 rounded-sm bg-muted/60 border border-border text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+                          />
+                          <input
+                            value={editAlbum}
+                            onChange={e => setEditAlbum(e.target.value)}
+                            placeholder="Album"
+                            className="flex-1 px-2 py-1 rounded-sm bg-muted/60 border border-border text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-xs text-muted-foreground">Artist:</span>
+                          <span className="text-xs text-foreground">{item.artist || '—'}</span>
+                          <span className="text-xs text-muted-foreground ml-2">Album:</span>
+                          <span className="text-xs text-foreground">{item.album || '—'}</span>
+                        </>
+                      )}
+
+                      <div className="flex items-center gap-1 ml-auto">
+                        {!isEditing && (
+                          <button
+                            onClick={() => { setEditingId(item.id); setEditArtist(item.artist || ''); setEditAlbum(item.album || ''); }}
+                            className="p-1 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
+                            title="Edit metadata"
+                          >
+                            <Edit3 className="h-3 w-3" />
+                          </button>
+                        )}
+                        {isEditing && (
+                          <button
+                            onClick={() => setEditingId(null)}
+                            className="p-1 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleApprove(item)}
+                          className="p-1 rounded hover:bg-primary/20 text-primary transition-colors"
+                          title="Approve & ingest"
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleReject(item)}
+                          className="p-1 rounded hover:bg-destructive/20 text-destructive transition-colors"
+                          title="Reject & delete"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Completed downloads */}
+        <div className="space-y-2">
+          <SectionHead tone="plain">
+            <CheckCircle className="h-3.5 w-3.5" />
+            Logged
+          </SectionHead>
+          {completed.length === 0 ? (
+            <EmptySlot>No completed downloads yet</EmptySlot>
+          ) : (
+            <>
+              <div className="rounded-lg border border-border/70 bg-card/60 overflow-hidden" style={{ minHeight: Math.min(completed.length, completedPageSize) * 33 }}>
+                {completed.slice(completedPage * completedPageSize, (completedPage + 1) * completedPageSize).map((dl, i) => (
+                  <div key={dl.id} className={`flex items-center gap-2 px-3 py-2 text-xs ${i > 0 ? 'border-t border-border/40' : ''}`}>
+                    <CheckCircle className="h-3 w-3 text-primary shrink-0" />
+                    <span className="font-mono text-foreground truncate flex-1">{dl.filename}</span>
+                    <span className="text-muted-foreground">{dl.artist} — {dl.album}</span>
+                    <span className="text-muted-foreground font-mono tabular-nums">{fmtBytes(dl.size_bytes)}</span>
+                    {dl.completed_at && <span className="text-muted-foreground font-mono tabular-nums">{fmtTime(dl.completed_at)}</span>}
+                    {dl.artist && dl.album && (
+                      <Link
+                        href={`/projects/barfoo`}
+                        className="p-1 rounded hover:bg-primary/20 text-primary transition-colors"
+                        title="Play in Barfoo"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                      </Link>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <Pagination
+                page={completedPage} totalPages={Math.ceil(completed.length / completedPageSize)}
+                pageSize={completedPageSize}
+                onPageChange={setCompletedPage}
+                onPageSizeChange={s => { setCompletedPageSize(s); setCompletedPage(0); }}
+              />
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* ══ UP WIRE ══ */}
+      <div className="space-y-5 border-t border-border/60 pt-6">
+        {/* Active uploads */}
+        <div className="space-y-2">
+          <SectionHead tone="up">
+            <ArrowUp className="h-3.5 w-3.5" />
+            Up wire
+            {activeUploads.length > 0 && <span className="font-mono tabular-nums text-foreground">({activeUploads.length})</span>}
+          </SectionHead>
+          {activeUploads.length === 0 ? (
+            <EmptySlot>The up wire is quiet</EmptySlot>
+          ) : (
+            <div className="space-y-1">
+              {activeUploads.map(t => {
+                const stateInfo = transferStateLabel(t.state);
+                return (
+                  <div key={t.id} className="rounded-lg border border-border/70 bg-card/60 px-3 py-2 space-y-1.5">
+                    <div className="flex items-center gap-2 text-xs">
+                      <User className="h-3 w-3 text-muted-foreground" />
+                      <span className="text-muted-foreground">{t.username}</span>
+                      <span className="text-foreground font-mono truncate flex-1">{basename(t.filename)}</span>
+                      <span className={stateInfo.color}>{stateInfo.label}</span>
+                      <span className="text-muted-foreground font-mono tabular-nums">{fmtSpeed(t.averageSpeed)}</span>
+                    </div>
+                    <ProgressBar percent={t.percentComplete} color="bg-accent" />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Upload history */}
+        <div className="space-y-2">
+          <SectionHead tone="plain">
+            <Clock className="h-3.5 w-3.5" />
+            Sent out
+          </SectionHead>
+          {uploadHistory.length === 0 ? (
+            <EmptySlot>Nothing sent out yet</EmptySlot>
+          ) : (
+            <>
+              <div className="rounded-lg border border-border/70 bg-card/60 overflow-hidden" style={{ minHeight: Math.min(uploadHistory.length, sentPageSize) * 33 }}>
+                {uploadHistory.slice(sentPage * sentPageSize, (sentPage + 1) * sentPageSize).map((ul, i) => (
+                  <div key={ul.id} className={`flex items-center gap-2 px-3 py-2 text-xs ${i > 0 ? 'border-t border-border/40' : ''}`}>
+                    <ArrowUp className="h-3 w-3 text-accent shrink-0" />
+                    <User className="h-3 w-3 text-muted-foreground shrink-0" />
+                    <span className="text-foreground">{ul.username}</span>
+                    <span className="font-mono text-muted-foreground truncate flex-1">{ul.filename}</span>
+                    <span className="text-muted-foreground font-mono tabular-nums">{fmtBytes(ul.size_bytes)}</span>
+                    {ul.speed_bytes_per_sec > 0 && <span className="text-muted-foreground font-mono tabular-nums">{fmtSpeed(ul.speed_bytes_per_sec)}</span>}
+                    <span className="text-muted-foreground font-mono tabular-nums">{fmtTime(ul.created_at)}</span>
+                  </div>
+                ))}
+              </div>
+              <Pagination
+                page={sentPage} totalPages={Math.ceil(uploadHistory.length / sentPageSize)}
+                pageSize={sentPageSize}
+                onPageChange={setSentPage}
+                onPageSizeChange={s => { setSentPageSize(s); setSentPage(0); }}
+              />
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Ledger tab (stats) ──
+
+function LedgerTab() {
   const [stats, setStats] = useState<StatsData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -1081,15 +1195,14 @@ function StatsTab() {
   }, []);
 
   if (loading) return (
-    <div className="flex items-center justify-center py-16 text-muted-foreground">
-      <Loader className="h-5 w-5 animate-spin mr-2" /> Loading statistics...
+    <div className="flex items-center justify-center gap-3 py-16 text-muted-foreground">
+      <span className="slsk-lamp text-primary slsk-lamp-live" /> Opening the ledger…
     </div>
   );
 
   if (!stats) return (
     <div className="text-center py-16 text-muted-foreground">
-      <BarChart3 className="h-10 w-10 mx-auto mb-4 opacity-20" />
-      <p className="text-sm">No statistics available yet</p>
+      <p className="text-sm">No ledger entries yet</p>
     </div>
   );
 
@@ -1098,92 +1211,96 @@ function StatsTab() {
 
   return (
     <div className="space-y-6">
-      {/* Summary Cards */}
+      {/* Summary tiles */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <StatCard icon={ArrowDown} label="Downloads" value={dl.completed} color="text-blue-400" />
-        <StatCard icon={ArrowUp} label="Uploads" value={ul.completed} color="text-emerald-400" />
-        <StatCard icon={HardDrive} label="Downloaded" value={fmtBytes(parseInt(dl.total_bytes))} color="text-cyan-400" />
-        <StatCard icon={HardDrive} label="Uploaded" value={fmtBytes(parseInt(ul.total_bytes))} color="text-purple-400" />
-        <StatCard icon={Users} label="Unique Users" value={String(parseInt(dl.unique_sources || '0') + parseInt(ul.unique_users || '0'))} color="text-amber-400" />
+        <StatTile label="Files in" value={dl.completed} color="text-primary" />
+        <StatTile label="Files out" value={ul.completed} color="text-accent" />
+        <StatTile label="Pulled down" value={fmtBytes(parseInt(dl.total_bytes))} color="text-primary" />
+        <StatTile label="Sent up" value={fmtBytes(parseInt(ul.total_bytes))} color="text-accent" />
+        <StatTile label="Peers" value={String(parseInt(dl.unique_sources || '0') + parseInt(ul.unique_users || '0'))} color="text-foreground" />
       </div>
 
-      {/* Speed Stats */}
+      {/* Speed stats */}
       <div className="grid grid-cols-2 gap-3">
-        <div className="rounded-lg border border-border/40 bg-card/60 p-4">
-          <div className="text-xs text-muted-foreground mb-1">Avg Download Speed</div>
-          <div className="text-lg font-mono text-foreground">{fmtSpeed(parseFloat(dl.avg_speed))}</div>
+        <div className="rounded-lg border border-border/70 bg-card/60 p-4">
+          <div className={`${EYEBROW} text-primary mb-1`}>▼ avg down speed</div>
+          <div className="text-lg font-mono tabular-nums text-foreground">{fmtSpeed(parseFloat(dl.avg_speed))}</div>
         </div>
-        <div className="rounded-lg border border-border/40 bg-card/60 p-4">
-          <div className="text-xs text-muted-foreground mb-1">Avg Upload Speed</div>
-          <div className="text-lg font-mono text-foreground">{fmtSpeed(parseFloat(ul.avg_speed))}</div>
+        <div className="rounded-lg border border-border/70 bg-card/60 p-4">
+          <div className={`${EYEBROW} text-accent mb-1`}>▲ avg up speed</div>
+          <div className="text-lg font-mono tabular-nums text-foreground">{fmtSpeed(parseFloat(ul.avg_speed))}</div>
         </div>
       </div>
 
-      {/* Daily Activity Chart */}
+      {/* Daily activity chart */}
       {(stats.downloads.daily.length > 0 || stats.uploads.daily.length > 0) && (
-        <div className="rounded-lg border border-border/40 bg-card/60 p-4 space-y-3">
-          <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-            <TrendingUp className="h-3.5 w-3.5" /> Daily Activity (30 days)
+        <div className="rounded-lg border border-border/70 bg-card/60 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className={`${EYEBROW} text-muted-foreground`}>Wire traffic — 30 days</div>
+            <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+              <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-[2px] bg-primary/80" /> down</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-[2px] bg-accent/80" /> up</span>
+            </div>
           </div>
           <DailyChart downloads={stats.downloads.daily} uploads={stats.uploads.daily} />
         </div>
       )}
 
-      {/* Top Sources / Users */}
+      {/* Top peers */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {stats.downloads.topSources.length > 0 && (
-          <div className="rounded-lg border border-border/40 bg-card/60 p-4 space-y-3">
-            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Top Download Sources</div>
+          <div className="rounded-lg border border-border/70 bg-card/60 p-4 space-y-3">
+            <div className={`${EYEBROW} text-primary`}>Best sources</div>
             {stats.downloads.topSources.map((s, i) => (
               <div key={s.username} className="flex items-center gap-2 text-xs">
-                <span className="text-muted-foreground w-4">{i + 1}</span>
+                <span className="text-muted-foreground font-mono tabular-nums w-4">{i + 1}</span>
                 <User className="h-3 w-3 text-muted-foreground" />
                 <span className="text-foreground flex-1">{s.username}</span>
-                <span className="text-muted-foreground">{s.count} files</span>
-                <span className="text-muted-foreground">{fmtBytes(parseInt(s.total_bytes))}</span>
+                <span className="text-muted-foreground font-mono tabular-nums">{s.count} files</span>
+                <span className="text-muted-foreground font-mono tabular-nums">{fmtBytes(parseInt(s.total_bytes))}</span>
               </div>
             ))}
           </div>
         )}
         {stats.uploads.topUsers.length > 0 && (
-          <div className="rounded-lg border border-border/40 bg-card/60 p-4 space-y-3">
-            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Top Uploading To</div>
+          <div className="rounded-lg border border-border/70 bg-card/60 p-4 space-y-3">
+            <div className={`${EYEBROW} text-accent`}>Best customers</div>
             {stats.uploads.topUsers.map((s, i) => (
               <div key={s.username} className="flex items-center gap-2 text-xs">
-                <span className="text-muted-foreground w-4">{i + 1}</span>
+                <span className="text-muted-foreground font-mono tabular-nums w-4">{i + 1}</span>
                 <User className="h-3 w-3 text-muted-foreground" />
                 <span className="text-foreground flex-1">{s.username}</span>
-                <span className="text-muted-foreground">{s.count} files</span>
-                <span className="text-muted-foreground">{fmtBytes(parseInt(s.total_bytes))}</span>
+                <span className="text-muted-foreground font-mono tabular-nums">{s.count} files</span>
+                <span className="text-muted-foreground font-mono tabular-nums">{fmtBytes(parseInt(s.total_bytes))}</span>
               </div>
             ))}
           </div>
         )}
       </div>
 
-      {/* Recent Activity */}
+      {/* Recent activity */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {stats.downloads.recent.length > 0 && (
-          <div className="rounded-lg border border-border/40 bg-card/60 p-4 space-y-3">
-            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Recent Downloads</div>
+          <div className="rounded-lg border border-border/70 bg-card/60 p-4 space-y-3">
+            <div className={`${EYEBROW} text-muted-foreground`}>Recent downloads</div>
             {stats.downloads.recent.map(d => (
               <div key={d.id} className="flex items-center gap-2 text-xs">
-                <ArrowDown className="h-3 w-3 text-blue-400 shrink-0" />
+                <ArrowDown className="h-3 w-3 text-primary shrink-0" />
                 <span className="text-foreground truncate flex-1 font-mono">{d.filename}</span>
-                <span className="text-muted-foreground">{fmtTime(d.created_at)}</span>
+                <span className="text-muted-foreground font-mono tabular-nums">{fmtTime(d.created_at)}</span>
               </div>
             ))}
           </div>
         )}
         {stats.uploads.recent.length > 0 && (
-          <div className="rounded-lg border border-border/40 bg-card/60 p-4 space-y-3">
-            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Recent Uploads</div>
+          <div className="rounded-lg border border-border/70 bg-card/60 p-4 space-y-3">
+            <div className={`${EYEBROW} text-muted-foreground`}>Recent uploads</div>
             {stats.uploads.recent.map(u => (
               <div key={u.id} className="flex items-center gap-2 text-xs">
-                <ArrowUp className="h-3 w-3 text-emerald-400 shrink-0" />
+                <ArrowUp className="h-3 w-3 text-accent shrink-0" />
                 <span className="text-foreground">{u.username}</span>
                 <span className="text-muted-foreground truncate flex-1 font-mono">{u.filename}</span>
-                <span className="text-muted-foreground">{fmtTime(u.created_at)}</span>
+                <span className="text-muted-foreground font-mono tabular-nums">{fmtTime(u.created_at)}</span>
               </div>
             ))}
           </div>
@@ -1193,14 +1310,11 @@ function StatsTab() {
   );
 }
 
-function StatCard({ icon: Icon, label, value, color }: { icon: React.ElementType; label: string; value: string; color: string }) {
+function StatTile({ label, value, color }: { label: string; value: string; color: string }) {
   return (
-    <div className="rounded-lg border border-border/40 bg-card/60 p-4 space-y-1">
-      <div className="flex items-center gap-1.5">
-        <Icon className={`h-3.5 w-3.5 ${color}`} />
-        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
-      </div>
-      <p className="text-xl font-bold font-mono text-foreground">{value}</p>
+    <div className="rounded-lg border border-border/70 bg-card/60 p-4 space-y-1">
+      <span className={`${EYEBROW} ${color}`}>{label}</span>
+      <p className="text-xl font-bold font-mono tabular-nums text-foreground">{value}</p>
     </div>
   );
 }
@@ -1231,8 +1345,8 @@ function DailyChart({ downloads, uploads }: { downloads: { date: string; count: 
         const ulH = (ulCount / maxVal) * 100;
         return (
           <div key={date} className="flex-1 flex gap-px items-end h-full" title={`${date}: ${dlCount} dl / ${ulCount} ul`}>
-            <div className="flex-1 bg-blue-500/60 rounded-t-sm" style={{ height: `${Math.max(dlH, 2)}%` }} />
-            <div className="flex-1 bg-emerald-500/60 rounded-t-sm" style={{ height: `${Math.max(ulH, 2)}%` }} />
+            <div className="flex-1 bg-primary/70 rounded-t-sm" style={{ height: `${Math.max(dlH, 2)}%` }} />
+            <div className="flex-1 bg-accent/70 rounded-t-sm" style={{ height: `${Math.max(ulH, 2)}%` }} />
           </div>
         );
       })}
@@ -1240,21 +1354,22 @@ function DailyChart({ downloads, uploads }: { downloads: { date: string; count: 
   );
 }
 
-// ── Main Page ──
+// ── Main page ──
 
 export default function SoulseekPage() {
+  // Recolor + refont the global site header to match the wire room.
+  useHeaderConfig({ scopeClass: 'slsk-theme' });
+
   const [activeTab, setActiveTab] = useState<TabId>('search');
   const [connected, setConnected] = useState<boolean | null>(null);
   const { albums } = useAudio();
 
-  // Single SSE connection for live transfers, shared by the Downloads and Uploads
-  // tabs. Opened only while one of those tabs is active (2s server polling), so we
-  // never run two concurrent EventSources. Auto-reconnect is EventSource's default.
+  // Single SSE connection for live transfers, open for the whole visit so the
+  // wire meter reads live from any tab (the server polls slskd every 2s).
+  // Auto-reconnect is EventSource's default.
   const [liveDownloads, setLiveDownloads] = useState<Record<string, Transfer[]>>({});
   const [liveUploads, setLiveUploads] = useState<Record<string, Transfer[]>>({});
-  const transfersActive = activeTab === 'downloads' || activeTab === 'uploads';
   useEffect(() => {
-    if (!transfersActive) return;
     const es = new EventSource('/api/soulseek/transfers/stream');
     es.onmessage = (event) => {
       try {
@@ -1264,7 +1379,22 @@ export default function SoulseekPage() {
       } catch {}
     };
     return () => { es.close(); };
-  }, [transfersActive]);
+  }, []);
+
+  // Staging lives at page level: the Transfers tab lists it and its count
+  // badges the tab from anywhere in the room.
+  const [staging, setStaging] = useState<StagingItem[]>([]);
+  const fetchStaging = useCallback(async () => {
+    try {
+      const d = await fetch('/api/soulseek/ingest').then(r => r.json());
+      setStaging(d.staging || []);
+    } catch {}
+  }, []);
+  useEffect(() => {
+    fetchStaging();
+    const i = setInterval(fetchStaging, 15000);
+    return () => clearInterval(i);
+  }, [fetchStaging]);
 
   // Build a set of lowercase artist names for "In Library" matching
   const libraryArtists = useMemo(() => {
@@ -1295,45 +1425,54 @@ export default function SoulseekPage() {
 
   return (
     <PageTransition>
-      <div className="bg-background" style={{ minHeight: 'calc(100vh - 57px)' }}>
-        <div className="mx-auto max-w-5xl px-4 py-8">
-          {/* Header */}
+      <div className="slsk-theme" style={{ minHeight: 'calc(100vh - 57px)' }}>
+        <div className="mx-auto max-w-5xl px-4 sm:px-6 py-8">
+          {/* Masthead */}
           <FadeIn>
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-start justify-between gap-4 mb-5">
               <div>
-                <h1 className="text-2xl font-bold text-foreground tracking-tight">Soulseek</h1>
-                <p className="text-sm text-muted-foreground mt-0.5">P2P Music Network</p>
+                <p className={`${EYEBROW} text-primary`}>RM 10 · The Wire Room</p>
+                <h1 className="ws-serif text-3xl font-semibold tracking-tight text-foreground mt-1">Soulseek Wire</h1>
+                <p className="text-[11px] text-muted-foreground mt-1">Peer-to-peer music exchange, patched through slskd</p>
               </div>
-              <ConnectionBadge ok={connected} checkingLabel="Checking..." />
+              <LineLamp connected={connected} />
             </div>
           </FadeIn>
 
-          {/* Tab Navigation */}
+          {/* Wire meter */}
           <FadeIn delay={0.05}>
-            <div className="flex items-center gap-1 mb-6 p-1 bg-muted/30 rounded-lg border border-border/40 w-fit">
+            <div className="mb-6">
+              <WireMeter liveDownloads={liveDownloads} liveUploads={liveUploads} />
+            </div>
+          </FadeIn>
+
+          {/* Patch-bay tabs */}
+          <FadeIn delay={0.1}>
+            <div className="flex items-center gap-1.5 mb-6">
               {TABS.map(tab => {
-                const Icon = tab.icon;
-                const isActive = activeTab === tab.id;
+                const active = activeTab === tab.id;
+                const holdCount = tab.id === 'transfers' ? staging.length : 0;
                 return (
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
-                    className={`relative flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                      isActive
-                        ? 'bg-card text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground'
+                    className={`flex items-center gap-2 px-3.5 py-2 rounded-md border text-[11px] font-semibold uppercase tracking-[0.18em] transition-colors ${
+                      active
+                        ? 'border-border bg-card text-foreground'
+                        : 'border-transparent text-muted-foreground hover:text-foreground'
                     }`}
                   >
-                    <Icon className="h-3.5 w-3.5" />
-                    <span className="hidden sm:inline">{tab.label}</span>
+                    <span className={`slsk-lamp ${active ? 'text-primary' : 'slsk-lamp-off'}`} />
+                    {tab.label}
+                    {holdCount > 0 && <span className="font-mono tabular-nums text-accent">{holdCount}</span>}
                   </button>
                 );
               })}
             </div>
           </FadeIn>
 
-          {/* Tab Content */}
-          <FadeIn delay={0.1}>
+          {/* Tab content */}
+          <FadeIn delay={0.15}>
             <AnimatePresence mode="wait">
               <motion.div
                 key={activeTab}
@@ -1343,10 +1482,15 @@ export default function SoulseekPage() {
                 transition={{ duration: 0.2 }}
               >
                 {activeTab === 'search' && <SearchTab libraryArtists={libraryArtists} initialSearch={initialSearch} />}
-                {activeTab === 'downloads' && <DownloadsTab liveDownloads={liveDownloads} />}
-                {activeTab === 'uploads' && <UploadsTab liveUploads={liveUploads} />}
-                {activeTab === 'browse' && <BrowseTab />}
-                {activeTab === 'stats' && <StatsTab />}
+                {activeTab === 'transfers' && (
+                  <TransfersTab
+                    liveDownloads={liveDownloads}
+                    liveUploads={liveUploads}
+                    staging={staging}
+                    refetchStaging={fetchStaging}
+                  />
+                )}
+                {activeTab === 'ledger' && <LedgerTab />}
               </motion.div>
             </AnimatePresence>
           </FadeIn>

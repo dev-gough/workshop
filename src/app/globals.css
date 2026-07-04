@@ -457,6 +457,82 @@
 }
 
 /* ─────────────────────────────────────────────────────────────
+   Soulseek scope — applied to /projects/soulseek shell.
+   "The wire room": a night-shift telephone exchange. Green-black
+   walls, emerald signal on the down-wire, copper on the up-wire,
+   mono readouts. Deliberately dark-always — the exchange has no
+   windows (same intent as cc-scope's instruments).
+   ──────────────────────────────────────────────────────────── */
+.slsk-theme {
+  /* Palette */
+  --slsk-bg:     hsl(160 20% 5%);
+  --slsk-bg-2:   hsl(160 16% 7.5%);
+  --slsk-card:   hsl(158 15% 8.5%);
+  --slsk-line:   hsl(158 12% 16%);
+  --slsk-ink:    hsl(140 18% 93%);
+  --slsk-dim:    hsl(152 8% 58%);
+  --slsk-signal: hsl(158 72% 52%);  /* down-wire / connected */
+  --slsk-copper: hsl(28 72% 58%);   /* up-wire / lossless */
+  --slsk-fault:  hsl(352 78% 62%);
+
+  /* Remap the shared tokens so utilities + shadcn/lucide follow suit. */
+  --color-background:        var(--slsk-bg);
+  --color-foreground:        var(--slsk-ink);
+  --color-card:              var(--slsk-card);
+  --color-card-foreground:   var(--slsk-ink);
+  --color-popover:           var(--slsk-bg-2);
+  --color-popover-foreground:var(--slsk-ink);
+  --color-muted:             var(--slsk-bg-2);
+  --color-muted-foreground:  var(--slsk-dim);
+  --color-secondary:         var(--slsk-bg-2);
+  --color-secondary-foreground: var(--slsk-ink);
+  --color-border:            var(--slsk-line);
+  --color-input:             var(--slsk-line);
+  --color-ring:              var(--slsk-signal);
+  --color-primary:           var(--slsk-signal);
+  --color-primary-foreground:hsl(160 25% 5%);
+  --color-accent:            var(--slsk-copper);
+  --color-accent-foreground: hsl(160 25% 5%);
+  --color-destructive:       var(--slsk-fault);
+  --color-destructive-foreground: hsl(160 25% 5%);
+  --color-chart-1:           var(--slsk-signal);
+  --color-chart-2:           var(--slsk-copper);
+
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  color: var(--slsk-ink);
+  background-color: var(--slsk-bg);
+  /* Cables running down the wall + a faint signal glow at the ceiling. */
+  background-image:
+    radial-gradient(ellipse 70% 38% at 50% -10%, hsl(158 80% 40% / 0.09), transparent 70%),
+    repeating-linear-gradient(90deg, transparent 0 96px, hsl(158 30% 13% / 0.55) 96px 97px);
+  background-attachment: fixed, scroll;
+}
+
+/* Signal lamp — LINE indicator, tab jacks, wire meters. Color via text-*. */
+.slsk-lamp {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor, inset 0 0 2px hsl(0 0% 100% / 0.45);
+  flex-shrink: 0;
+}
+.slsk-lamp-off { color: hsl(158 10% 26%); box-shadow: none; }
+@keyframes slsk-pulse { 50% { opacity: 0.35; } }
+.slsk-lamp-live { animation: slsk-pulse 1.6s infinite ease-in-out; }
+
+/* A run of exchange wire. Dashes travel while the wire carries traffic —
+   toward the readout on the down-wire, away from it on the up-wire. */
+.slsk-wire {
+  height: 2px;
+  background-image: repeating-linear-gradient(90deg, currentColor 0 7px, transparent 7px 14px);
+}
+@keyframes slsk-travel { to { background-position-x: -14px; } }
+.slsk-wire-live { animation: slsk-travel 0.9s linear infinite; }
+.slsk-wire-out  { animation-direction: reverse; }
+
+/* ─────────────────────────────────────────────────────────────
    Hallway scope — the homepage corridor. A neutral gallery shell
    whose only job is to frame each project tile rendered in its
    OWN theme (cc-scope, ws-theme, lol-theme, …). Light: warm
