@@ -12,6 +12,7 @@ import {
 } from '@/workers/gol-census-core';
 import type { CensusResult } from '@/workers/gol-census-shared';
 import { CensusPool, poolWorkerCount } from '@/lib/census-pool';
+import { usePlaneFate, type PlaneFate } from '@/lib/plane-fate-client';
 
 // ── Board sizes ───────────────────────────────────────────────────────────
 //
@@ -130,6 +131,101 @@ function MiniGrid({ state, w, h, cell = 12 }: { state: number; w: number; h: num
   );
 }
 
+// ── Plane-fate verdict badge ──────────────────────────────────────────────
+//
+// The census plays Life in a box with dead walls, so its "oscillators" are
+// oscillators of that bounded universe. Each gallery specimen is re-tried on
+// the infinite plane (plane-fate worker) and badged with its true fate: a
+// genuine oscillator, or a wall artifact that fizzles / settles into ash /
+// turns out to be a spaceship. Chalk colors: green = verified, yellow =
+// settles elsewhere, blue = freezes, violet = travels, rose = open problem.
+
+function shedTotal(f: PlaneFate): number {
+  return f.shed.glider + f.shed.lwss + f.shed.mwss + f.shed.hwss;
+}
+
+function fateChip(fate: PlaneFate, boundedPeriod: number): { text: string; cls: string; tip: string } {
+  const ships = shedTotal(fate);
+  const shipsNoun = ships === fate.shed.glider
+    ? (ships === 1 ? 'glider' : 'gliders')
+    : (ships === 1 ? 'ship' : 'ships');
+  switch (fate.kind) {
+    case 'oscillator':
+      if (fate.settledAt === 0 && ships === 0) {
+        return {
+          text: `plane-true · p${fate.period}`,
+          cls: 'bg-chart-4/10 text-chart-4 border-chart-4/25',
+          tip: `A genuine oscillator on the infinite plane: the seed returns to itself every ${fate.period} generations, no walls needed`
+            + (fate.period === boundedPeriod ? '.' : ` (period ${boundedPeriod} inside the box).`),
+        };
+      }
+      return {
+        text: ships > 0 ? `→ p${fate.period} + ${ships} ${shipsNoun}` : `→ p${fate.period} ash`,
+        cls: 'bg-chart-1/10 text-chart-1 border-chart-1/25',
+        tip: `Box-bound: freed onto the plane it runs ${fate.settledAt.toLocaleString()} generations`
+          + (ships > 0 ? `, sheds ${ships} ${shipsNoun},` : '')
+          + ` and settles into period-${fate.period} ash (${fate.finalPop} cells).`,
+      };
+    case 'still':
+      return {
+        text: ships > 0 ? `→ still life + ${ships} ${shipsNoun}` : '→ still life',
+        cls: 'bg-chart-2/10 text-chart-2 border-chart-2/25',
+        tip: `Box-bound: on the plane it freezes into a ${fate.finalPop}-cell still life`
+          + (ships > 0 ? ` after shedding ${ships} ${shipsNoun}` : '')
+          + ` (settled by generation ${fate.settledAt.toLocaleString()}).`,
+      };
+    case 'dies':
+      if (ships > 0) {
+        return {
+          text: `→ ${ships} ${shipsNoun}`,
+          cls: 'bg-chart-5/10 text-chart-5 border-chart-5/25',
+          tip: `On the plane everything that survives flies away: ${ships} ${shipsNoun} escape and nothing else remains.`,
+        };
+      }
+      return {
+        text: 'fizzles',
+        cls: 'bg-muted/60 text-muted-foreground border-border',
+        tip: `Box-bound: without the walls it dies out entirely by generation ${fate.gens.toLocaleString()}.`,
+      };
+    case 'ship':
+      return {
+        text: fate.settledAt === 0 ? 'spaceship!' : '→ spaceship',
+        cls: 'bg-chart-5/10 text-chart-5 border-chart-5/25',
+        tip: fate.settledAt === 0
+          ? `The seed itself is a spaceship: every ${fate.period} generations it repeats, displaced by (${fate.dx}, ${fate.dy}).`
+          : `On the plane it evolves into a spaceship travelling (${fate.dx}, ${fate.dy}) every ${fate.period} generations.`,
+      };
+    case 'unresolved':
+      return {
+        text: 'open problem',
+        cls: 'bg-chart-3/10 text-chart-3 border-chart-3/25',
+        tip: `Fate unknown: still not settled after ${fate.gens.toLocaleString()} generations (caps: ${fate.capped}). Life is Turing-complete — some seeds never settle.`,
+      };
+  }
+}
+
+function PlaneFateBadge({ w, h, state, boundedPeriod }: {
+  w: number; h: number; state: number; boundedPeriod: number;
+}) {
+  const fate = usePlaneFate(w, h, state);
+  if (!fate) {
+    return (
+      <span className="h-[17px] text-[9px] leading-[17px] text-muted-foreground/50">
+        trying the plane…
+      </span>
+    );
+  }
+  const chip = fateChip(fate, boundedPeriod);
+  return (
+    <span
+      title={chip.tip}
+      className={`h-[17px] inline-flex items-center text-[9px] font-mono tabular-nums px-1.5 rounded border ${chip.cls}`}
+    >
+      {chip.text}
+    </span>
+  );
+}
+
 // ── Animated oscillator for the gallery ───────────────────────────────────
 //
 // Steps the actual bounded cycle with the census core's own step function.
@@ -166,6 +262,7 @@ function OscillatorGalleryItem({
       <span className="text-[10px] font-medium text-muted-foreground tabular-nums transition-colors group-enabled:group-hover:text-primary">
         {w}×{h} · period {period}
       </span>
+      <PlaneFateBadge w={w} h={h} state={state} boundedPeriod={period} />
     </button>
   );
 }
@@ -451,7 +548,9 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
         <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
           Every starting configuration on a bounded W×H board, simulated to its cycle and
           classified as dies&nbsp;out, still&nbsp;life, or oscillator. Boards to a million states
-          compute on arrival; bigger ones run on every core this machine has.
+          compute on arrival; bigger ones run on every core this machine has. The walls do
+          real work here — so each gallery specimen is also released onto an infinite plane
+          and badged with its true, unbounded fate.
         </p>
       </div>
 
@@ -599,7 +698,9 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
         <div>
           <div className="flex flex-wrap items-baseline justify-between gap-x-3 mb-3">
             <h3 className="text-[11px] font-semibold uppercase tracking-[0.18em]">Longest-period oscillators found</h3>
-            <span className="text-[10px] text-muted-foreground">select one to chalk it onto the board</span>
+            <span className="text-[10px] text-muted-foreground">
+              badge = fate on the infinite plane · select one to chalk it onto the board
+            </span>
           </div>
           <div className="flex flex-wrap gap-3">
             {galleryItems.map((it, i) => (
