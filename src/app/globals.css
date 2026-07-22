@@ -747,6 +747,117 @@
 }
 
 /* ─────────────────────────────────────────────────────────────
+   Megabonk scope — applied to /projects/megabonk shell.
+   "The damage foundry": chiselled basalt, molten gold bonk-energy,
+   crimson crit heat, arcade impact numerals. A punchy, dark-leaning
+   game room. Light: a sandstone reference tablet in daylight; dark:
+   the foundry lit only by its own molten gold. Bracket hues are set
+   in TS (categorical) so they read on both stones.
+   ──────────────────────────────────────────────────────────── */
+.megabonk-theme {
+  /* Palette — light (sandstone tablet) */
+  --mb-stone:    #ece2cd;            /* background slab */
+  --mb-surface:  #f7f0df;            /* cards / plates */
+  --mb-elevated: #e3d7ba;            /* raised chips */
+  --mb-ink:      #2c2418;            /* chiselled ink */
+  --mb-ink-soft: #6d6047;            /* weathered engraving */
+  --mb-line:     #d3c4a1;            /* mortar line */
+  --mb-gold:     #c67d0b;            /* bonk gold — the accent */
+  --mb-crit:     #c8322e;            /* crit heat */
+  --mb-glow:     rgba(198, 125, 11, 0.16);
+
+  --color-background:        var(--mb-stone);
+  --color-foreground:        var(--mb-ink);
+  --color-card:              var(--mb-surface);
+  --color-card-foreground:   var(--mb-ink);
+  --color-popover:           var(--mb-surface);
+  --color-popover-foreground:var(--mb-ink);
+  --color-muted:             var(--mb-elevated);
+  --color-muted-foreground:  var(--mb-ink-soft);
+  --color-secondary:         var(--mb-elevated);
+  --color-secondary-foreground: var(--mb-ink);
+  --color-border:            var(--mb-line);
+  --color-input:             var(--mb-line);
+  --color-ring:              var(--mb-gold);
+  --color-primary:           var(--mb-gold);
+  --color-primary-foreground:#fff7e8;
+  --color-accent:            var(--mb-elevated);
+  --color-accent-foreground: var(--mb-ink);
+  --color-destructive:       var(--mb-crit);
+  --color-destructive-foreground: #fff7e8;
+
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  color: var(--mb-ink);
+  background-color: var(--mb-stone);
+  background-image:
+    radial-gradient(ellipse 70% 40% at 50% -6%, var(--mb-glow), transparent 70%),
+    repeating-linear-gradient(122deg, transparent 0 5px, hsl(38 30% 30% / 0.014) 5px 6px);
+}
+
+.dark .megabonk-theme {
+  /* Palette — dark (the foundry, molten-lit) */
+  --mb-stone:    #14110b;            /* warm basalt near-black */
+  --mb-surface:  #1e1810;
+  --mb-elevated: #29211533;          /* handled per-use; base below */
+  --mb-ink:      #f4ead2;            /* warm parchment */
+  --mb-ink-soft: #a99a7b;
+  --mb-line:     #362b1b;
+  --mb-gold:     #f2ac1c;            /* molten gold */
+  --mb-crit:     #ef4b47;
+  --mb-glow:     rgba(242, 172, 28, 0.14);
+
+  --color-card:              var(--mb-surface);
+  --color-card-foreground:   var(--mb-ink);
+  --color-popover:           var(--mb-surface);
+  --color-popover-foreground:var(--mb-ink);
+  --color-muted:             #241d12;
+  --color-muted-foreground:  var(--mb-ink-soft);
+  --color-secondary:         #241d12;
+  --color-secondary-foreground: var(--mb-ink);
+  --color-border:            var(--mb-line);
+  --color-input:             var(--mb-line);
+  --color-primary-foreground:#1a1408;
+  --color-accent:            #241d12;
+  --color-accent-foreground: var(--mb-ink);
+
+  background-image:
+    radial-gradient(ellipse 65% 42% at 50% -4%, var(--mb-glow), transparent 68%),
+    radial-gradient(ellipse 40% 30% at 82% 108%, hsl(20 80% 45% / 0.06), transparent 70%),
+    repeating-linear-gradient(122deg, transparent 0 5px, hsl(40 40% 70% / 0.01) 5px 6px);
+}
+
+/* Arcade impact numerals — the hero damage number and readouts. */
+.mb-readout {
+  font-family: var(--font-readout), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* A chiselled plate — panels, the picker, the hero card. */
+.mb-plate {
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  box-shadow:
+    0 1px 0 hsl(45 40% 100% / 0.04) inset,
+    0 10px 30px hsl(30 40% 4% / 0.10);
+}
+
+/* Molten gold gradient text for the hero multiplier. */
+.mb-molten {
+  background: linear-gradient(180deg, #ffd873, var(--mb-gold, #f2ac1c) 55%, #d97706);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* An item chip in the roster — a chiselled tile with a hover lift. */
+.mb-chip {
+  transition: transform 140ms ease, border-color 140ms ease, background-color 140ms ease;
+}
+.mb-chip:hover { transform: translateY(-2px); }
+
+/* ─────────────────────────────────────────────────────────────
    Hallway scope — the homepage corridor. A neutral gallery shell
    whose only job is to frame each project tile rendered in its
    OWN theme (cc-scope, ws-theme, lol-theme, …). Light: warm

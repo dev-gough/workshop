@@ -184,3 +184,59 @@ export function ImageEvolverRoom({ className }: { className?: string }) {
     </Door>
   );
 }
+
+// ── 15 · Megabonk — the damage foundry: a molten impact + bracket bar ──
+
+// The bracket palette echoes the room's own viz (main/flat/crit/…).
+const MB_BAR = [
+  { w: 34, c: '#f2a71c' }, // Damage %
+  { w: 22, c: '#e8433f' }, // Crit
+  { w: 15, c: '#e8743b' }, // Base damage
+  { w: 12, c: '#37b24d' }, // Tome
+  { w: 9, c: '#3b82f6' },  // Attack speed
+  { w: 8, c: '#a855f7' },  // Elite
+];
+
+export function MegabonkRoom({ className }: { className?: string }) {
+  return (
+    <Door href="/projects/megabonk" number="RM 15" room="Megabonk" className={className}>
+      <div className="relative h-full overflow-hidden bg-[#14110b]">
+        {/* molten heat behind the number */}
+        <div
+          className="absolute left-1/2 top-[42%] h-40 w-40 -translate-x-1/2 -translate-y-1/2 rounded-full"
+          style={{ background: 'radial-gradient(circle, #f2ac1c, transparent 66%)', opacity: 0.22 }}
+        />
+        {/* impact starburst */}
+        <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full" preserveAspectRatio="xMidYMid meet">
+          <polygon
+            points="50,10 57,34 78,22 64,42 90,46 64,52 76,74 54,60 50,86 44,62 24,74 36,52 12,48 36,42 24,24 44,36"
+            fill="#f2ac1c" opacity="0.14"
+          />
+        </svg>
+        {/* the molten multiplier — the room's whole promise in one number */}
+        <div className="absolute inset-x-0 top-1/2 -translate-y-[58%] text-center">
+          <div
+            className="font-mono text-4xl font-bold tracking-tight"
+            style={{
+              background: 'linear-gradient(180deg,#ffd873,#f2ac1c 55%,#d97706)',
+              WebkitBackgroundClip: 'text',
+              backgroundClip: 'text',
+              color: 'transparent',
+            }}
+          >
+            ×248
+          </div>
+          <div className="mt-0.5 text-[8px] font-semibold uppercase tracking-[0.2em] text-[#a99a7b]">
+            total damage
+          </div>
+        </div>
+        {/* a mini damage bar — each thing's share, echoing the real viz */}
+        <div className="absolute inset-x-4 bottom-8 flex h-2 overflow-hidden rounded-full ring-1 ring-white/10">
+          {MB_BAR.map((s, i) => (
+            <span key={i} style={{ width: `${s.w}%`, background: s.c }} />
+          ))}
+        </div>
+      </div>
+    </Door>
+  );
+}

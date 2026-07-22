@@ -9,7 +9,7 @@ import {
   BrainfuckRoom, JellyfinRoom, SplitwiserRoom, SoulseekRoom,
 } from './_home/rooms-live';
 import {
-  PolarRoom, GolRoom, HouseRoom, EcosystemRoom, NeuroRoom, ImageEvolverRoom,
+  PolarRoom, GolRoom, HouseRoom, EcosystemRoom, NeuroRoom, ImageEvolverRoom, MegabonkRoom,
 } from './_home/rooms-art';
 import { Noticeboard } from './_home/noticeboard';
 
@@ -36,7 +36,7 @@ export default function HomePage() {
                   Devy&apos;s Workshop
                 </h1>
                 <p className="mt-1.5 text-sm text-muted-foreground">
-                  Fourteen rooms off one hallway — pick a door.
+                  Fifteen rooms off one hallway — pick a door.
                 </p>
               </div>
               <DirectoryPlaque data={data} />
@@ -59,6 +59,7 @@ export default function HomePage() {
               <JellyfinRoom fetches={data.fetches} className="col-span-2" />
               <SplitwiserRoom splitwiser={data.splitwiser} className="col-span-2" />
               <SoulseekRoom soulseek={data.soulseek} className="col-span-2" />
+              <MegabonkRoom className="col-span-2" />
               <HouseRoom className="col-span-1" />
               <EcosystemRoom className="col-span-1" />
               <NeuroRoom className="col-span-1" />
