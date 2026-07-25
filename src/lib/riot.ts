@@ -10,6 +10,8 @@ interface ChallengeConfig {
   state: string;
   leaderboard?: boolean;
   thresholds: Record<string, number>;
+  /** Epoch ms at which a seasonal challenge stops accruing; 0 for evergreen. */
+  endTimestamp?: number;
   category?: string;
   tags?: Record<string, string[]>;
 }

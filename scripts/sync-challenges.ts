@@ -13,9 +13,14 @@ async function main() {
 
   console.log(`Syncing challenges for ${riot.gameName}#${riot.tagLine} on ${riot.region}...`);
 
-  const { configCount, progressCount, thresholdUpdates } = await syncChallenges(pool, riot);
+  const { configCount, progressCount, thresholdUpdates, metaUpdates } = await syncChallenges(pool, riot);
 
   console.log(`\nDone! Synced ${configCount} configs, ${progressCount} progress entries, ${thresholdUpdates} dynamic thresholds.`);
+  console.log(
+    metaUpdates === null
+      ? '  Hierarchy still fresh (or upstream unreachable) — left as-is.'
+      : `  Hierarchy refreshed from CommunityDragon: ${metaUpdates} rows.`
+  );
   await pool.end();
 }
 

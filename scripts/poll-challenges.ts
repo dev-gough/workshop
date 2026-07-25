@@ -191,9 +191,10 @@ async function pollMatches(riot: RiotConfig) {
 // "last synced" badge reads. ~78 Riot calls, which the shared rate limiter
 // (95/120s) absorbs in a few seconds at this cadence.
 async function runFullSync(riot: RiotConfig) {
-  const { configCount, progressCount, thresholdUpdates } = await syncChallenges(pool, riot);
+  const { configCount, progressCount, thresholdUpdates, metaUpdates } = await syncChallenges(pool, riot);
+  const meta = metaUpdates === null ? 'hierarchy fresh' : `${metaUpdates} hierarchy rows`;
   console.log(
-    `  Full sync: ${configCount} configs, ${progressCount} progress entries, ${thresholdUpdates} threshold updates.`
+    `  Full sync: ${configCount} configs, ${progressCount} progress entries, ${thresholdUpdates} threshold updates, ${meta}.`
   );
 }
 

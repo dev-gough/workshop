@@ -10,6 +10,7 @@
     "scan-music": "npx tsx scripts/scan-music.ts",
     "sync-challenges": "npx tsx scripts/sync-challenges.ts",
     "poll-challenges": "npx tsx scripts/poll-challenges.ts",
+    "mirror-challenge-icons": "npx tsx scripts/mirror-challenge-icons.ts",
     "prune-metrics": "npx tsx scripts/prune-metrics.ts",
     "setup": "npx tsx scripts/setup.ts",
     "setup:python": "bash scripts/setup-python.sh",
