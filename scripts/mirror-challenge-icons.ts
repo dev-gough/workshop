@@ -24,7 +24,55 @@ const MANIFEST =
 const TOKEN_URL = (id: string, tier: string) =>
   `https://raw.communitydragon.org/latest/game/assets/challenges/config/${id}/tokens/${tier}.png`;
 
+// Category glyphs, crystals and chrome live in the frontend static-assets
+// plugin, NOT the game asset tree — the six category challenges (ids 0-5) have
+// an empty levelToIconPath and no tokens of their own.
+const STATIC =
+  'https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-static-assets/global/default';
+
 const OUT_ROOT = path.join(process.cwd(), 'public/lol/challenge-tokens');
+const SHARED_ROOT = path.join(process.cwd(), 'public/lol/challenge-shared');
+
+const TIER_SLUGS = [
+  'none', 'iron', 'bronze', 'silver', 'gold',
+  'platinum', 'diamond', 'master', 'grandmaster', 'challenger',
+];
+
+/**
+ * Shared chrome. Filenames are inconsistent upstream and must not be
+ * "tidied": the IMAGINATION category PNG ships under its old internal name
+ * `innovation.png` (`imagination.png` 404s), while the matching SVG really is
+ * `icon_category_imagination.svg`. Local names are normalised so callers only
+ * ever deal with the canonical category slug.
+ */
+function sharedJobs(): Job[] {
+  const jobs: Job[] = [];
+  const add = (url: string, rel: string) =>
+    jobs.push({ id: 'shared', tier: rel, url, dest: path.join(SHARED_ROOT, rel) });
+
+  const catPng: Record<string, string> = {
+    imagination: 'innovation', expertise: 'expertise', veterancy: 'veterancy',
+    teamwork: 'teamwork', collection: 'collection', legacy: 'legacy',
+  };
+  for (const [slug, upstream] of Object.entries(catPng)) {
+    add(`${STATIC}/challenges-shared/categories/${upstream}.png`, `categories/${slug}.png`);
+    add(`${STATIC}/challenges-shared/icon_category_${slug}.svg`, `categories/${slug}.svg`);
+  }
+
+  for (const tier of TIER_SLUGS) {
+    // The overall CRYSTAL gem — the only category art with per-tier variants.
+    add(`${STATIC}/challenges-shared/crystal_${tier}.png`, `crystal/${tier}.png`);
+    add(`${STATIC}/challenge-mini-crystal/${tier}.svg`, `crystal/mini-${tier}.svg`);
+    // Fallback token art, used for nodes that have no per-challenge token.
+    add(`${STATIC}/challenges-shared/icon_achievement_${tier}.png`, `token-fallback/${tier}.png`);
+    add(`${STATIC}/challenges-shared/challenge-card-background-${tier}.png`, `card-bg/${tier}.png`);
+  }
+
+  for (const f of ['crystal-ring.png', 'crystal-radial-fill.png', 'crystal-container-bg.png', 'icon-capstone.svg']) {
+    add(`${STATIC}/challenges-shared/${f}`, `chrome/${f}`);
+  }
+  return jobs;
+}
 
 const argv = process.argv.slice(2);
 const FORCE = argv.includes('--force');
@@ -81,9 +129,14 @@ async function download(job: Job): Promise<'ok' | 'skip' | 'missing' | 'error'> 
 }
 
 async function main() {
-  console.log(`Mirroring challenge tokens -> ${OUT_ROOT}`);
-  const jobs = await buildJobs();
-  console.log(`  ${jobs.length} (challenge, tier) pairs in the manifest; concurrency ${CONCURRENCY}${FORCE ? ' (force)' : ''}`);
+  console.log(`Mirroring challenge art -> ${OUT_ROOT} + ${SHARED_ROOT}`);
+  const tokenJobs = await buildJobs();
+  const shared = sharedJobs();
+  const jobs = [...tokenJobs, ...shared];
+  console.log(
+    `  ${tokenJobs.length} (challenge, tier) tokens + ${shared.length} shared assets; ` +
+    `concurrency ${CONCURRENCY}${FORCE ? ' (force)' : ''}`
+  );
 
   const tally = { ok: 0, skip: 0, missing: 0, error: 0 };
   const missing: string[] = [];

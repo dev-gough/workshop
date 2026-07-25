@@ -166,6 +166,38 @@ export async function fetchChallengeMeta(): Promise<ChallengeMeta[] | null> {
  */
 export const TOKEN_PLACEHOLDER = '/lol/challenge-token-placeholder.png';
 
+/** The six category roots. Slugs are ours; the mirror normalises upstream names. */
+export const CATEGORY_SLUGS: Record<number, string> = {
+  0: 'crystal', 1: 'imagination', 2: 'expertise',
+  3: 'veterancy', 4: 'teamwork', 5: 'collection',
+};
+
+/**
+ * Category glyph. `svg` is the flat monochrome rail icon (currentColor-friendly
+ * once its hardcoded fill is overridden); `png` is the 80x80 white fill used
+ * beside the section heading, which recolors cleanly via mask-image.
+ * Note CRYSTAL (id 0) has no category glyph — use `crystalPath` instead.
+ */
+export function categoryIconPath(id: number, ext: 'svg' | 'png' = 'svg'): string | null {
+  const slug = CATEGORY_SLUGS[id];
+  if (!slug || slug === 'crystal') return null;
+  return `/lol/challenge-shared/categories/${slug}.${ext}`;
+}
+
+/** The overall CRYSTAL gem — the only category art with per-tier variants. */
+export function crystalPath(level: string, mini = false): string {
+  // `none` has no mini variant upstream; iron is its visual twin (the full-size
+  // none/iron crystals are byte-identical), so it stands in.
+  const tier = String(level || 'NONE').toLowerCase();
+  if (mini) return `/lol/challenge-shared/crystal/mini-${tier === 'none' ? 'iron' : tier}.svg`;
+  return `/lol/challenge-shared/crystal/${tier}.png`;
+}
+
+/** Generic tier token, for nodes with no per-challenge art (e.g. ids 0-5). */
+export function tokenFallbackPath(level: string): string {
+  return `/lol/challenge-shared/token-fallback/${String(level || 'NONE').toLowerCase()}.png`;
+}
+
 /**
  * Local path for a challenge's tier token, as written by
  * `scripts/mirror-challenge-icons.ts`. A pure string builder — existence is not

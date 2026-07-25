@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db';
-import { tierPoints, tokenIconPath, TIERS } from '@/lib/cdragon';
+import { tierPoints, tokenIconPath, categoryIconPath, crystalPath, TIERS } from '@/lib/cdragon';
 
 export const dynamic = 'force-dynamic';
 
@@ -86,6 +86,17 @@ interface Row {
 const num = (v: string | number | null | undefined): number | null =>
   v === null || v === undefined ? null : Number(v);
 
+/**
+ * Art for a node. The six category roots have an empty levelToIconPath upstream
+ * and no tokens of their own, so they fall back to the static-assets glyphs:
+ * the tiered CRYSTAL gem for id 0, the flat category glyph for 1-5.
+ */
+function iconFor(id: number, kind: string, level: string): string {
+  if (id === 0) return crystalPath(level);
+  if (kind === 'category') return categoryIconPath(id, 'png') ?? crystalPath(level);
+  return tokenIconPath(id, level === 'NONE' ? 'iron' : level);
+}
+
 /** Next tier above `level` that this challenge actually defines a threshold for. */
 function nextTier(level: string, thresholds: Record<string, number>) {
   const start = level === 'NONE' ? 0 : TIERS.indexOf(level as (typeof TIERS)[number]) + 1;
@@ -128,12 +139,13 @@ export async function GET() {
       const level = r.level ?? 'NONE';
       const thresholds = r.thresholds ?? {};
       const next = nextTier(level, thresholds);
+      const kind = r.is_category ? 'category' : r.is_capstone ? 'capstone' : 'challenge';
       return {
         challengeId: id,
         name: r.name ?? `Challenge ${id}`,
         description: r.description ?? '',
         shortDescription: r.short_description ?? '',
-        kind: r.is_category ? 'category' : r.is_capstone ? 'capstone' : 'challenge',
+        kind,
         parentId: num(r.parent_id),
         childIds: childIds.get(id) ?? [],
         state: r.state ?? 'ENABLED',
@@ -152,7 +164,7 @@ export async function GET() {
         source: r.source,
         queueIds: r.queue_ids ?? [],
         rewards: r.rewards ?? {},
-        icon: tokenIconPath(id, level === 'NONE' ? 'iron' : level),
+        icon: iconFor(id, kind, level),
         achievedTime: num(r.achieved_time),
         position: r.position,
         playersInLevel: num(r.players_in_level),

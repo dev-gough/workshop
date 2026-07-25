@@ -46,3 +46,4 @@ config.json
 # Mirrored LoL challenge tier tokens (~93MB, populated by
 # `npm run mirror-challenge-icons`; regenerable, never committed).
 /public/lol/challenge-tokens/
+/public/lol/challenge-shared/
