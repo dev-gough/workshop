@@ -6,7 +6,11 @@ import { syncChallenges } from '@/lib/challenges-sync';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
-const COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
+// Must stay below the poller's 5-minute interval. The poller now writes
+// sync_metadata every cycle, so a cooldown >= that interval would leave the
+// manual Sync button permanently rejected. This is just anti-hammer protection
+// (each sync is ~78 Riot calls); the data is never more than 5 minutes stale.
+const COOLDOWN_MS = 60 * 1000; // 1 minute
 
 export async function POST() {
   try {

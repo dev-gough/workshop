@@ -1,4 +1,4 @@
-import { getConfig, resetConfigCache } from '../src/lib/config';
+import { getConfig, resetConfigCache, type RiotConfig } from '../src/lib/config';
 import { makePool } from '../src/lib/db';
 import {
   getAccountByRiotId,
@@ -6,7 +6,7 @@ import {
   getMatchIds,
   getMatch,
 } from '../src/lib/riot';
-import { upsertChallengeProgress } from '../src/lib/challenges-sync';
+import { syncChallenges } from '../src/lib/challenges-sync';
 
 const pool = makePool('challenge_poller');
 
@@ -84,8 +84,9 @@ function computeDeltas(
   return deltas;
 }
 
-async function poll() {
-  const riot = loadRiotConfig();
+// Detect new matches and attribute challenge deltas to them. Deliberately leaves
+// challenge_progress/configs alone — runFullSync below owns those.
+async function pollMatches(riot: RiotConfig) {
   const { apiKey: riotApiKey, gameName: riotGameName, tagLine: riotTagLine, region: riotRegion } = riot;
 
   // Resolve PUUID
@@ -115,7 +116,10 @@ async function poll() {
   const newMatchIds = matchIds.filter((id: string) => !existingSet.has(id));
 
   if (newMatchIds.length === 0 && Object.keys(oldSnap).length > 0) {
-    console.log(`  No new matches detected. Skipping.`);
+    // Hold the snapshot steady: whatever progress has accrued since the last
+    // tracked match must stay un-consumed so it can be attributed to the next
+    // one. Only the match/delta path is skipped — the full sync still runs.
+    console.log(`  No new matches detected. Skipping delta attribution.`);
     return;
   }
 
@@ -179,10 +183,24 @@ async function poll() {
     [JSON.stringify(newSnap)]
   );
 
-  // Also update challenge_progress table
-  await upsertChallengeProgress(pool, playerData.challenges);
-
   console.log(`  Snapshot updated.`);
+}
+
+// Full refresh of challenge_configs, challenge_progress and the dynamic
+// GM/Challenger thresholds, plus the sync_metadata row the dashboard's
+// "last synced" badge reads. ~78 Riot calls, which the shared rate limiter
+// (95/120s) absorbs in a few seconds at this cadence.
+async function runFullSync(riot: RiotConfig) {
+  const { configCount, progressCount, thresholdUpdates } = await syncChallenges(pool, riot);
+  console.log(
+    `  Full sync: ${configCount} configs, ${progressCount} progress entries, ${thresholdUpdates} threshold updates.`
+  );
+}
+
+async function poll() {
+  const riot = loadRiotConfig();
+  await pollMatches(riot);
+  await runFullSync(riot);
 }
 
 async function main() {

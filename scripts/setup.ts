@@ -152,8 +152,15 @@ async function setupDatabase(
     await wkdb.query(`GRANT USAGE ON SCHEMA public TO "${role}"`);
     await wkdb.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "${role}"`);
     await wkdb.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "${role}"`);
-    await wkdb.query(`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "${role}"`);
-    await wkdb.query(`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO "${role}"`);
+    // Default privileges are scoped to the role that creates the object, so these
+    // two must be issued FOR ROLE workshop as well: migrations (npm run db:migrate)
+    // run as workshop, and without this every migration-created table lands with
+    // no grants for the other roles. That is how sync_metadata ended up unreadable
+    // to challenge_poller.
+    for (const creator of [pgConn.superuser, 'workshop']) {
+      await wkdb.query(`ALTER DEFAULT PRIVILEGES FOR ROLE "${creator}" IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "${role}"`);
+      await wkdb.query(`ALTER DEFAULT PRIVILEGES FOR ROLE "${creator}" IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO "${role}"`);
+    }
   }
   // Only the workshop role runs migrations (npm run db:migrate); it needs
   // CREATE on schema public to add new tables.
