@@ -9,6 +9,7 @@ import { CategoryGlyph, CategoryRail, CrystalDial, LEGACY_ID, RAIL } from './_co
 import { CapstoneRow, GroupRow, ChallengeCard, SectionHeading } from './_components/rows';
 import { ChallengeHoverCard, ChallengeDetailSheet } from './_components/hover-card';
 import { ChallengesSkeleton } from './_components/skeleton';
+import type { HistoryMap } from './_components/sparkline';
 import {
   ALL_TIERS, tierVar, progressFraction, progressLabel,
   type ChallengeData, type ChallengeNode,
@@ -85,6 +86,7 @@ export default function ChallengesPage() {
   const [hover, setHover] = useState<{ node: ChallengeNode; rect: DOMRect } | null>(null);
   const [selected, setSelected] = useState<ChallengeNode | null>(null);
   const [canHover, setCanHover] = useState(true);
+  const [history, setHistory] = useState<HistoryMap | undefined>();
 
   // Touch browsers fire synthetic mouseenter on tap, which would leave the
   // anchored card stranded on screen behind the sheet. Gate it on real hover
@@ -103,6 +105,15 @@ export default function ChallengesPage() {
       .then((d: ChallengeData) => setData(d))
       .catch((e) => console.error('Failed to load challenges:', e))
       .finally(() => setLoading(false));
+  }, []);
+
+  // History is a separate, non-blocking fetch: the page is fully usable
+  // without it, and a failure here should cost the sparklines, nothing else.
+  useEffect(() => {
+    fetch('/api/challenges/history')
+      .then((r) => r.json())
+      .then((d: { series?: HistoryMap }) => setHistory(d.series))
+      .catch((e) => console.error('Failed to load challenge history:', e));
   }, []);
 
   // Deep-link the selected category. Kept on window.history rather than
@@ -441,10 +452,10 @@ export default function ChallengesPage() {
       )}
 
       {canHover && hover && !selected && (
-        <ChallengeHoverCard node={hover.node} rect={hover.rect} />
+        <ChallengeHoverCard node={hover.node} rect={hover.rect} history={history} />
       )}
       {selected && (
-        <ChallengeDetailSheet node={selected} onClose={() => setSelected(null)} />
+        <ChallengeDetailSheet node={selected} onClose={() => setSelected(null)} history={history} />
       )}
     </div>
   );

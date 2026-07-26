@@ -8,6 +8,7 @@ import {
   ALL_TIERS, tierVar, stripHtml, progressFraction, progressLabel, pctLabel,
   type ChallengeNode,
 } from './types';
+import { ChallengeSparkline, type HistoryMap } from './sparkline';
 
 const KIND_LABEL: Record<ChallengeNode['kind'], string> = {
   category: 'Category', capstone: 'Capstone', group: 'Group', challenge: 'Challenge',
@@ -15,6 +16,8 @@ const KIND_LABEL: Record<ChallengeNode['kind'], string> = {
 
 const CARD_W = 340;
 const GAP = 12;
+/** Upper bound on card height, used only for viewport clamping. */
+const CARD_H = 520;
 
 /**
  * The rarity curve: what share of players ended up at each tier.
@@ -60,10 +63,12 @@ function place(rect: DOMRect) {
   const left = spaceRight > CARD_W + GAP
     ? rect.right + GAP
     : Math.max(GAP, rect.left - CARD_W - GAP);
-  // Vertically centre on the anchor, then clamp to the window.
-  const top = Math.min(
-    Math.max(GAP, rect.top + rect.height / 2 - 150),
-    window.innerHeight - 340
+  // Vertically centre on the anchor, then clamp to the window. CARD_H is an
+  // upper estimate of the tallest card (with sparkline and rewards present);
+  // clamping low would let the card hang off the bottom of short viewports.
+  const top = Math.max(
+    GAP,
+    Math.min(rect.top + rect.height / 2 - CARD_H / 2, window.innerHeight - CARD_H - GAP)
   );
   return { left, top };
 }
@@ -72,7 +77,9 @@ function place(rect: DOMRect) {
  * The card's contents, shared by the pointer-anchored card and the tap sheet.
  * Splitting only the chrome means touch and pointer can never drift apart.
  */
-function DetailBody({ node, inset = false }: { node: ChallengeNode; inset?: boolean }) {
+function DetailBody({ node, history, inset = false }: {
+  node: ChallengeNode; history?: HistoryMap; inset?: boolean;
+}) {
   const frac = progressFraction(node);
   const earned = pctLabel(node.percentiles[node.level]);
   const desc = stripHtml(node.description || node.shortDescription);
@@ -125,6 +132,12 @@ function DetailBody({ node, inset = false }: { node: ChallengeNode; inset?: bool
         </div>
       </div>
 
+      {history && (
+        <div className="px-4 pb-3">
+          <ChallengeSparkline node={node} points={history[String(node.challengeId)]} />
+        </div>
+      )}
+
       <div className="px-4 pb-3">
         <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
           Players by tier
@@ -175,7 +188,9 @@ function useMounted() {
  * its `position: fixed` — which also takes it outside the page's theme scope,
  * where every --lol-* variable would resolve to nothing.
  */
-export function ChallengeHoverCard({ node, rect }: { node: ChallengeNode; rect: DOMRect }) {
+export function ChallengeHoverCard({ node, rect, history }: {
+  node: ChallengeNode; rect: DOMRect; history?: HistoryMap;
+}) {
   if (!useMounted()) return null;
   const { left, top } = place(rect);
   return createPortal(
@@ -184,7 +199,7 @@ export function ChallengeHoverCard({ node, rect }: { node: ChallengeNode; rect: 
       style={{ left, top, width: CARD_W }}
       role="tooltip"
     >
-      <DetailBody node={node} />
+      <DetailBody node={node} history={history} />
     </div>,
     document.body
   );
@@ -199,8 +214,8 @@ export function ChallengeHoverCard({ node, rect }: { node: ChallengeNode; rect: 
  * ones, where it doubles as a way to pin a card open with a click.
  */
 export function ChallengeDetailSheet({
-  node, onClose,
-}: { node: ChallengeNode; onClose: () => void }) {
+  node, onClose, history,
+}: { node: ChallengeNode; onClose: () => void; history?: HistoryMap }) {
   const mounted = useMounted();
 
   useEffect(() => {
@@ -230,7 +245,7 @@ export function ChallengeDetailSheet({
         >
           <X className="h-4 w-4" />
         </button>
-        <DetailBody node={node} inset />
+        <DetailBody node={node} history={history} inset />
       </div>
     </div>,
     document.body
