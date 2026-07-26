@@ -7,7 +7,7 @@ import { useHeaderConfig } from '@/components/header-config';
 import MatchHistory from './_components/match-history';
 import { CategoryGlyph, CategoryRail, CrystalDial, LEGACY_ID, RAIL } from './_components/rail';
 import { CapstoneRow, GroupRow, ChallengeCard, SectionHeading } from './_components/rows';
-import { ChallengeHoverCard } from './_components/hover-card';
+import { ChallengeHoverCard, ChallengeDetailSheet } from './_components/hover-card';
 import {
   ALL_TIERS, tierVar, progressFraction, progressLabel,
   type ChallengeData, type ChallengeNode,
@@ -82,6 +82,19 @@ export default function ChallengesPage() {
   const [tierFilter, setTierFilter] = useState<string | null>(null);
   const [sort, setSort] = useState<SortKey>('name');
   const [hover, setHover] = useState<{ node: ChallengeNode; rect: DOMRect } | null>(null);
+  const [selected, setSelected] = useState<ChallengeNode | null>(null);
+  const [canHover, setCanHover] = useState(true);
+
+  // Touch browsers fire synthetic mouseenter on tap, which would leave the
+  // anchored card stranded on screen behind the sheet. Gate it on real hover
+  // capability and let the sheet be the only detail surface on touch.
+  useEffect(() => {
+    const mq = window.matchMedia('(hover: hover)');
+    const sync = () => setCanHover(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
 
   useEffect(() => {
     fetch('/api/challenges')
@@ -266,7 +279,7 @@ export default function ChallengesPage() {
 
       {tab === 'games' ? (
         <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
-          <MatchHistory />
+          <MatchHistory challenges={data?.challenges ?? []} />
         </div>
       ) : (
         <div className="mx-auto flex max-w-[1400px] flex-col gap-6 px-4 py-6 sm:px-6 lg:flex-row">
@@ -381,7 +394,7 @@ export default function ChallengesPage() {
                 ) : (
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                     {results.map((c) => (
-                      <ChallengeCard key={c.challengeId} node={c} onHover={onHover} />
+                      <ChallengeCard key={c.challengeId} node={c} onHover={onHover} onSelect={setSelected} />
                     ))}
                   </div>
                 )}
@@ -399,6 +412,7 @@ export default function ChallengesPage() {
                           items={kids(c)}
                           onHover={onHover}
                           onJump={jump}
+                          onSelect={setSelected}
                         />
                       ))}
                     </div>
@@ -410,7 +424,7 @@ export default function ChallengesPage() {
                     <SectionHeading label="Groups" kind="group" />
                     <div className="space-y-3">
                       {groups.map((g) => (
-                        <GroupRow key={g.challengeId} node={g} items={kids(g)} onHover={onHover} />
+                        <GroupRow key={g.challengeId} node={g} items={kids(g)} onHover={onHover} onSelect={setSelected} />
                       ))}
                     </div>
                   </section>
@@ -421,7 +435,7 @@ export default function ChallengesPage() {
                     <SectionHeading label="Milestones" kind="group" />
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                       {orphans.map((c) => (
-                        <ChallengeCard key={c.challengeId} node={c} onHover={onHover} />
+                        <ChallengeCard key={c.challengeId} node={c} onHover={onHover} onSelect={setSelected} />
                       ))}
                     </div>
                   </section>
@@ -432,7 +446,12 @@ export default function ChallengesPage() {
         </div>
       )}
 
-      {hover && <ChallengeHoverCard node={hover.node} rect={hover.rect} />}
+      {canHover && hover && !selected && (
+        <ChallengeHoverCard node={hover.node} rect={hover.rect} />
+      )}
+      {selected && (
+        <ChallengeDetailSheet node={selected} onClose={() => setSelected(null)} />
+      )}
     </div>
   );
 }

@@ -9,9 +9,9 @@
  * exactly which challenges moved, by how much, and whether the move crossed a
  * tier boundary.
  *
- * Owns its own state and its own fetching (games + the full challenge table,
- * which the delta tooltips and the "nearest"/"rarest" sorts need). Takes no
- * props; renders only the tab body, never the page header or tab bar.
+ * Fetches its own games, but takes the challenge tree as a prop: the page has
+ * already loaded it, and re-fetching ~450 nodes on every tab switch bought
+ * nothing. Renders only the tab body, never the page header or tab bar.
  *
  * Palette comes from the `.lol-theme` scope on the page shell — utilities only
  * (bg-card, text-muted-foreground, text-accent, …). The single exception is the
@@ -21,6 +21,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { ChevronDown, ArrowUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import type { ChallengeNode } from './types';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -51,16 +52,8 @@ interface Game {
 }
 
 /** Only the slice of the challenge record the deltas need. */
-interface Challenge {
-  challenge_id: number;
-  name: string;
-  description: string;
-  short_description: string;
-  thresholds: Record<string, number>;
-  level: string | null;
-  value: number | null;
-  percentile: number | null;
-}
+// The challenge tree comes in as a prop from the page, which has already
+// fetched it — see the note on the component below.
 
 type DeltaSort = 'default' | 'nearest' | 'rarest' | 'tier';
 
@@ -111,7 +104,13 @@ function timeAgo(timestamp: number) {
   return `${days}d ago`;
 }
 
-function getProgress(challenge: Challenge): { percent: number; currentThreshold: number; nextThreshold: number; nextTier: string } | null {
+/**
+ * Progress WITHIN the current tier, unlike the room's bars which show value
+ * over the next threshold. That is deliberate here: the "nearest" sort is
+ * asking which challenges are closest to levelling up, and a challenge sitting
+ * just past a tier boundary is not close to the next one.
+ */
+function getProgress(challenge: ChallengeNode): { percent: number; currentThreshold: number; nextThreshold: number; nextTier: string } | null {
   const level = challenge.level || 'NONE';
   const value = challenge.value ?? 0;
   const thresholds = challenge.thresholds;
@@ -177,9 +176,8 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: (e: Rea
 
 // ── Component ──────────────────────────────────────────
 
-export default function MatchHistory() {
+export default function MatchHistory({ challenges }: { challenges: ChallengeNode[] }) {
   const [games, setGames] = useState<Game[]>([]);
-  const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [loading, setLoading] = useState(true);
   const [gameModeFilter, setGameModeFilter] = useState('ALL');
   const [deltaSortBy, setDeltaSortBy] = useState<DeltaSort>('default');
@@ -191,17 +189,12 @@ export default function MatchHistory() {
       .then((rows: Game[]) => setGames(Array.isArray(rows) ? rows : []))
       .catch(console.error)
       .finally(() => setLoading(false));
-
-    fetch('/api/challenges')
-      .then(r => r.json())
-      .then((d: { challenges?: Challenge[] }) => setChallenges(d.challenges ?? []))
-      .catch(console.error);
   }, []);
 
   /** Challenge lookup by id — powers the delta tooltips and the rarity sorts. */
   const challengeMap = useMemo(() => {
-    const map: Record<string, Challenge> = {};
-    for (const c of challenges) map[String(c.challenge_id)] = c;
+    const map: Record<string, ChallengeNode> = {};
+    for (const c of challenges) map[String(c.challengeId)] = c;
     return map;
   }, [challenges]);
 
@@ -413,7 +406,7 @@ export default function MatchHistory() {
                                 >
                                   <p className="mb-1 text-xs font-medium text-foreground">{fullChallenge.name}</p>
                                   <p className="mb-2 text-[10px] text-muted-foreground">
-                                    {stripHtml(fullChallenge.description || fullChallenge.short_description)}
+                                    {stripHtml(fullChallenge.description || fullChallenge.shortDescription)}
                                   </p>
                                   {progress && progress.nextTier !== 'MAX' && (
                                     <div className="mb-2">

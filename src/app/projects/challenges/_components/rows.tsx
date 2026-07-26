@@ -8,9 +8,14 @@ import {
 } from './types';
 
 export type HoverHandler = (node: ChallengeNode | null, rect?: DOMRect) => void;
+export type SelectHandler = (node: ChallengeNode) => void;
 
-/** Binds a node's hover card to an element without repeating the plumbing. */
-function hoverProps(node: ChallengeNode, onHover: HoverHandler) {
+/**
+ * Binds a node's detail affordances to an element without repeating the
+ * plumbing. Hover drives the floating card on pointer devices; click/Enter
+ * opens the same content as a sheet, which is the only way in on touch.
+ */
+function interact(node: ChallengeNode, onHover: HoverHandler, onSelect?: SelectHandler) {
   return {
     onMouseEnter: (e: React.MouseEvent<HTMLElement>) =>
       onHover(node, e.currentTarget.getBoundingClientRect()),
@@ -18,6 +23,16 @@ function hoverProps(node: ChallengeNode, onHover: HoverHandler) {
     onFocus: (e: React.FocusEvent<HTMLElement>) =>
       onHover(node, e.currentTarget.getBoundingClientRect()),
     onBlur: () => onHover(null),
+    ...(onSelect && {
+      role: 'button',
+      onClick: () => onSelect(node),
+      onKeyDown: (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect(node);
+        }
+      },
+    }),
   };
 }
 
@@ -73,11 +88,13 @@ export function ProgressBar({ node, height = 22 }: { node: ChallengeNode; height
  * A leaf challenge. The faceted per-tier plate behind it is the client's own
  * card art, which is what makes a grid of these read as a trophy shelf.
  */
-export function ChallengeCard({ node, onHover }: { node: ChallengeNode; onHover: HoverHandler }) {
+export function ChallengeCard({ node, onHover, onSelect }: {
+  node: ChallengeNode; onHover: HoverHandler; onSelect?: SelectHandler;
+}) {
   const bg = `/lol/challenge-shared/card-bg/${(node.level || 'NONE').toLowerCase()}.png`;
   return (
     <motion.div
-      {...hoverProps(node, onHover)}
+      {...interact(node, onHover, onSelect)}
       tabIndex={0}
       whileHover={{ y: -3 }}
       transition={{ type: 'spring', stiffness: 320, damping: 26 }}
@@ -106,13 +123,16 @@ export function ChallengeCard({ node, onHover }: { node: ChallengeNode; onHover:
  * the same plate — the client treats the group and its children as one object.
  */
 export function GroupRow({
-  node, items, onHover,
-}: { node: ChallengeNode; items: ChallengeNode[]; onHover: HoverHandler }) {
+  node, items, onHover, onSelect,
+}: {
+  node: ChallengeNode; items: ChallengeNode[];
+  onHover: HoverHandler; onSelect?: SelectHandler;
+}) {
   return (
     <div id={`grp-${node.challengeId}`} className="lol-plate relative scroll-mt-20">
       <PointsCorner node={node} />
       <div className="flex items-center gap-5 p-5 pl-8">
-        <div {...hoverProps(node, onHover)} tabIndex={0} className="outline-none">
+        <div {...interact(node, onHover, onSelect)} tabIndex={0} className="cursor-pointer outline-none">
           <ChallengeToken node={node} size={104} />
         </div>
         <div className="min-w-0 flex-1">
@@ -133,7 +153,7 @@ export function GroupRow({
       {items.length > 0 && (
         <div className="grid grid-cols-2 gap-3 px-5 pb-5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {items.map((c) => (
-            <ChallengeCard key={c.challengeId} node={c} onHover={onHover} />
+            <ChallengeCard key={c.challengeId} node={c} onHover={onHover} onSelect={onSelect} />
           ))}
         </div>
       )}
@@ -147,18 +167,19 @@ export function GroupRow({
  * otherwise a single capstone would swallow the whole page.
  */
 export function CapstoneRow({
-  node, items, onHover, onJump,
+  node, items, onHover, onJump, onSelect,
 }: {
   node: ChallengeNode;
   items: ChallengeNode[];
   onHover: HoverHandler;
   onJump: (id: number) => void;
+  onSelect?: SelectHandler;
 }) {
   return (
     <div className="lol-plate relative">
       <PointsCorner node={node} />
       <div className="flex items-center gap-5 p-5 pl-8">
-        <div {...hoverProps(node, onHover)} tabIndex={0} className="outline-none">
+        <div {...interact(node, onHover, onSelect)} tabIndex={0} className="cursor-pointer outline-none">
           <ChallengeToken node={node} size={116} />
         </div>
         <div className="min-w-0 flex-1">
@@ -178,7 +199,7 @@ export function CapstoneRow({
                 {items.map((c) => (
                   <button
                     key={c.challengeId}
-                    {...hoverProps(c, onHover)}
+                    {...interact(c, onHover)}
                     onClick={() => onJump(c.challengeId)}
                     title={c.name}
                     className="transition-transform hover:scale-110"
