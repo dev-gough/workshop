@@ -186,11 +186,13 @@ export function TradingRoom({ accounts, className }: { accounts: PtAccount[]; cl
 
 // ── 04 · Challenges — hextech gold ──
 
-const TIER_COLORS: Record<string, string> = {
-  NONE: '#5B5A56', IRON: '#8C7B70', BRONZE: '#B08D57', SILVER: '#A0ACBA',
-  GOLD: '#C8AA6E', PLATINUM: '#4E9996', DIAMOND: '#576BCE', MASTER: '#9D48E0',
-  GRANDMASTER: '#EF4444', CHALLENGER: '#F4E171',
-};
+/**
+ * Tier colour comes from the `.lol-theme` ramp, which the tile sits inside —
+ * the tile used to carry its own hex map that had drifted out of step with the
+ * room's. One palette now, defined in globals.css.
+ */
+const tierVar = (level: string | null | undefined) =>
+  `var(--lol-tier-${(level || 'NONE').toLowerCase()})`;
 
 export function ChallengesRoom({ challenges, games, className }: {
   challenges: ChallengeData | null;
@@ -198,7 +200,7 @@ export function ChallengesRoom({ challenges, games, className }: {
   className?: string;
 }) {
   const tp = challenges?.totalPoints;
-  const tierColor = TIER_COLORS[tp?.level ?? 'NONE'] ?? TIER_COLORS.NONE;
+  const tierColor = tierVar(tp?.level);
   const g = games[0];
 
   return (
@@ -206,7 +208,7 @@ export function ChallengesRoom({ challenges, games, className }: {
       <div
         className="lol-theme relative flex h-full flex-col justify-between p-4 pb-9"
         style={{
-          background: 'linear-gradient(160deg, var(--lol-gradient-start), var(--lol-gradient-end))',
+          background: 'linear-gradient(160deg, var(--lol-bg-surface), var(--lol-bg-deep))',
           color: 'var(--lol-text-primary)',
         }}
       >
@@ -218,7 +220,13 @@ export function ChallengesRoom({ challenges, games, className }: {
           {tp && (
             <span
               className="rounded-sm px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.15em]"
-              style={{ color: tierColor, border: `1px solid ${tierColor}55`, background: `${tierColor}18` }}
+              // color-mix, not an `#rrggbb55` alpha suffix — tierColor is a
+              // var() reference now, so string concatenation would not parse.
+              style={{
+                color: tierColor,
+                border: `1px solid color-mix(in srgb, ${tierColor} 35%, transparent)`,
+                background: `color-mix(in srgb, ${tierColor} 10%, transparent)`,
+              }}
             >
               {tp.level}
             </span>

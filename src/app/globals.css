@@ -104,59 +104,88 @@
   --color-brand-darkmaroon: #633342;
 }
 
-/* LoL Challenge Tracker theme */
+/* ─────────────────────────────────────────────────────────────
+   Hextech scope — applied to /projects/challenges shell.
+   Material metaphor: the League client's challenge vault — a
+   lit crystal on obsidian-navy glass, framed in worn brass.
+
+   DELIBERATELY DARK-ONLY. Every other room answers to `.dark`;
+   this one doesn't, because it is a faithful replica of a client
+   that has no light mode. A pale hextech panel would be a
+   different room, not this one in daylight. The consequence is
+   intentional and visible: the RM 04 homepage tile stays dark
+   even in light mode, the same way a cinema stays dark.
+   ──────────────────────────────────────────────────────────── */
 .lol-theme {
-  --lol-bg-deep: #010A13;
-  --lol-bg-surface: #0A1428;
-  --lol-bg-elevated: #1E2328;
-  --lol-border: #1E2328;
-  --lol-border-gold: #785A28;
+  /* Palette — obsidian navy, brass, parchment */
+  --lol-bg-deep:      #010A13;
+  --lol-bg-surface:   #0A1428;
+  --lol-bg-elevated:  #101D33;
+  --lol-border:       #1E2328;
+  --lol-border-gold:  #785A28;
   --lol-text-primary: #F0E6D2;
   --lol-text-secondary: #A09B8C;
-  --lol-text-muted: #5B5A56;
-  --lol-text-dim: #3C3C41;
-  --lol-gold: #C8AA6E;
-  --lol-gold-dark: #785A28;
-  --lol-blue: #0AC8B9;
-  --lol-red: #E84057;
-  --lol-gradient-start: #0A1428;
-  --lol-gradient-end: #010A13;
+  --lol-text-muted:   #5B5A56;
+  --lol-text-dim:     #3C3C41;
+  --lol-gold:         #C8AA6E;
+  --lol-gold-dark:    #785A28;
+  --lol-blue:         #0AC8B9;
+  --lol-red:          #E84057;
+
+  /* Tier ramp — the single source of truth. Components read these
+     as var(--lol-tier-<level lowercased>), which is why no TSX file
+     needs a tier→hex map any more. Hues follow the client's own
+     token art: brass through teal, indigo, magenta, ember. */
+  --lol-tier-none:        #3C3C41;
+  --lol-tier-iron:        #6B5B53;
+  --lol-tier-bronze:      #A5714A;
+  --lol-tier-silver:      #8FA0AA;
+  --lol-tier-gold:        #D8A13A;
+  --lol-tier-platinum:    #2EC4A6;
+  --lol-tier-diamond:     #6A7BF0;
+  --lol-tier-master:      #D152E8;
+  --lol-tier-grandmaster: #E8536A;
+  --lol-tier-challenger:  #F0D080;
+
+  /* Map onto the shared tokens so inherited components follow suit. */
+  --color-background:       var(--lol-bg-deep);
+  --color-foreground:       var(--lol-text-primary);
+  --color-card:             var(--lol-bg-surface);
+  --color-card-foreground:  var(--lol-text-primary);
+  --color-border:           var(--lol-border);
+  --color-muted:            var(--lol-bg-elevated);
+  --color-muted-foreground: var(--lol-text-secondary);
+  --color-primary:          var(--lol-gold);
+  --color-accent:           var(--lol-blue);
+  --color-destructive:      var(--lol-red);
+
+  color: var(--lol-text-secondary);
+  background-color: var(--lol-bg-deep);
 }
 
-:root .lol-theme {
-  --lol-bg-deep: #F0EDE6;
-  --lol-bg-surface: #FFFFFF;
-  --lol-bg-elevated: #E8E4DC;
-  --lol-border: #D4CEBC;
-  --lol-border-gold: #C8AA6E;
-  --lol-text-primary: #1E2328;
-  --lol-text-secondary: #5B5A56;
-  --lol-text-muted: #8C8C84;
-  --lol-text-dim: #B0ACA0;
-  --lol-gold: #9A7B3E;
-  --lol-gold-dark: #6B5525;
-  --lol-blue: #068B82;
-  --lol-red: #C42D40;
-  --lol-gradient-start: #FFFFFF;
-  --lol-gradient-end: #F0EDE6;
+/* Beveled hextech panel. Square corners on purpose — nothing in the
+   client is rounded; the frame is a mitred metal plate. */
+.lol-plate {
+  background: linear-gradient(160deg, var(--lol-bg-surface), var(--lol-bg-deep));
+  border: 1px solid var(--lol-border);
+}
+.lol-plate-gold { border-color: color-mix(in srgb, var(--lol-gold-dark) 70%, transparent); }
+
+/* Section heading rule: label, then a hairline running to the edge. */
+.lol-rule {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--lol-gold-dark), transparent);
 }
 
-.dark .lol-theme {
-  --lol-bg-deep: #010A13;
-  --lol-bg-surface: #0A1428;
-  --lol-bg-elevated: #1E2328;
-  --lol-border: #1E2328;
-  --lol-border-gold: #785A28;
-  --lol-text-primary: #F0E6D2;
-  --lol-text-secondary: #A09B8C;
-  --lol-text-muted: #5B5A56;
-  --lol-text-dim: #3C3C41;
-  --lol-gold: #C8AA6E;
-  --lol-gold-dark: #785A28;
-  --lol-blue: #0AC8B9;
-  --lol-red: #E84057;
-  --lol-gradient-start: #0A1428;
-  --lol-gradient-end: #010A13;
+/* The client's progress bars are a flat teal fill that lightens toward
+   the leading edge, on a recessed track. */
+.lol-bar-track {
+  background: color-mix(in srgb, var(--lol-bg-deep) 70%, #000);
+  border: 1px solid var(--lol-border);
+}
+.lol-bar-fill {
+  background: linear-gradient(90deg, #0A6E8C, #14A5C4 60%, #7FE3E8);
 }
 
 /* ─────────────────────────────────────────────────────────────

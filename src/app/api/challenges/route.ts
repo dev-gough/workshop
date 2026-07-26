@@ -9,9 +9,22 @@ export interface ChallengeNode {
   name: string;
   description: string;
   shortDescription: string;
-  /** 'category' (the 6 roots) | 'capstone' (a group) | 'challenge' (a leaf). */
-  kind: 'category' | 'capstone' | 'challenge';
+  /**
+   * Where the node sits in the client's own layout, derived from the shape of
+   * the tree rather than from a flag. `is_capstone` is true for BOTH the rows
+   * under a category (Might, Mastermind) and the rows under those (Flair,
+   * Slayer) — but the client renders them in two different sections. The thing
+   * that actually separates them is what their children are:
+   *   capstone  — its children are themselves parents (renders under CAPSTONES)
+   *   group     — its children are leaf challenges (renders under GROUPS)
+   * Adept is the case that proves it: flagged a capstone, sits directly under
+   * EXPERTISE, but holds four plain challenges — and the client lists it under
+   * GROUPS, not CAPSTONES.
+   */
+  kind: 'category' | 'capstone' | 'group' | 'challenge';
   parentId: number | null;
+  /** Rail bucket this node belongs to: a category id, or LEGACY_ID. */
+  categoryId: number;
   childIds: number[];
   state: string;
   level: string;
@@ -40,19 +53,19 @@ export interface ChallengeNode {
   position: number | null;
   playersInLevel: number | null;
 
-  // ── Deprecated snake_case aliases ────────────────────────────────────────
-  // The current challenges page still reads these. Kept so the data layer can
-  // land without blanking the page; delete them once the page is rewritten
-  // against the fields above.
-  /** @deprecated use `challengeId` */
-  challenge_id: string;
-  /** @deprecated use `shortDescription` */
-  short_description: string;
-  /** @deprecated derived from the real hierarchy now — use `parentId`/`kind` */
-  category: string;
-  /** @deprecated always [] upstream; the real data is `source`/`queueIds` */
-  tags: string[];
 }
+
+/**
+ * Synthetic rail bucket for everything hanging off no category: the seasonal
+ * trees (2022, 2023, the three 2024 splits), Arena, Swarm, and four loose
+ * milestone challenges. Riot gives these no parent at all, which is exactly
+ * what the client's LEGACY tab collects — so we mint one id for them rather
+ * than inventing a category row in the database.
+ *
+ * Not exported: Next.js route modules may only export handlers and a fixed set
+ * of config keys. The client-side twin lives in `_components/rail.tsx`.
+ */
+const LEGACY_ID = -1;
 
 interface Row {
   challenge_id: string;
@@ -134,12 +147,38 @@ export async function GET() {
       else childIds.set(pid, [Number(r.challenge_id)]);
     }
 
+    const parentOf = new Map<number, number | null>();
+    const isCategory = new Set<number>();
+    for (const r of rows) {
+      parentOf.set(Number(r.challenge_id), num(r.parent_id));
+      if (r.is_category) isCategory.add(Number(r.challenge_id));
+    }
+
+    /** Walk up to the rail bucket: a category id, or LEGACY_ID if there is none. */
+    function railOf(id: number): number {
+      let cur: number | null | undefined = id;
+      // Bounded by tree depth (5); the guard is only against a malformed
+      // upstream manifest introducing a parent cycle.
+      for (let hops = 0; cur !== undefined && cur !== null && hops < 16; hops++) {
+        if (isCategory.has(cur) && cur !== 0) return cur;
+        cur = parentOf.get(cur) ?? null;
+      }
+      return LEGACY_ID;
+    }
+
     const challenges: ChallengeNode[] = rows.map((r) => {
       const id = Number(r.challenge_id);
       const level = r.level ?? 'NONE';
       const thresholds = r.thresholds ?? {};
       const next = nextTier(level, thresholds);
-      const kind = r.is_category ? 'category' : r.is_capstone ? 'capstone' : 'challenge';
+      const kids = childIds.get(id) ?? [];
+      const kind: ChallengeNode['kind'] = r.is_category
+        ? 'category'
+        : kids.length === 0
+          ? 'challenge'
+          : kids.some((k) => (childIds.get(k) ?? []).length > 0)
+            ? 'capstone'
+            : 'group';
       return {
         challengeId: id,
         name: r.name ?? `Challenge ${id}`,
@@ -147,7 +186,8 @@ export async function GET() {
         shortDescription: r.short_description ?? '',
         kind,
         parentId: num(r.parent_id),
-        childIds: childIds.get(id) ?? [],
+        categoryId: r.is_category ? id : railOf(id),
+        childIds: kids,
         state: r.state ?? 'ENABLED',
         level,
         value: r.value,
@@ -168,11 +208,6 @@ export async function GET() {
         achievedTime: num(r.achieved_time),
         position: r.position,
         playersInLevel: num(r.players_in_level),
-
-        challenge_id: r.challenge_id,
-        short_description: r.short_description ?? '',
-        category: r.category ?? 'OTHER',
-        tags: [],
       };
     });
 
