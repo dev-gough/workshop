@@ -22,6 +22,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { ChevronDown, ArrowUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import type { ChallengeNode } from './types';
+import { MatchHistorySkeleton } from './skeleton';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -225,9 +226,7 @@ export default function MatchHistory({ challenges }: { challenges: ChallengeNode
     });
   };
 
-  if (loading) {
-    return <p className="py-12 text-center text-xs uppercase tracking-[0.2em] text-muted-foreground">Loading matches…</p>;
-  }
+  if (loading) return <MatchHistorySkeleton />;
 
   if (games.length === 0) {
     return <p className="py-12 text-center text-xs uppercase tracking-[0.2em] text-muted-foreground">No games tracked yet.</p>;

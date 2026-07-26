@@ -24,6 +24,7 @@ export function ChallengeToken({
   className?: string;
 }) {
   const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const frac = progressFraction(node);
   const color = tierVar(node.level);
 
@@ -65,7 +66,13 @@ export function ChallengeToken({
         alt=""
         loading="lazy"
         onError={() => setFailed(true)}
-        className="absolute object-contain"
+        onLoad={() => setLoaded(true)}
+        // A cached image can finish decoding before React attaches onLoad, so
+        // check `complete` on mount too — otherwise it would sit at opacity 0.
+        ref={(el) => { if (el?.complete) setLoaded(true); }}
+        className={`absolute object-contain transition-opacity duration-300 ${
+          loaded ? 'opacity-100' : 'opacity-0'
+        }`}
         // Width/height are explicit rather than implied by `inset`. An
         // absolutely-positioned replaced element resolves `width: auto` to its
         // INTRINSIC width instead of stretching between left and right, so

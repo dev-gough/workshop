@@ -8,6 +8,7 @@ import MatchHistory from './_components/match-history';
 import { CategoryGlyph, CategoryRail, CrystalDial, LEGACY_ID, RAIL } from './_components/rail';
 import { CapstoneRow, GroupRow, ChallengeCard, SectionHeading } from './_components/rows';
 import { ChallengeHoverCard, ChallengeDetailSheet } from './_components/hover-card';
+import { ChallengesSkeleton } from './_components/skeleton';
 import {
   ALL_TIERS, tierVar, progressFraction, progressLabel,
   type ChallengeData, type ChallengeNode,
@@ -223,17 +224,6 @@ export default function ChallengesPage() {
     document.getElementById(`grp-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
 
-  if (loading) {
-    return (
-      <div className="lol-theme flex min-h-[calc(100vh-57px)] items-center justify-center">
-        <div className="text-center">
-          <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-          <p className="text-sm text-muted-foreground">Loading challenges…</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="lol-theme min-h-[calc(100vh-57px)]">
       {/* ── Tab bar ─────────────────────────────────────────────── */}
@@ -277,7 +267,11 @@ export default function ChallengesPage() {
         </div>
       </div>
 
-      {tab === 'games' ? (
+      {loading ? (
+        // The tab bar above stays put; only the body swaps, so arriving data
+        // doesn't shift the chrome.
+        <ChallengesSkeleton />
+      ) : tab === 'games' ? (
         <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
           <MatchHistory challenges={data?.challenges ?? []} />
         </div>
