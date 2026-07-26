@@ -66,7 +66,17 @@ export function ChallengeToken({
         loading="lazy"
         onError={() => setFailed(true)}
         className="absolute object-contain"
-        style={{ inset: showRing ? '11%' : 0 }}
+        // Width/height are explicit rather than implied by `inset`. An
+        // absolutely-positioned replaced element resolves `width: auto` to its
+        // INTRINSIC width instead of stretching between left and right, so
+        // `inset: 11%` alone left the image at full size and merely nudged it
+        // down-and-right by 11% — the ring and the token drifted apart.
+        // 86% is sized to sit just inside the ring's inner edge (88%).
+        style={
+          showRing
+            ? { top: '7%', left: '7%', width: '86%', height: '86%' }
+            : { top: 0, left: 0, width: '100%', height: '100%' }
+        }
       />
     </div>
   );
