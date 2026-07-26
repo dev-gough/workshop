@@ -21,7 +21,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { ChevronDown, ArrowUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import type { ChallengeNode } from './types';
+import { timeAgo, type ChallengeNode } from './types';
 import { MatchHistorySkeleton } from './skeleton';
 
 // ── Types ──────────────────────────────────────────────
@@ -93,16 +93,6 @@ function formatDuration(seconds: number) {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return `${m}:${s.toString().padStart(2, '0')}`;
-}
-
-function timeAgo(timestamp: number) {
-  const diff = Date.now() - timestamp;
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
 }
 
 /**
@@ -267,6 +257,10 @@ export default function MatchHistory({ challenges }: { challenges: ChallengeNode
               initial={{ opacity: 0, x: -8 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: Math.min(gi * 0.03, 0.4) }}
+              // The entry animation leaves a transform behind, so each row is its
+              // own stacking context — lifting the open one keeps its overhanging
+              // tooltips above the rows that follow it.
+              className={`relative ${expanded ? 'z-20' : ''}`}
             >
               <motion.div
                 whileHover={{ y: -2 }}
@@ -343,10 +337,15 @@ export default function MatchHistory({ challenges }: { challenges: ChallengeNode
                 {expanded && hasDeltas && (
                   <motion.div
                     initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
+                    // `overflow` has to be hidden while the height animates, but
+                    // must be released once it settles: the delta tooltips hang
+                    // past the panel's bottom edge and would otherwise be clipped
+                    // by the very box that is no longer animating.
+                    animate={{ height: 'auto', opacity: 1, transitionEnd: { overflow: 'visible' } }}
+                    exit={{ height: 0, opacity: 0, overflow: 'hidden' }}
                     transition={{ duration: 0.2 }}
-                    className="overflow-hidden"
+                    style={{ overflow: 'hidden' }}
+                    className="relative z-10"
                   >
                     <div className={`border-l-[3px] px-4 pt-2 pb-3 ${game.win ? 'border-accent/20' : 'border-destructive/20'}`}>
                       {/* Sort controls */}

@@ -188,6 +188,12 @@
   background: linear-gradient(90deg, #0A6E8C, #14A5C4 60%, #7FE3E8);
 }
 
+/* Tier-up herald: the dwell bar draining along the foot of the plate.
+   Decoration for the JS clock that actually dismisses it — both stall
+   together while the plate is hovered (see tier-up.tsx). */
+.lol-herald-dwell { animation: lol-herald-dwell linear forwards; }
+@keyframes lol-herald-dwell { to { transform: scaleX(0); } }
+
 /* ─────────────────────────────────────────────────────────────
    Wealthsimple scope — applied to /projects/paper-trading shell.
    Warm paper + "Dune" ink, geometric sans (Jost) + chunky serif

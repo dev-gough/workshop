@@ -9,9 +9,10 @@ import { CategoryGlyph, CategoryRail, CrystalDial, LEGACY_ID, RAIL } from './_co
 import { CapstoneRow, GroupRow, ChallengeCard, SectionHeading } from './_components/rows';
 import { ChallengeHoverCard, ChallengeDetailSheet } from './_components/hover-card';
 import { ChallengesSkeleton } from './_components/skeleton';
+import TierUpHerald from './_components/tier-up';
 import type { HistoryMap } from './_components/sparkline';
 import {
-  ALL_TIERS, tierVar, progressFraction, progressLabel,
+  ALL_TIERS, tierVar, progressFraction, progressLabel, timeAgo,
   type ChallengeData, type ChallengeNode,
 } from './_components/types';
 
@@ -63,14 +64,6 @@ function sortNodes(nodes: ChallengeNode[], key: SortKey): ChallengeNode[] {
   }
 }
 
-function timeAgo(ts: number) {
-  const s = Math.floor((Date.now() - ts) / 1000);
-  if (s < 60) return 'just now';
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  return `${Math.floor(s / 86400)}d ago`;
-}
-
 export default function ChallengesPage() {
   useHeaderConfig({ scopeClass: 'lol-theme' });
 
@@ -87,6 +80,8 @@ export default function ChallengesPage() {
   const [selected, setSelected] = useState<ChallengeNode | null>(null);
   const [canHover, setCanHover] = useState(true);
   const [history, setHistory] = useState<HistoryMap | undefined>();
+  /** Bumped after a successful sync so the herald re-checks for tier-ups. */
+  const [tierUpPulse, setTierUpPulse] = useState(0);
 
   // Touch browsers fire synthetic mouseenter on tap, which would leave the
   // anchored card stranded on screen behind the sheet. Gate it on real hover
@@ -142,6 +137,7 @@ export default function ChallengesPage() {
       const result = await res.json();
       if (result.synced) {
         setData(await (await fetch('/api/challenges')).json());
+        setTierUpPulse((n) => n + 1);
       } else if (result.reason === 'cooldown') {
         setSyncNote(`On cooldown — ${result.remainingSeconds}s`);
       }
@@ -450,6 +446,15 @@ export default function ChallengesPage() {
           </main>
         </div>
       )}
+
+      {/* Outside the tab switch on purpose: a tier-up is worth announcing
+          whichever tab you happen to be reading. */}
+      <TierUpHerald
+        challenges={data?.challenges ?? []}
+        ready={!loading}
+        pulse={tierUpPulse}
+        onOpenHistory={() => setTab('games')}
+      />
 
       {canHover && hover && !selected && (
         <ChallengeHoverCard node={hover.node} rect={hover.rect} history={history} />

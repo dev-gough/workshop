@@ -117,3 +117,12 @@ export function pctLabel(fraction: number | null | undefined): string | null {
 export function titleTier(level: string): string {
   return level.charAt(0) + level.slice(1).toLowerCase();
 }
+
+/** Coarse relative time ("just now", "17h ago") — shared by every surface in the room. */
+export function timeAgo(ts: number): string {
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+}
