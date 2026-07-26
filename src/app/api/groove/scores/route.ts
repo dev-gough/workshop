@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import {
-  GENERATOR_VERSION, generateTrack, gradeFor, type Onset, type TrackFeatures,
+  GENERATOR_VERSION, generateCourse, gradeFor, parMsOf, ratioFor,
+  type Onset, type TrackFeatures,
 } from '@/lib/groove';
 
 export const dynamic = 'force-dynamic';
@@ -10,24 +11,17 @@ export const dynamic = 'force-dynamic';
  * Runs, and the leaderboard built from them.
  *
  * Every row is stamped with the generator version it was set against, and
- * every read filters on the CURRENT version — so revising the track generator
+ * every read filters on the CURRENT version — so revising the course generator
  * retires the old board rather than silently re-labelling it. Old rows stay:
- * they're still true about the track they were set on.
+ * they're still true about the course they were set on.
  */
 
 interface BestRow {
-  artist: string;
-  album: string;
-  song: string;
-  score: string;
-  max_score: string;
-  notes_hit: number;
-  notes_total: number;
-  ramps_hit: number;
-  ramps_total: number;
-  best_combo: number;
-  played_at: string;
-  runs: string;
+  artist: string; album: string; song: string;
+  time_ms: number; par_ms: number; finished: boolean;
+  distance: number; course_len: number;
+  crashes: number; air_ms: number; flips: number; style: number;
+  played_at: string; runs: string;
 }
 
 export async function GET(request: Request) {
@@ -42,31 +36,28 @@ export async function GET(request: Request) {
 
   try {
     // One row per song: the best run, plus how many times it's been ridden.
+    // A finished run always beats an unfinished one, however quick.
     const { rows } = await pool.query<BestRow>(
       `SELECT DISTINCT ON (artist, album, song)
-              artist, album, song, score::text, max_score::text,
-              notes_hit, notes_total, ramps_hit, ramps_total, best_combo,
+              artist, album, song, time_ms, par_ms, finished,
+              distance, course_len, crashes, air_ms, flips, style,
               played_at::text,
               COUNT(*) OVER (PARTITION BY artist, album, song)::text AS runs
          FROM groove_scores
         WHERE ${filters.join(' AND ')}
-        ORDER BY artist, album, song, score DESC`,
+        ORDER BY artist, album, song, finished DESC, time_ms ASC`,
       params
     );
 
     const best = rows.map(r => {
-      const score = Number(r.score);
-      const maxScore = Number(r.max_score);
-      const pct = maxScore > 0 ? score / maxScore : 0;
+      const ratio = ratioFor(r.par_ms, r.time_ms, r.finished);
       return {
         artist: r.artist, album: r.album, song: r.song,
-        score, maxScore, pct,
-        grade: gradeFor(pct),
-        notesHit: r.notes_hit, notesTotal: r.notes_total,
-        rampsHit: r.ramps_hit, rampsTotal: r.ramps_total,
-        bestCombo: r.best_combo,
-        playedAt: r.played_at,
-        runs: Number(r.runs),
+        timeMs: r.time_ms, parMs: r.par_ms, finished: r.finished,
+        ratio, grade: gradeFor(ratio),
+        distance: r.distance, courseLength: r.course_len,
+        crashes: r.crashes, airMs: r.air_ms, flips: r.flips, style: r.style,
+        playedAt: r.played_at, runs: Number(r.runs),
       };
     });
 
@@ -86,8 +77,8 @@ interface Row {
 export async function POST(request: Request) {
   let body: {
     artist?: string; album?: string; song?: string; player?: string;
-    score?: number; notesHit?: number; notesTotal?: number;
-    rampsHit?: number; rampsTotal?: number; bestCombo?: number;
+    timeMs?: number; finished?: boolean; distance?: number;
+    crashes?: number; airMs?: number; flips?: number; style?: number;
   };
   try {
     body = await request.json();
@@ -99,15 +90,15 @@ export async function POST(request: Request) {
   if (!artist || !album || !song) {
     return NextResponse.json({ error: 'artist, album and song are all required' }, { status: 400 });
   }
-  const score = Math.max(0, Math.round(Number(body.score ?? 0)));
-  if (!Number.isFinite(score)) {
-    return NextResponse.json({ error: 'score must be a number' }, { status: 400 });
+  const timeMs = Math.max(0, Math.round(Number(body.timeMs ?? 0)));
+  if (!Number.isFinite(timeMs)) {
+    return NextResponse.json({ error: 'timeMs must be a number' }, { status: 400 });
   }
 
   try {
-    // Rebuild the track from the cached analysis to get the perfect-play
-    // total. The client knows this number too, but it's the denominator of
-    // every percentage on the board, so it isn't the client's to report.
+    // Rebuild the course from the cached analysis to get par and its length.
+    // The client knows both, but par is the denominator of every grade on the
+    // board, so it isn't the client's to report.
     const { rows } = await pool.query<Row>(
       `SELECT frame_rate, duration, intensity, bass, mid, treble, onsets, rideability
          FROM groove_tracks WHERE artist = $1 AND album = $2 AND song = $3`,
@@ -123,25 +114,30 @@ export async function POST(request: Request) {
       intensity: r.intensity, bass: r.bass, mid: r.mid, treble: r.treble,
       onsets: r.onsets, rideability: r.rideability,
     };
-    const track = generateTrack(features);
+    const course = generateCourse(features);
+    const parMs = parMsOf(course);
+    const finished = Boolean(body.finished);
+    const distance = Math.max(0, Math.min(Math.round(body.distance ?? 0), Math.round(course.length)));
 
     await pool.query(
       `INSERT INTO groove_scores
-         (artist, album, song, generator_version, player, score, max_score,
-          notes_hit, notes_total, ramps_hit, ramps_total, best_combo)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+         (artist, album, song, generator_version, player,
+          time_ms, par_ms, finished, distance, course_len, crashes, air_ms, flips, style)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
       [
         artist, album, song, GENERATOR_VERSION, body.player?.slice(0, 40) || 'anon',
-        Math.min(score, track.maxScore), track.maxScore,
-        Math.max(0, Math.round(body.notesHit ?? 0)), track.notes.length,
-        Math.max(0, Math.round(body.rampsHit ?? 0)), track.ramps.length,
-        Math.max(0, Math.round(body.bestCombo ?? 0)),
+        timeMs, parMs, finished,
+        finished ? Math.round(course.length) : distance, Math.round(course.length),
+        Math.max(0, Math.round(body.crashes ?? 0)),
+        Math.max(0, Math.round(body.airMs ?? 0)),
+        Math.max(0, Math.round(body.flips ?? 0)),
+        Math.max(0, Math.round(body.style ?? 0)),
       ]
     );
 
-    const pct = Math.min(score, track.maxScore) / track.maxScore;
+    const ratio = ratioFor(parMs, timeMs, finished);
     return NextResponse.json({
-      ok: true, maxScore: track.maxScore, pct, grade: gradeFor(pct),
+      ok: true, parMs, ratio, grade: gradeFor(ratio),
       generatorVersion: GENERATOR_VERSION,
     });
   } catch (error) {

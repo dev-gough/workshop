@@ -1,25 +1,32 @@
 /**
- * The Groove — turning a song into a track.
+ * The Groove — turning a song into a course.
  *
- * This module is the single source of truth for what a song "is" as a ride.
- * It is deliberately pure: no DOM, no audio APIs, no clock, no Math.random.
- * Given the same features it must produce byte-identical geometry forever,
- * because a score is only meaningful against the exact track it was set on.
+ * A side-on dirt-bike course, in the Free Rider / Trials mould: the song
+ * carves the ground line and you ride it. Bass is the landscape, the mids
+ * and highs are the surface you have to deal with, kicks throw up jumps,
+ * and the loud parts of the record are where it gets nasty.
  *
- * That's also why GENERATOR_VERSION exists and why it is stamped on every
- * score. Change any constant in this file and you have changed the game;
- * bump the version in the same commit and the old leaderboard stays valid
- * for the track it actually refers to, instead of quietly becoming a
+ * The par time is the song's own length. Finish before the record does and
+ * you've beaten it — which is the whole goal, and the reason the music
+ * cutting out mid-run means something.
+ *
+ * This module is deliberately pure: no DOM, no audio APIs, no clock, no
+ * Math.random. Given the same features it must produce the identical course
+ * forever, because a time is only meaningful against the exact ground it was
+ * set on. That's what GENERATOR_VERSION is for — it's stamped on every score,
+ * and every leaderboard read filters on the current one, so revising the
+ * generator retires the old board instead of quietly re-labelling it as a
  * ranking of a course nobody can ride any more.
- *
- * Imported by both the ride (to build the road) and /api/groove/scores (to
- * recompute the perfect-play maximum server-side, so the denominator of
- * every percentage is never client-supplied).
  */
 
-export const GENERATOR_VERSION = 1;
+/**
+ * v2 — the course became a 2D side-scroller. v1 was a fixed-speed ride down
+ * a pseudo-3D road collecting notes; nothing about that track survives, so
+ * nothing scored on it can be compared to anything scored now.
+ */
+export const GENERATOR_VERSION = 2;
 
-// ── Analysis, as produced by _lib/analyse.ts ─────────────────────
+// ── Analysis, as produced by _lib/analyse.ts (unchanged across versions) ──
 
 export interface Onset {
   /** Seconds into the song. */
@@ -42,86 +49,76 @@ export interface TrackFeatures {
   rideability: number;
 }
 
-// ── The track ────────────────────────────────────────────────────
+// ── The course ───────────────────────────────────────────────────
 
-/** One slice of road. Segments are uniform in TIME, not in length. */
-export interface Segment {
-  /** World length of this slice — this is where the speed sensation lives. */
-  len: number;
-  /** Elevation, world units. */
-  y: number;
-  /** Lateral bend applied per segment while projecting. */
-  curve: number;
-  /** 0..1, the scoring multiplier's source and the road's colour. */
-  intensity: number;
-}
-
-export interface Note {
-  t: number;
-  /** Lateral position, -1 (far left) .. 1 (far right). */
+export interface Rock {
   x: number;
-  band: 0 | 1 | 2;
+  /** Drawn radius; the bump itself is already baked into the ground line. */
+  r: number;
+}
+
+export interface Kicker {
+  x: number;
   strength: number;
 }
 
-export interface Ramp {
-  t: number;
-  strength: number;
-  /** Seconds of hang time a clean launch buys. */
-  air: number;
-}
-
-export interface Track {
-  segments: Segment[];
-  notes: Note[];
-  ramps: Ramp[];
-  /** Perfect play: every note, every ramp, combo never dropped. */
-  maxScore: number;
+export interface Course {
+  /** World units between ground samples. */
+  step: number;
+  /** Ground height at each sample, world units, y increasing upward. */
+  heights: number[];
+  /** 0..1 per sample — how hard the song is going here. Colour and style. */
+  intensity: number[];
+  /** Total course length in world units. */
+  length: number;
+  /** Song length in seconds, which is also the par time. */
   duration: number;
-  /** Segments per second of song — the fixed rate the camera indexes by. */
-  segmentRate: number;
+  /** Somewhere to restart from after a crash. */
+  checkpoints: number[];
+  rocks: Rock[];
+  kickers: Kicker[];
 }
 
 // ── Tuning ───────────────────────────────────────────────────────
 // Every number below is part of the generator's identity. Touching one
 // means bumping GENERATOR_VERSION.
 
-const SEGMENT_RATE = 60;        // segments per second of song
-// World units are sized against the road's own width (see ROAD_WIDTH in
-// ride.tsx): at neutral intensity you cross roughly three road-widths a
-// second, which is what a bike at speed actually feels like.
-const BASE_SPEED = 4800;        // world units per second at neutral intensity
-const SPEED_SWING = 0.85;       // how hard intensity leans on the throttle
-const HILL_HEIGHT = 1500;       // world units from trough to crest
-const CURVE_STRENGTH = 3.4;
-
-const NOTE_POINTS = 100;
-const RAMP_POINTS = 250;
-const AIR_POINTS_PER_SEC = 400;
-const COMBO_CAP = 50;           // combo multiplier tops out at 1 + 50/25 = 3×
-
-/** Points for one hit, before the combo multiplier. */
-export const comboMultiplier = (combo: number) => 1 + Math.min(combo, COMBO_CAP) / 25;
+const SAMPLE_STEP = 8;
+/**
+ * World units of course per second of song — which also sets par, since the
+ * course is duration × this and par is the duration.
+ *
+ * Calibrated with scripts/groove-sim.ts rather than by feel: the bike's flat
+ * top speed is around 950, but jumps, climbs and rough ground mean a poor
+ * rider averages nearer 300. At 430 that unskilled floor comes in around 0.70
+ * (a C), which leaves beating the record as something you have to ride well
+ * for. Re-run the sim after touching this.
+ */
+const PAR_SPEED = 430;
 
 /**
- * The whole point of the design: a note banked during the intro is worth a
- * fraction of the same note banked in the drop. Kept off zero so a quiet
- * passage is still worth riding, and off linear so the loud parts pull away.
+ * Each layer's amplitude is paired with the smoothing length below it: a
+ * height swing only matters relative to the distance it happens over. 560
+ * units of hill is a gentle roll across 1600 units and an unclimbable wall
+ * across 400, and getting that ratio wrong is what turns a course into a
+ * series of dead stops. The SMOOTH_* values are 1/length in samples.
  */
-export const scoreMultiplier = (intensity: number) => 0.4 + 1.9 * intensity * intensity;
+const BASE_HEIGHT = 620;      // rolling landscape, trough to crest
+const SMOOTH_BASE = 0.005;    // ≈1600 units — worst-case gradient ≈0.39
+const MID_HEIGHT = 90;        // whoops and rollers
+const SMOOTH_MID = 0.028;     // ≈290 units — ≈0.31
+const FINE_HEIGHT = 16;       // surface chatter
+const SMOOTH_FINE = 0.11;     // ≈73 units — ≈0.22
+/** ≈32°. The steepest the LANDSCAPE may be: past this you can't climb it. */
+const MAX_SLOPE = 0.62;
+/** ≈52°. Jumps and rocks are allowed to be much sharper than the landscape,
+ *  because you meet them at speed and leave the ground; this only exists to
+ *  stop stacked features summing into a vertical face. */
+const FEATURE_MAX_SLOPE = 1.3;
+
+const CHECKPOINT_SECONDS = 14;
 
 // ── Helpers ──────────────────────────────────────────────────────
-
-/**
- * Deterministic hash → 0..1. Placement needs to look scattered without ever
- * being random: two clients building the same song must lay out the same
- * notes, so Math.random is not available to us here.
- */
-function hash01(a: number, b: number): number {
-  let h = Math.imul(Math.round(a * 1000) ^ 0x9e3779b9, 0x85ebca6b);
-  h = Math.imul(h ^ (h >>> 13) ^ Math.round(b * 7919), 0xc2b2ae35);
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-}
 
 /** Sample a per-frame series at a time in seconds, linearly interpolated. */
 function sampleAt(series: number[], frameRate: number, t: number): number {
@@ -133,7 +130,7 @@ function sampleAt(series: number[], frameRate: number, t: number): number {
   return series[i] + (series[i + 1] - series[i]) * (f - i);
 }
 
-/** In-place single-pole smoothing, run forwards then backwards so it adds no lag. */
+/** Single-pole smoothing run forwards then backwards, so it adds no lag. */
 function smooth(values: number[], alpha: number): number[] {
   const out = values.slice();
   for (let i = 1; i < out.length; i++) out[i] = out[i - 1] + (out[i] - out[i - 1]) * alpha;
@@ -143,153 +140,215 @@ function smooth(values: number[], alpha: number): number[] {
 
 // ── Generation ───────────────────────────────────────────────────
 
-export function generateTrack(features: TrackFeatures): Track {
+export function generateCourse(features: TrackFeatures): Course {
   const { frameRate, duration } = features;
-  const segmentCount = Math.max(2, Math.ceil(duration * SEGMENT_RATE));
+  const length = Math.max(PAR_SPEED * 4, duration * PAR_SPEED);
+  const count = Math.ceil(length / SAMPLE_STEP) + 1;
 
-  // ── Road shape ──
-  // Bass drives elevation and mid/treble balance drives the bend, both
-  // heavily smoothed: raw frame-to-frame audio is far too jittery to steer
-  // a vehicle along, and a track that shakes is a track nobody can read.
-  const rawY: number[] = new Array(segmentCount);
-  const rawCurve: number[] = new Array(segmentCount);
-  const intensity: number[] = new Array(segmentCount);
+  // ── Three layers of ground ──
+  // Bass is the landscape you ride over, mids are the rollers in it, treble
+  // is the surface texture. Each gets its own smoothing, because a hill and
+  // a stone are different sizes of the same idea.
+  const rawBase: number[] = new Array(count);
+  const rawMid: number[] = new Array(count);
+  const rawFine: number[] = new Array(count);
+  const intensityRaw: number[] = new Array(count);
 
-  for (let i = 0; i < segmentCount; i++) {
-    const t = i / SEGMENT_RATE;
+  for (let i = 0; i < count; i++) {
+    const t = (i * SAMPLE_STEP) / PAR_SPEED;
     const bass = sampleAt(features.bass, frameRate, t);
-    const mid = sampleAt(features.mid, frameRate, t);
+    const midV = sampleAt(features.mid, frameRate, t);
     const treble = sampleAt(features.treble, frameRate, t);
-    intensity[i] = sampleAt(features.intensity, frameRate, t);
-    rawY[i] = (bass - 0.5) * HILL_HEIGHT;
-    // Brightness pulls right, body pulls left. Musically this means a track
-    // leans one way through a bright passage and back through a heavy one,
-    // which reads as the song steering rather than as noise.
-    rawCurve[i] = (treble - mid) * CURVE_STRENGTH;
+    const inten = sampleAt(features.intensity, frameRate, t);
+    intensityRaw[i] = inten;
+    rawBase[i] = (bass - 0.5) * BASE_HEIGHT;
+    // The busy parts of the record are the rough parts of the ground: a
+    // quiet passage should be somewhere you can recover, not more of the
+    // same. This is where "different parts of the song matter" lives now.
+    rawMid[i] = (midV - 0.5) * MID_HEIGHT * (0.35 + inten * 1.3);
+    rawFine[i] = (treble - 0.5) * FINE_HEIGHT * (0.2 + inten * 1.6);
   }
 
-  const y = smooth(rawY, 0.06);
-  const curve = smooth(rawCurve, 0.03);
-  const smoothIntensity = smooth(intensity, 0.25);
+  const base = smooth(rawBase, SMOOTH_BASE);
+  const mid = smooth(rawMid, SMOOTH_MID);
+  const fine = smooth(rawFine, SMOOTH_FINE);
+  const intensity = smooth(intensityRaw, 0.2);
 
-  const segments: Segment[] = new Array(segmentCount);
-  for (let i = 0; i < segmentCount; i++) {
-    // Speed: intensity opens the throttle. Because position along the road
-    // is the integral of this, and this is a pure function of song time,
-    // every rider is at the identical point at the identical moment — which
-    // is what makes two scores on one song comparable at all.
-    const speed = BASE_SPEED * (1 - SPEED_SWING / 2 + SPEED_SWING * smoothIntensity[i]);
-    segments[i] = {
-      len: speed / SEGMENT_RATE,
-      y: y[i],
-      curve: curve[i],
-      intensity: smoothIntensity[i],
-    };
-  }
+  const heights: number[] = new Array(count);
+  for (let i = 0; i < count; i++) heights[i] = base[i] + mid[i] + fine[i];
 
-  // ── Events ──
-  const notes: Note[] = [];
-  const ramps: Ramp[] = [];
+  // The LANDSCAPE gets clamped here, before anything is stamped onto it.
+  // A sustained gradient steeper than this can't be climbed and stops the
+  // ride dead; the features that follow are allowed to be steeper, because
+  // a lip you hit at speed and leave the ground on is a different thing
+  // entirely from a hill you have to drive up.
+  clampSlope(heights, SAMPLE_STEP, MAX_SLOPE);
 
-  // Kicks become ramps, but only the ones with room around them: a jump you
-  // land 80ms before the next launch isn't a jump, it's a stumble.
-  // Ramps are meant to be moments, not a metronome. A kick drum gives you
-  // one every half second; at that rate the ride stops being a ride and
-  // becomes a jump-mashing exercise, so only the strong, well-spaced ones
-  // get a lip.
-  const RAMP_SPACING = 2.8;
-  let lastRamp = -Infinity;
-  for (const o of features.onsets) {
-    if (o.band !== 0 || o.strength < 0.6) continue;
-    if (o.t - lastRamp < RAMP_SPACING) continue;
-    if (o.t < 2 || o.t > duration - 1.5) continue;
-    lastRamp = o.t;
-    ramps.push({ t: o.t, strength: o.strength, air: 0.45 + o.strength * 0.5 });
-  }
-
-  // Everything else becomes a note to steer through. Lane comes from a hash
-  // of the onset so a repeated motif lands in a repeated place — the track
-  // should feel written, not sprinkled.
-  const NOTE_SPACING = 0.14;
-  let lastNote = -Infinity;
-  let lastX = 0;
-  for (const o of features.onsets) {
-    if (o.band === 0) continue;
-    if (o.strength < 0.3) continue;
-    if (o.t - lastNote < NOTE_SPACING) continue;
-    if (o.t < 1.5 || o.t > duration - 1) continue;
-
-    // Ramps own their moment; a note in the launch window is unhittable.
-    if (ramps.some(r => Math.abs(r.t - o.t) < 0.35)) continue;
-
-    let x = hash01(o.t, o.band) * 2 - 1;
-    // Playability constraint: you can only cross so much road per second, so
-    // clamp each note's offset to something reachable from the last one.
-    // Without this a fast hi-hat run scatters notes nobody could ever collect.
-    const dt = o.t - lastNote;
-    if (Number.isFinite(dt)) {
-      const reach = Math.min(2, dt * 1.5);
-      x = Math.max(lastX - reach, Math.min(lastX + reach, x));
-    }
-    x = Math.max(-0.92, Math.min(0.92, x));
-
-    notes.push({ t: o.t, x, band: o.band, strength: o.strength });
-    lastNote = o.t;
-    lastX = x;
-  }
-
-  return {
-    segments,
-    notes,
-    ramps,
-    maxScore: perfectScore(notes, ramps, segments),
-    duration,
-    segmentRate: SEGMENT_RATE,
+  /** Gradient of the landscape at a sample, for deciding what can go where. */
+  const landscapeSlope = (i: number) => {
+    const a = heights[Math.max(0, i - 3)];
+    const b = heights[Math.min(count - 1, i + 3)];
+    return (b - a) / (6 * SAMPLE_STEP);
   };
+
+  // ── Jumps ──
+  // A hard kick throws up a lip with the ground falling away just past it,
+  // so there's air to be had. Only on ground that's already fairly level:
+  // a ramp built into the side of a hill is just a steeper hill.
+  const kickers: Kicker[] = [];
+  let lastKick = -Infinity;
+  for (const o of features.onsets) {
+    if (o.band !== 0 || o.strength < 0.55) continue;
+    if (o.t - lastKick < 2.4) continue;
+    if (o.t < 2.5 || o.t > duration - 3) continue;
+
+    const x0 = o.t * PAR_SPEED;
+    const idx = Math.min(count - 1, Math.round(x0 / SAMPLE_STEP));
+    if (Math.abs(landscapeSlope(idx)) > 0.3) continue;
+    lastKick = o.t;
+
+    // Asymmetric on purpose. A symmetric bump is not a jump: its crest is
+    // flat, so you go light over the top and settle straight back down. A
+    // ramp has to END while it's still climbing, so you leave the ground
+    // travelling the way the face was pointing. Rise over w (peaking near
+    // 44° at full strength), then the lip falls away underneath you.
+    const amp = 100 + o.strength * 110;
+    const w = 320;
+    kickers.push({ x: x0, strength: o.strength });
+
+    const from = Math.max(0, Math.floor((x0 - w * 1.2) / SAMPLE_STEP));
+    const to = Math.min(count - 1, Math.ceil((x0 + w * 3.2) / SAMPLE_STEP));
+    for (let i = from; i <= to; i++) {
+      const dx = i * SAMPLE_STEP - x0;
+      if (dx <= 0) {
+        const k = Math.max(0, Math.min(1, (dx + w) / w));
+        heights[i] += amp * k * k * (3 - 2 * k);
+      } else {
+        heights[i] += amp * Math.exp(-((dx / (w * 0.22)) ** 2));
+      }
+      // A shallow trough beyond it, so there's somewhere to come down.
+      heights[i] -= amp * 0.35 * Math.exp(-(((dx - w * 1.6) / (w * 1.1)) ** 2));
+    }
+  }
+
+  // ── Rocks ──
+  // Sharp, narrow, and only where the record is already loud — something to
+  // get over cleanly rather than a kerb that stops you dead.
+  const rocks: Rock[] = [];
+  let lastRock = -Infinity;
+  for (const o of features.onsets) {
+    if (o.band !== 1 || o.strength < 0.62) continue;
+    if (o.t - lastRock < 1.9) continue;
+    if (o.t < 4 || o.t > duration - 3) continue;
+    const x0 = o.t * PAR_SPEED;
+    const idx = Math.min(count - 1, Math.round(x0 / SAMPLE_STEP));
+    if (intensity[idx] < 0.45) continue;
+    if (Math.abs(landscapeSlope(idx)) > 0.32) continue;
+    // Never in a kicker's run-up or landing.
+    if (kickers.some(k => Math.abs(k.x - x0) < 520)) continue;
+    lastRock = o.t;
+
+    const r = 26 + o.strength * 26;
+    rocks.push({ x: x0, r });
+
+    const w = r * 1.2;
+    const from = Math.max(0, Math.floor((x0 - w * 2.5) / SAMPLE_STEP));
+    const to = Math.min(count - 1, Math.ceil((x0 + w * 2.5) / SAMPLE_STEP));
+    for (let i = from; i <= to; i++) {
+      const dx = i * SAMPLE_STEP - x0;
+      heights[i] += r * 1.4 * Math.exp(-((dx / w) ** 2));
+    }
+  }
+
+  // A genuinely flat run-in, so you start on your wheels with room to get
+  // going. Levelled to whatever the course is doing at the end of it, rather
+  // than ramped down from zero — a ramp here is a ramp you meet at walking
+  // pace, which is the one place on the course you can't afford one.
+  const runIn = Math.round(560 / SAMPLE_STEP);
+  for (let i = 0; i <= runIn && i < count; i++) heights[i] = heights[Math.min(count - 1, runIn)];
+
+  // A last, much looser clamp: the features above are meant to be steep, but
+  // a kicker landing on top of a rock on top of a roller shouldn't be able to
+  // sum into something vertical.
+  clampSlope(heights, SAMPLE_STEP, FEATURE_MAX_SLOPE);
+
+  const checkpoints: number[] = [];
+  for (let t = CHECKPOINT_SECONDS; t < duration - 4; t += CHECKPOINT_SECONDS) {
+    checkpoints.push(t * PAR_SPEED);
+  }
+
+  return { step: SAMPLE_STEP, heights, intensity, length, duration, checkpoints, rocks, kickers };
 }
 
 /**
- * What a flawless run is worth: every note collected, every ramp launched
- * clean, the combo never broken. This is the denominator behind every
- * percentage and grade, so it's computed from the track itself rather than
- * reported by whoever was playing.
+ * Limit |dh/dx| by walking the array forwards then backwards, pulling any
+ * sample too far from its neighbour back into reach. Both passes are needed:
+ * one alone only ever flattens cliffs facing one direction.
  */
-export function perfectScore(notes: Note[], ramps: Ramp[], segments: Segment[]): number {
-  const events = [
-    ...notes.map(n => ({ t: n.t, kind: 'note' as const, air: 0 })),
-    ...ramps.map(r => ({ t: r.t, kind: 'ramp' as const, air: r.air })),
-  ].sort((a, b) => a.t - b.t);
-
-  let total = 0;
-  let combo = 0;
-  for (const e of events) {
-    const seg = segments[Math.min(segments.length - 1, Math.floor(e.t * SEGMENT_RATE))];
-    const mult = scoreMultiplier(seg?.intensity ?? 0) * comboMultiplier(combo);
-    total += Math.round(((e.kind === 'note' ? NOTE_POINTS : RAMP_POINTS) + e.air * AIR_POINTS_PER_SEC) * mult);
-    combo++;
+function clampSlope(heights: number[], step: number, maxSlope: number): void {
+  const maxRise = maxSlope * step;
+  for (let i = 1; i < heights.length; i++) {
+    const d = heights[i] - heights[i - 1];
+    if (d > maxRise) heights[i] = heights[i - 1] + maxRise;
+    else if (d < -maxRise) heights[i] = heights[i - 1] - maxRise;
   }
-  // A track with nothing on it would divide by zero downstream.
-  return Math.max(1, total);
+  for (let i = heights.length - 2; i >= 0; i--) {
+    const d = heights[i] - heights[i + 1];
+    if (d > maxRise) heights[i] = heights[i + 1] + maxRise;
+    else if (d < -maxRise) heights[i] = heights[i + 1] - maxRise;
+  }
 }
 
-/** Points for one landed event, given where in the song it happened. */
-export function eventScore(
-  kind: 'note' | 'ramp',
-  intensity: number,
-  combo: number,
-  airSeconds = 0,
-): number {
-  const base = (kind === 'note' ? NOTE_POINTS : RAMP_POINTS) + airSeconds * AIR_POINTS_PER_SEC;
-  return Math.round(base * scoreMultiplier(intensity) * comboMultiplier(combo));
+// ── Reading the ground ───────────────────────────────────────────
+
+export function heightAt(course: Course, x: number): number {
+  const f = x / course.step;
+  const i = Math.floor(f);
+  if (i < 0) return course.heights[0];
+  if (i >= course.heights.length - 1) return course.heights[course.heights.length - 1];
+  return course.heights[i] + (course.heights[i + 1] - course.heights[i]) * (f - i);
 }
 
-// ── Grades ───────────────────────────────────────────────────────
+export function slopeAt(course: Course, x: number): number {
+  return (heightAt(course, x + course.step) - heightAt(course, x - course.step)) / (2 * course.step);
+}
+
+export function intensityAt(course: Course, x: number): number {
+  const i = Math.max(0, Math.min(course.intensity.length - 1, Math.round(x / course.step)));
+  return course.intensity[i];
+}
+
+// ── Scoring ──────────────────────────────────────────────────────
+
+/** Par is the record's own running time. */
+export const parMsOf = (course: Course) => Math.round(course.duration * 1000);
+
+/**
+ * Style, and the one place the original scoring idea survives: air is worth
+ * more over the loud parts of the record. Hanging it out through the chorus
+ * should count for more than the same jump in the intro.
+ */
+export function airScore(seconds: number, intensity: number, flips: number): number {
+  const heat = 0.5 + 1.8 * intensity * intensity;
+  return Math.round((seconds * 220 + flips * 500) * heat);
+}
 
 export const GRADES = [
-  { min: 0.95, grade: 'S' }, { min: 0.90, grade: 'A' }, { min: 0.80, grade: 'B' },
-  { min: 0.70, grade: 'C' }, { min: 0.60, grade: 'D' }, { min: 0, grade: 'F' },
+  { min: 1.15, grade: 'S' },   // home with a sixth of the record still to run
+  { min: 1.00, grade: 'A' },   // beat the record
+  { min: 0.85, grade: 'B' },
+  { min: 0.70, grade: 'C' },
+  { min: 0.55, grade: 'D' },
+  { min: 0, grade: 'F' },
 ] as const;
 
-export function gradeFor(pct: number): string {
-  return GRADES.find(g => pct >= g.min)!.grade;
+/** `ratio` is par ÷ your time — above 1 means you beat the song. */
+export function gradeFor(ratio: number): string {
+  return GRADES.find(g => ratio >= g.min)!.grade;
+}
+
+/** A run that never reached the end is an F however far it got. */
+export function ratioFor(parMs: number, timeMs: number, finished: boolean): number {
+  if (!finished || timeMs <= 0) return 0;
+  return parMs / timeMs;
 }
