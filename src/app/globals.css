@@ -893,6 +893,138 @@
 .mb-chip:hover { transform: translateY(-2px); }
 
 /* ─────────────────────────────────────────────────────────────
+   Groove scope — applied to /projects/groove shell.
+   Material metaphor: a record shop's listening booth. A groove IS a
+   track — the pun is the whole design. Sleeves stand in a crate,
+   the selected record goes on the platter, and the grade you earned
+   is stamped on its centre label.
+
+   Two modes on purpose (unlike the Observatory next door): a crate of
+   records is a daylight object, and the shop after closing is the
+   same room with the lights off. The one thing that never changes is
+   the vinyl — black is black in any light — and the ride itself,
+   which draws its own dark stage in both modes because it's a screen,
+   not a surface.
+   ──────────────────────────────────────────────────────────── */
+.groove-theme {
+  /* Palette — sleeve card, black wax, a hot label */
+  --gv-paper:   hsl(38 30% 94%);
+  --gv-paper-2: hsl(36 22% 88%);
+  --gv-card:    hsl(40 42% 98%);
+  --gv-ink:     hsl(24 14% 13%);
+  --gv-ink-soft:hsl(24 8% 44%);
+  --gv-line:    hsl(34 16% 83%);
+  --gv-vinyl:   #131011;             /* never themed — wax is wax */
+  --gv-label:   #d9542b;             /* the centre label */
+  --gv-gold:    #c98a1e;             /* foil on the sleeve */
+
+  --color-background:        var(--gv-paper);
+  --color-foreground:        var(--gv-ink);
+  --color-card:              var(--gv-card);
+  --color-card-foreground:   var(--gv-ink);
+  --color-popover:           var(--gv-card);
+  --color-popover-foreground:var(--gv-ink);
+  --color-muted:             var(--gv-paper-2);
+  --color-muted-foreground:  var(--gv-ink-soft);
+  --color-secondary:         var(--gv-paper-2);
+  --color-secondary-foreground: var(--gv-ink);
+  --color-border:            var(--gv-line);
+  --color-input:             var(--gv-line);
+  --color-ring:              var(--gv-label);
+  --color-primary:           var(--gv-label);
+  --color-primary-foreground:#fff8f2;
+  --color-accent:            var(--gv-gold);
+  --color-accent-foreground: var(--gv-ink);
+
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  color: var(--gv-ink);
+  background-color: var(--gv-paper);
+}
+
+.dark .groove-theme {
+  --gv-paper:   hsl(24 12% 8%);
+  --gv-paper-2: hsl(24 10% 12%);
+  --gv-card:    hsl(24 11% 11%);
+  --gv-ink:     hsl(38 28% 92%);
+  --gv-ink-soft:hsl(30 8% 58%);
+  --gv-line:    hsl(24 10% 21%);
+  --gv-label:   #e8663a;
+  --gv-gold:    #e0a83c;
+}
+
+/* A sleeve standing in the crate: card stock with a printed spine. */
+.gv-sleeve {
+  position: relative;
+  border: 1px solid var(--gv-line);
+  border-radius: 3px;               /* sleeves are cut square, not rounded */
+  background: var(--gv-card);
+  box-shadow: 0 1px 3px hsl(24 30% 8% / 0.16);
+  transition: transform 180ms cubic-bezier(.2,.9,.2,1), box-shadow 180ms ease, border-color 180ms ease;
+}
+.gv-sleeve::after {
+  /* the printed spine down the opening edge */
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  background: linear-gradient(90deg, hsl(24 30% 8% / 0.22), transparent);
+  border-radius: 3px 0 0 3px;
+  pointer-events: none;
+}
+.gv-sleeve:hover {
+  transform: translateY(-4px);
+  border-color: color-mix(in srgb, var(--gv-label) 45%, var(--gv-line));
+  box-shadow: 0 12px 26px -10px hsl(24 40% 8% / 0.45);
+}
+
+/* Black wax, with the light catching the groove. */
+.gv-vinyl {
+  border-radius: 50%;
+  background:
+    repeating-radial-gradient(circle at 50% 50%,
+      hsl(0 0% 100% / 0.055) 0 1px, transparent 1px 4px),
+    radial-gradient(circle at 34% 28%, hsl(30 20% 40% / 0.30), transparent 46%),
+    var(--gv-vinyl);
+}
+
+/* The centre label — where the grade gets stamped. */
+.gv-label-disc {
+  border-radius: 50%;
+  background: radial-gradient(circle at 36% 30%, color-mix(in srgb, var(--gv-label) 78%, #fff), var(--gv-label));
+  color: #fff8f2;
+}
+
+@keyframes gv-spin { to { transform: rotate(360deg); } }
+.gv-spin { animation: gv-spin 1.8s linear infinite; }
+
+/* Numerals: scores, times, percentages. */
+.gv-readout {
+  font-family: var(--font-readout), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A stamped grade, like a QC mark inked onto the sleeve. */
+.gv-grade {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid currentColor;
+  border-radius: 3px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
+/* The ride surface. Always dark in both modes — this one is a screen
+   showing a night road, not a piece of the room's furniture. */
+.gv-stage {
+  background: #08070a;
+  border: 1px solid var(--gv-line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+/* ─────────────────────────────────────────────────────────────
    Observatory scope — applied to /projects/polar-clock shell.
    Material metaphor: a planetarium dome after hours. The clock is
    an orrery of oxidised-copper rings under glass; the dome behind

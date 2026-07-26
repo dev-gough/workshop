@@ -88,6 +88,56 @@ export function PolarRoom({ className }: { className?: string }) {
   );
 }
 
+// ── 16 · The Groove — a record half out of its sleeve ──
+// The room's whole premise in one image: the groove IS the track. The
+// ridge line across the label is a stretch of the road the wax makes.
+
+const GROOVE_ROAD = (() => {
+  // Deterministic, so server and client draw the same stretch of road.
+  const pts: string[] = [];
+  for (let i = 0; i <= 40; i++) {
+    const x = i / 40;
+    const y = 0.5
+      + Math.sin(x * 7.1) * 0.16
+      + Math.sin(x * 17.3 + 1.1) * 0.07
+      + Math.sin(x * 3.2 + 2.4) * 0.09;
+    pts.push(`${(x * 100).toFixed(1)},${(y * 100).toFixed(1)}`);
+  }
+  return pts.join(' ');
+})();
+
+export function GrooveRoom({ className }: { className?: string }) {
+  return (
+    <Door href="/projects/groove" number="RM 16" room="The Groove" className={className}>
+      {/* No background of its own: the scope paints it, so the tile is a
+          paper sleeve in daylight and the shop after closing at night. */}
+      <div className="groove-theme pointer-events-none relative h-full overflow-hidden">
+        {/* The wax, running off the right edge of the door. `aspect-square`
+            is load-bearing: a 50% border-radius on a tile-shaped box gives
+            you an ellipse, not a record. */}
+        <div className="gv-vinyl absolute -bottom-[32%] -right-[14%] aspect-square h-[164%]">
+          <div className="gv-label-disc absolute left-1/2 top-1/2 aspect-square h-[26%] -translate-x-1/2 -translate-y-1/2" />
+        </div>
+        {/* The road cut into it — fading in from the left so it reads as
+            running out of the groove rather than lying on the sleeve. */}
+        <svg
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          className="absolute inset-x-0 top-[38%] h-[34%] w-full"
+          style={{ maskImage: 'linear-gradient(90deg, transparent, #000 26%)', WebkitMaskImage: 'linear-gradient(90deg, transparent, #000 26%)' }}
+        >
+          <polyline points={GROOVE_ROAD} fill="none" stroke="#e8663a" strokeWidth="2.4" opacity="0.9" />
+          <polyline points={GROOVE_ROAD} fill="none" stroke="#ffd9a8" strokeWidth="0.8" opacity="0.6" />
+        </svg>
+        <div className="absolute left-3 top-3">
+          <p className="text-[8px] font-semibold uppercase tracking-[0.2em] text-primary">Side A</p>
+          <p className="mt-0.5 text-[11px] font-medium text-foreground">Ride the groove</p>
+        </div>
+      </div>
+    </Door>
+  );
+}
+
 // ── 06 · Game of Life — chalk cells living on the seminar slate ──
 
 export function GolRoom({ className }: { className?: string }) {
