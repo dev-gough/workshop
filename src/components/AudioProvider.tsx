@@ -64,6 +64,7 @@ interface AudioContextType {
   currentSongName: string | null;
   // Analyser for visualizations
   getFrequencyData: () => Uint8Array | null;
+  getWaveformData: () => Uint8Array | null;
 }
 
 function getCookie(name: string): string | null {
@@ -122,7 +123,12 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
       const ctx = new globalThis.AudioContext();
       const source = ctx.createMediaElementSource(audio);
       const analyser = ctx.createAnalyser();
-      analyser.fftSize = 64;
+      // 512 bins. The old 32 was enough for the header's 15-bar bounce but
+      // far too coarse for the polar-clock visualizers (spectral terrain
+      // wants a real spectrum, not eight buckets). Every consumer samples
+      // adaptively off `data.length`, so widening it costs them nothing.
+      analyser.fftSize = 1024;
+      analyser.smoothingTimeConstant = 0.75;
       source.connect(analyser);
       analyser.connect(ctx.destination);
       audioCtxRef.current = ctx;
@@ -136,6 +142,15 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
     if (!analyser) return null;
     const data = new Uint8Array(analyser.frequencyBinCount);
     analyser.getByteFrequencyData(data);
+    return data;
+  }, []);
+
+  /** Time-domain samples (128 = silence), for oscilloscope-style visuals. */
+  const getWaveformData = useCallback((): Uint8Array | null => {
+    const analyser = analyserRef.current;
+    if (!analyser) return null;
+    const data = new Uint8Array(analyser.fftSize);
+    analyser.getByteTimeDomainData(data);
     return data;
   }, []);
 
@@ -466,7 +481,7 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
       seek, seekTo, setVolumeValue, changeVolume, handleVolumeWheel, toggleMute,
       setQueue, setQueueIndex, setShuffleMode,
       formatTime, currentAlbum, currentSongName,
-      getFrequencyData,
+      getFrequencyData, getWaveformData,
     }}>
       <audio ref={audioRef} preload="auto" crossOrigin="anonymous" />
       {children}

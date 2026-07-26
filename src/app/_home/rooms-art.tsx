@@ -1,16 +1,88 @@
 'use client';
 
-import PolarClock from '@/components/PolarClock';
+import { useEffect, useState } from 'react';
 import GSMOL from '@/components/GSMOL';
 import { Door } from './door';
 
-// ── 05 · Polar Clock — the real thing, ticking ──
+// ── 05 · Polar Clock — the observatory, seen through the door ──
+// A miniature of the room in the room's own theme (.pc-theme): the dome
+// falling off toward the rim, a graduated bezel, three live rings, and the
+// lamplit readout at the hub.
+
+/** The head of the Indigo Teal palette — the room's own default rings. */
+const DIAL_RINGS = [
+  { r: 50, pct: (d: Date) => (d.getHours() + d.getMinutes() / 60) / 24, color: 'hsl(225,70%,60%)' },
+  { r: 39, pct: (d: Date) => (d.getMinutes() + d.getSeconds() / 60) / 60, color: 'hsl(172,66%,45%)' },
+  { r: 28, pct: (d: Date) => d.getSeconds() / 60, color: 'hsl(350,80%,62%)' },
+];
+
+// 12 graduations, precomputed so server and client agree on the markup.
+const BEZEL = Array.from({ length: 12 }, (_, i) => {
+  const a = (i / 12) * Math.PI * 2 - Math.PI / 2;
+  return {
+    x1: 64 + Math.cos(a) * 58, y1: 64 + Math.sin(a) * 58,
+    x2: 64 + Math.cos(a) * 62, y2: 64 + Math.sin(a) * 62,
+  };
+});
 
 export function PolarRoom({ className }: { className?: string }) {
+  // Null until mounted: the clock can't agree with the server about "now",
+  // and a hydration mismatch is a worse tile than half a second of dashes.
+  const [now, setNow] = useState<Date | null>(null);
+  useEffect(() => {
+    setNow(new Date());
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const time = now
+    ? now.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : '--:-- --';
+  const date = now
+    ? now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+    : '';
+
   return (
     <Door href="/projects/polar-clock" number="RM 05" room="Polar Clock" className={className}>
-      <div className="pointer-events-none flex h-full items-center justify-center bg-[hsl(240_15%_5%)]">
-        <PolarClock width={280} height={280} />
+      <div className="pc-theme pointer-events-none relative h-full overflow-hidden">
+        {/* a verdigris glow off the instrument, then the dome's falloff */}
+        <div
+          className="absolute inset-0"
+          style={{ background: 'radial-gradient(ellipse 55% 90% at 76% 50%, rgba(87,207,182,0.13), transparent 68%)' }}
+        />
+        <div className="pc-vignette absolute inset-0" />
+
+        <div className="relative flex h-full items-center justify-between gap-2 pl-4 pr-1">
+          <div className="min-w-0">
+            <p className="pc-etch text-[9px]">Observatory</p>
+            <p className="pc-readout mt-1 text-xl font-semibold tracking-tight text-foreground">{time}</p>
+            <p className="mt-0.5 text-[10px] text-muted-foreground">{date || ' '}</p>
+          </div>
+
+          <svg viewBox="0 0 128 128" className="h-[132px] w-[132px] shrink-0">
+            {BEZEL.map((t, i) => (
+              <line key={i} {...t} stroke="rgba(207,224,255,0.34)" strokeWidth={1} />
+            ))}
+            <circle cx={64} cy={64} r={58} fill="none" stroke="rgba(85,97,138,0.45)" strokeWidth={0.75} />
+            {DIAL_RINGS.map(ring => {
+              const circ = 2 * Math.PI * ring.r;
+              const pct = now ? ring.pct(now) : 0;
+              return (
+                <g key={ring.r}>
+                  <circle cx={64} cy={64} r={ring.r} fill="none" stroke="rgba(120,150,210,0.15)" strokeWidth={8} />
+                  <circle
+                    cx={64} cy={64} r={ring.r} fill="none"
+                    stroke={ring.color} strokeWidth={8} strokeLinecap="round"
+                    strokeDasharray={`${circ * pct} ${circ * (1 - pct)}`}
+                    transform="rotate(-90 64 64)"
+                    opacity={0.9}
+                  />
+                </g>
+              );
+            })}
+            <circle cx={64} cy={64} r={3} fill="#f2b76a" opacity={0.85} />
+          </svg>
+        </div>
       </div>
     </Door>
   );

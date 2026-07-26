@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { useTheme } from '@/components/ThemeProvider';
+import { useDomeTheme } from './dome';
 
 // ── Background: Lissajous Curves ────────────────────────────────
 export function LissajousBackground({ width, height }: { width: number; height: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { theme } = useTheme();
+  const { theme } = useDomeTheme();
 
   useEffect(() => {
     if (!width || !height) return;

@@ -31,7 +31,7 @@ export function generateWallpaperHTML(settings: WallpaperSettings): string {
 <title>Polar Clock</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { width: 100vw; height: 100vh; overflow: hidden; background: #0b1120; color: #e8ecf2; font-family: system-ui, -apple-system, sans-serif; }
+  html, body { width: 100vw; height: 100vh; overflow: hidden; background: #05070e; color: #e9eefc; font-family: system-ui, -apple-system, sans-serif; }
   #bg-layer { position: absolute; inset: 0; z-index: 0; }
   #bg-layer canvas { position: absolute; inset: 0; }
   #clock-layer { position: absolute; inset: 0; z-index: 10; display: flex; align-items: center; }
@@ -138,14 +138,36 @@ function renderClock() {
   if (S.ringMinutes) activeRings.push({ label: 'Min', value: '' + Math.floor(minutes), pct: (minutes / 60) * 100, color: colors[ci++ % colors.length] });
   if (S.ringSeconds) activeRings.push({ label: 'Sec', value: '' + Math.floor(seconds), pct: (seconds / 60) * 100, color: colors[ci++ % colors.length] });
 
+  // Geometry and palette kept in step with _components/PolarClockSVG.tsx so
+  // an exported wallpaper is the same instrument you were just looking at.
   var cx = size / 2, cy = size / 2;
   var ringCount = activeRings.length || 1;
-  var ringThickness = Math.min((size / 2 - 30) / (ringCount + 1.5), size / 14);
-  var maxR = size / 2 - ringThickness / 2 - 6;
+  var ringThickness = Math.min((size / 2 - 30) / (ringCount + 1.5), size / 17);
+  var maxR = size / 2 - ringThickness / 2 - 14;
   var ringGap = Math.max(2, size / 120);
-  var bgRingColor = 'rgba(40,50,70,0.6)';
-  var textColor = 'hsl(210,20%,92%)';
-  var mutedColor = 'hsl(210,10%,60%)';
+  var bezelR = maxR + ringThickness / 2 + 8;
+  var bgRingColor = 'rgba(120,150,210,0.13)';
+  var textColor = '#e9eefc';
+  var mutedColor = '#8e9cbd';
+  var voidColor = '#05070e';
+  var bezelColor = 'rgba(85,97,138,0.55)';
+
+  // Graduated bezel
+  svg.appendChild(svgEl('circle', {
+    cx: cx, cy: cy, r: bezelR, fill: 'none', stroke: bezelColor,
+    'stroke-width': 1, opacity: '0.5'
+  }));
+  for (var g = 0; g < 60; g++) {
+    var major = g % 5 === 0;
+    var ga = (g / 60) * Math.PI * 2 - Math.PI / 2;
+    var glen = major ? 7 : 3.5;
+    svg.appendChild(svgEl('line', {
+      x1: cx + Math.cos(ga) * bezelR, y1: cy + Math.sin(ga) * bezelR,
+      x2: cx + Math.cos(ga) * (bezelR + glen), y2: cy + Math.sin(ga) * (bezelR + glen),
+      stroke: major ? 'rgba(207,224,255,0.42)' : bezelColor,
+      'stroke-width': major ? 1.4 : 0.8
+    }));
+  }
 
   // Draw rings
   for (var i = 0; i < activeRings.length; i++) {
@@ -154,10 +176,14 @@ function renderClock() {
     var circ = 2 * Math.PI * r;
     var dashLen = circ * (ring.pct / 100);
 
-    // Background ring
+    // Recessed track
     svg.appendChild(svgEl('circle', {
       cx: cx, cy: cy, r: r, fill: 'none', stroke: bgRingColor,
-      'stroke-width': ringThickness, 'stroke-linecap': 'round'
+      'stroke-width': ringThickness
+    }));
+    svg.appendChild(svgEl('circle', {
+      cx: cx, cy: cy, r: r + ringThickness / 2, fill: 'none',
+      stroke: 'rgba(140,170,230,0.10)', 'stroke-width': 0.75
     }));
 
     // Progress arc
@@ -166,17 +192,24 @@ function renderClock() {
       'stroke-width': ringThickness, 'stroke-linecap': 'round',
       'stroke-dasharray': dashLen + ' ' + (circ - dashLen),
       transform: 'rotate(-90 ' + cx + ' ' + cy + ')',
-      opacity: '0.85'
+      opacity: '0.88'
     });
     if (S.smooth) arc.style.transition = 'opacity 0.15s';
     else arc.style.transition = 'stroke-dasharray 0.3s ease, opacity 0.15s';
     svg.appendChild(arc);
+
+    // Leading pip
+    var pa = (ring.pct / 100) * Math.PI * 2 - Math.PI / 2;
+    svg.appendChild(svgEl('circle', {
+      cx: cx + Math.cos(pa) * r, cy: cy + Math.sin(pa) * r,
+      r: Math.max(1.6, ringThickness * 0.13), fill: '#ffffff', opacity: '0.7'
+    }));
   }
 
   // Center text
-  var cityFontSize = Math.max(14, size / 18);
+  var cityFontSize = Math.max(11, size / 26);
   var timeFontSize = Math.max(20, size / 12);
-  var dateFontSize = Math.max(10, size / 28);
+  var dateFontSize = Math.max(10, size / 30);
 
   var digitalTime = now.toLocaleTimeString('en-US', { timeZone: S.timezone, hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' });
   var digitalDate = now.toLocaleDateString('en-US', { timeZone: S.timezone, weekday: 'long', month: 'long', day: 'numeric' });
@@ -186,8 +219,10 @@ function renderClock() {
       x: cx, y: cy - timeFontSize * 0.9,
       'text-anchor': 'middle', 'dominant-baseline': 'middle',
       'font-size': cityFontSize, fill: mutedColor,
-      'font-family': "'Inter', system-ui, sans-serif",
-      'letter-spacing': '0.12em', 'font-weight': '300'
+      'font-family': "system-ui, -apple-system, sans-serif",
+      'letter-spacing': '0.28em', 'font-weight': '600',
+      stroke: voidColor, 'stroke-width': cityFontSize * 0.22,
+      'stroke-opacity': '0.6', 'paint-order': 'stroke'
     });
     cityText.textContent = S.cityLabel.toUpperCase();
     svg.appendChild(cityText);
@@ -196,17 +231,21 @@ function renderClock() {
   var timeText = svgEl('text', {
     x: cx, y: cy + (S.showCity ? 2 : -timeFontSize * 0.2),
     'text-anchor': 'middle', 'dominant-baseline': 'middle',
-    'font-size': timeFontSize, 'font-weight': '700', fill: textColor,
-    'font-family': "'JetBrains Mono', 'SF Mono', 'Cascadia Code', monospace"
+    'font-size': timeFontSize, 'font-weight': '600', fill: textColor,
+    'font-family': "'JetBrains Mono', 'SF Mono', 'Cascadia Code', monospace",
+    stroke: voidColor, 'stroke-width': timeFontSize * 0.13,
+    'stroke-opacity': '0.6', 'paint-order': 'stroke'
   });
   timeText.textContent = digitalTime;
   svg.appendChild(timeText);
 
   if (S.showDate) {
     var dateText = svgEl('text', {
-      x: cx, y: cy + timeFontSize * 0.85 - (S.showCity ? 0 : timeFontSize * 0.2),
+      x: cx, y: cy + timeFontSize * 0.92 - (S.showCity ? 0 : timeFontSize * 0.2),
       'text-anchor': 'middle', 'dominant-baseline': 'middle',
-      'font-size': dateFontSize, fill: mutedColor
+      'font-size': dateFontSize, fill: mutedColor, 'letter-spacing': '0.06em',
+      stroke: voidColor, 'stroke-width': dateFontSize * 0.24,
+      'stroke-opacity': '0.6', 'paint-order': 'stroke'
     });
     dateText.textContent = digitalDate;
     svg.appendChild(dateText);
@@ -245,6 +284,9 @@ function startBackground() {
   if (bg === 'gol') startGOL(w, h);
   else if (bg === 'julia') startJulia(w, h);
   else if (bg === 'mandelbrot') startMandelbrot(w, h);
+  else if (bg === 'burningship') startBurningShip(w, h);
+  else if (bg === 'newton') startNewton(w, h);
+  else if (bg === 'attractor') startAttractor(w, h);
   else if (bg === 'koch') startKoch(w, h);
   else if (bg === 'starfield') startStarfield(w, h);
   else if (bg === 'particles') startParticles(w, h);
@@ -289,22 +331,58 @@ function startGOL(w, h) {
 }
 
 // ── WebGL Fractal shared ──
+// Kept in step with _components/Fractal.tsx: same smooth-iteration shading,
+// same cosine palettes, same premultiplied blend — so an exported wallpaper
+// looks like the page it was exported from.
 var VERT_SRC = 'attribute vec2 a_pos; void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }';
-var FRAC_COMMON = 'precision highp float; uniform vec2 u_resolution; uniform float u_time; uniform float u_isDark;' +
-  'vec3 hsv2rgb(vec3 c) { vec3 p = abs(fract(c.xxx + vec3(1.0, 2.0/3.0, 1.0/3.0)) * 6.0 - 3.0); return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y); }' +
-  'vec4 colorize(int iter, int maxIter) { if (iter == maxIter) return vec4(0.0); float v = float(iter) / float(maxIter); float hue = v * 0.67 + 0.55; float sat = u_isDark > 0.5 ? 0.85 : 0.9; float val = u_isDark > 0.5 ? 0.4 + v * 0.6 : 0.2 + v * 0.6; vec3 col = hsv2rgb(vec3(hue, sat, val)); float alpha = u_isDark > 0.5 ? 0.65 : 0.45; return vec4(col * alpha, alpha); }';
+var FRAC_COMMON = 'precision highp float; uniform vec2 u_resolution; uniform float u_time;' +
+  'const float TAU = 6.28318530718;' +
+  'vec3 pal(float t, vec3 a, vec3 b, vec3 c, vec3 d) { return a + b * cos(TAU * (c * t + d)); }' +
+  'vec2 plane(vec2 ctr, float span) { float s = span / min(u_resolution.x, u_resolution.y); vec2 p = (gl_FragCoord.xy - u_resolution * 0.5) * s; return vec2(ctr.x + p.x, ctr.y - p.y); }';
 
-var JULIA_FRAG = FRAC_COMMON +
-  'void main() { float scale = 3.0 / min(u_resolution.x, u_resolution.y); vec2 z = (gl_FragCoord.xy - u_resolution * 0.5) * scale; z.y = -z.y;' +
-  'float cRe = -0.7 + 0.15 * cos(u_time); float cIm = 0.27015 + 0.1 * sin(u_time * 0.7);' +
-  'int iter = 0; for (int i = 0; i < 80; i++) { if (z.x * z.x + z.y * z.y > 4.0) break; float tmp = z.x * z.x - z.y * z.y + cRe; z.y = 2.0 * z.x * z.y + cIm; z.x = tmp; iter++; }' +
-  'gl_FragColor = colorize(iter, 80); }';
+var FRAC_SHADE = 'vec4 shade(float sn, float maxI, vec3 a, vec3 b, vec3 c, vec3 d, float gain) {' +
+  'if (sn < 0.0) return vec4(0.0); float v = pow(clamp(sn / maxI, 0.0, 1.0), 0.55);' +
+  'vec3 col = pal(v, a, b, c, d); float al = clamp((0.18 + 0.72 * v) * gain, 0.0, 1.0); return vec4(col * al, al); }';
 
-var MANDEL_FRAG = FRAC_COMMON +
-  'void main() { float cycle = mod(u_time * 0.15, 30.0); float zoom = 1.0 + cycle * cycle * 0.5; vec2 center = vec2(-0.75, 0.1);' +
-  'float scale = 3.0 / (min(u_resolution.x, u_resolution.y) * zoom); vec2 c = (gl_FragCoord.xy - u_resolution * 0.5) * scale + center; c.y = -c.y;' +
-  'vec2 z = vec2(0.0); int iter = 0; for (int i = 0; i < 120; i++) { if (z.x * z.x + z.y * z.y > 4.0) break; float tmp = z.x * z.x - z.y * z.y + c.x; z.y = 2.0 * z.x * z.y + c.y; z.x = tmp; iter++; }' +
-  'gl_FragColor = colorize(iter, 120); }';
+var JULIA_FRAG = FRAC_COMMON + FRAC_SHADE +
+  'void main() { vec2 z = plane(vec2(0.0), 3.0);' +
+  'vec2 c = vec2(-0.7 + 0.15 * cos(u_time), 0.27015 + 0.1 * sin(u_time * 0.7)); float sn = -1.0;' +
+  'for (int i = 0; i < 96; i++) { z = vec2(z.x*z.x - z.y*z.y + c.x, 2.0*z.x*z.y + c.y);' +
+  'if (dot(z,z) > 256.0) { sn = float(i) + 1.0 - log2(log(length(z))/log(2.0)); break; } }' +
+  'gl_FragColor = shade(sn, 96.0, vec3(0.34,0.38,0.50), vec3(0.38,0.36,0.44), vec3(1.0,1.0,1.0), vec3(0.06,0.32,0.58), 1.0); }';
+
+var MANDEL_FRAG = FRAC_COMMON + FRAC_SHADE +
+  'void main() { float cycle = mod(u_time * 1.85, 60.0); float zoom = 1.0 + cycle * cycle * 0.2;' +
+  'float fade = smoothstep(0.0, 4.0, cycle) * smoothstep(0.0, 4.0, 60.0 - cycle);' +
+  'vec2 c = plane(vec2(-0.7436, 0.1318), 3.0 / zoom); vec2 z = vec2(0.0); float sn = -1.0;' +
+  'for (int i = 0; i < 140; i++) { z = vec2(z.x*z.x - z.y*z.y + c.x, 2.0*z.x*z.y + c.y);' +
+  'if (dot(z,z) > 256.0) { sn = float(i) + 1.0 - log2(log(length(z))/log(2.0)); break; } }' +
+  'gl_FragColor = shade(sn, 140.0, vec3(0.30,0.34,0.44), vec3(0.44,0.40,0.32), vec3(1.0,0.94,0.72), vec3(0.0,0.18,0.48), fade); }';
+
+var BURNSHIP_FRAG = FRAC_COMMON + FRAC_SHADE +
+  'void main() { float cycle = mod(u_time * 1.85, 60.0); float zoom = 1.0 + cycle * cycle * 0.004;' +
+  'float fade = smoothstep(0.0, 4.0, cycle) * smoothstep(0.0, 4.0, 60.0 - cycle);' +
+  'vec2 c = plane(mix(vec2(-0.5, -0.5), vec2(-1.755, -0.035), smoothstep(0.0, 45.0, cycle)), 3.4 / zoom);' +
+  'vec2 z = vec2(0.0); float sn = -1.0;' +
+  'for (int i = 0; i < 150; i++) { vec2 a = abs(z); z = vec2(a.x*a.x - a.y*a.y + c.x, 2.0*a.x*a.y + c.y);' +
+  'if (dot(z,z) > 256.0) { sn = float(i) + 1.0 - log2(log(length(z))/log(2.0)); break; } }' +
+  'if (sn < 0.0) { gl_FragColor = vec4(0.0); } else {' +
+  'float v = clamp(log(1.0 + sn) / log(49.0), 0.0, 1.0);' +
+  'vec3 col = pal(v, vec3(0.36,0.16,0.08), vec3(0.52,0.36,0.20), vec3(1.0,0.92,0.72), vec3(0.02,0.13,0.26));' +
+  'float al = clamp(0.20 + 0.78 * v, 0.0, 1.0) * fade; gl_FragColor = vec4(col * al, al); } }';
+
+var NEWTON_FRAG = FRAC_COMMON +
+  'vec2 cmul(vec2 a, vec2 b) { return vec2(a.x*b.x - a.y*b.y, a.x*b.y + a.y*b.x); }' +
+  'vec2 cdiv(vec2 a, vec2 b) { float d = max(dot(b,b), 1e-9); return vec2(a.x*b.x + a.y*b.y, a.y*b.x - a.x*b.y) / d; }' +
+  'void main() { float th = u_time * 0.28; float breathe = 2.6 + 0.55 * sin(u_time * 0.19);' +
+  'vec2 p = plane(vec2(0.0), breathe); vec2 z = vec2(p.x*cos(th) - p.y*sin(th), p.x*sin(th) + p.y*cos(th));' +
+  'float steps = 0.0; for (int i = 0; i < 44; i++) { vec2 z2 = cmul(z,z); vec2 z3 = cmul(z2,z);' +
+  'vec2 dz = cdiv(z3 - vec2(1.0,0.0), 3.0 * z2); z -= dz; steps += 1.0; if (dot(dz,dz) < 1e-7) break; }' +
+  'float d0 = distance(z, vec2(1.0,0.0)); float d1 = distance(z, vec2(-0.5,0.86602540)); float d2 = distance(z, vec2(-0.5,-0.86602540));' +
+  'float root = d0 < d1 ? (d0 < d2 ? 0.0 : 2.0) : (d1 < d2 ? 1.0 : 2.0);' +
+  'float speed = 1.0 - clamp(steps / 26.0, 0.0, 1.0);' +
+  'vec3 col = pal(root / 3.0 + 0.02 * steps, vec3(0.48,0.46,0.52), vec3(0.42,0.40,0.44), vec3(1.0,1.0,1.0), vec3(0.0,0.33,0.67));' +
+  'float al = 0.16 + 0.62 * pow(speed, 1.4); gl_FragColor = vec4(col * al, al); }';
 
 function initWebGLFractal(fragSrc) {
   var c = createCanvas();
@@ -321,16 +399,14 @@ function initWebGLFractal(fragSrc) {
   var aPos = gl.getAttribLocation(prog, 'a_pos');
   gl.enableVertexAttribArray(aPos); gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
   gl.viewport(0, 0, c.width, c.height);
-  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
   var uRes = gl.getUniformLocation(prog, 'u_resolution');
   var uTime = gl.getUniformLocation(prog, 'u_time');
-  var uDark = gl.getUniformLocation(prog, 'u_isDark');
   var t = 0;
   function render() {
     t += 0.003;
     gl.uniform2f(uRes, c.width, c.height);
     gl.uniform1f(uTime, t);
-    gl.uniform1f(uDark, 1.0);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     bgRAF = requestAnimationFrame(render);
   }
@@ -338,6 +414,58 @@ function initWebGLFractal(fragSrc) {
 }
 function startJulia(w, h) { initWebGLFractal(JULIA_FRAG); }
 function startMandelbrot(w, h) { initWebGLFractal(MANDEL_FRAG); }
+function startBurningShip(w, h) { initWebGLFractal(BURNSHIP_FRAG); }
+function startNewton(w, h) { initWebGLFractal(NEWTON_FRAG); }
+
+// ── Clifford Attractor ──
+// Long-exposure density field: the orbit is one continuous trajectory and
+// each frame decays what came before, so the picture re-develops as the
+// four parameters drift.
+function startAttractor(w, h) {
+  var c = createCanvas();
+  var q = w * h > 1400000 ? 3 : 2;
+  var rw = Math.max(2, Math.ceil(w / q)), rh = Math.max(2, Math.ceil(h / q));
+  c.width = rw; c.height = rh;
+  var ctx = c.getContext('2d');
+  var img = ctx.createImageData(rw, rh);
+  var px = img.data;
+  var dens = new Float32Array(rw * rh);
+  var stops = [[0,26,30,72],[0.32,40,110,150],[0.62,87,207,182],[0.85,214,226,190],[1,255,244,224]];
+  var ramp = new Uint8Array(1024);
+  for (var i = 0; i < 256; i++) {
+    var tt = i / 255, s = 0;
+    while (s < stops.length - 2 && tt > stops[s + 1][0]) s++;
+    var a = stops[s], b = stops[s + 1];
+    var f = Math.min(1, Math.max(0, (tt - a[0]) / (b[0] - a[0])));
+    ramp[i * 4] = a[1] + (b[1] - a[1]) * f;
+    ramp[i * 4 + 1] = a[2] + (b[2] - a[2]) * f;
+    ramp[i * 4 + 2] = a[3] + (b[3] - a[3]) * f;
+    ramp[i * 4 + 3] = Math.min(255, Math.round(Math.pow(tt, 0.7) * 235));
+  }
+  var scale = Math.min(rw / 6.0, rh / 5.0), cx = rw / 2, cy = rh / 2;
+  var x = 0.1, y = 0.1, t = 0;
+  function draw() {
+    t += 0.0016;
+    var pa = 1.7 + 0.55 * Math.sin(t * 0.73), pb = -1.8 + 0.5 * Math.cos(t * 0.51);
+    var pc = 1.4 + 0.5 * Math.sin(t * 0.31 + 1.7), pd = 1.5 + 0.45 * Math.cos(t * 0.41 + 0.6);
+    for (var i = 0; i < dens.length; i++) dens[i] *= 0.955;
+    for (var n = 0; n < 16000; n++) {
+      var nx = Math.sin(pa * y) + pc * Math.cos(pa * x);
+      y = Math.sin(pb * x) + pd * Math.cos(pb * y);
+      x = nx;
+      var ix = (cx + x * scale) | 0, iy = (cy + y * scale) | 0;
+      if (ix >= 0 && ix < rw && iy >= 0 && iy < rh) dens[iy * rw + ix] += 1;
+    }
+    for (var i2 = 0, p = 0; i2 < dens.length; i2++, p += 4) {
+      var v = dens[i2];
+      var o = (v <= 0 ? 0 : Math.min(255, (Math.log(1 + v * 2.2) * 74) | 0)) * 4;
+      px[p] = ramp[o]; px[p + 1] = ramp[o + 1]; px[p + 2] = ramp[o + 2]; px[p + 3] = ramp[o + 3];
+    }
+    ctx.putImageData(img, 0, 0);
+    bgRAF = requestAnimationFrame(draw);
+  }
+  bgRAF = requestAnimationFrame(draw);
+}
 
 // ── Koch Snowflake ──
 function startKoch(w, h) {

@@ -4,21 +4,26 @@ import React, { useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-// ── Collapsible Settings Section ─────────────────────────────────
-export function SettingsSection({ title, children, defaultOpen = true }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
+// ── A drawer in the control desk ─────────────────────────────────
+// Etched heading, a hairline running out to the edge of the plate, and
+// the contents folded away underneath.
+export function SettingsSection({ title, children, defaultOpen = true }: {
+  title: string; children: React.ReactNode; defaultOpen?: boolean;
+}) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div>
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center justify-between w-full cursor-pointer group"
+        className="group flex w-full cursor-pointer items-center gap-2.5"
       >
-        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{title}</h3>
-        <motion.div
-          animate={{ rotate: open ? 0 : -90 }}
-          transition={{ duration: 0.2 }}
-        >
-          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground group-hover:text-foreground transition-colors" />
+        <h3 className="pc-etch shrink-0 transition-colors group-hover:text-foreground">{title}</h3>
+        <span
+          className="h-px flex-1"
+          style={{ background: 'linear-gradient(90deg, color-mix(in srgb, var(--pc-verd) 40%, transparent), transparent)' }}
+        />
+        <motion.div animate={{ rotate: open ? 0 : -90 }} transition={{ duration: 0.2 }}>
+          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-colors group-hover:text-foreground" />
         </motion.div>
       </button>
       <AnimatePresence initial={false}>
@@ -30,9 +35,7 @@ export function SettingsSection({ title, children, defaultOpen = true }: { title
             transition={{ duration: 0.2, ease: 'easeInOut' }}
             className="overflow-hidden"
           >
-            <div className="pt-2">
-              {children}
-            </div>
+            <div className="pt-2.5">{children}</div>
           </motion.div>
         )}
       </AnimatePresence>

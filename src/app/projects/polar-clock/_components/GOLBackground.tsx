@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { useTheme } from '@/components/ThemeProvider';
+import { useDomeTheme } from './dome';
 
 // ── GOL Engine (lightweight, for background) ────────────────────
 class GOLEngine {
@@ -41,7 +41,7 @@ class GOLEngine {
 export function GOLBackground({ width, height }: { width: number; height: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GOLEngine | null>(null);
-  const { theme } = useTheme();
+  const { theme } = useDomeTheme();
   const cellSize = 8;
 
   useEffect(() => {

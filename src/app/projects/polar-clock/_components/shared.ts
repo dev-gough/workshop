@@ -68,6 +68,99 @@ export const TIMEZONE_OPTIONS = [
   { label: 'Seoul', value: 'Asia/Seoul' },
 ];
 
+// ── Background catalogue ────────────────────────────────────────
+// One list, three shelves. The projector groups its slides by what
+// drives them: pure maths, the music you're playing, or nothing at all.
+
+export type BackgroundKey =
+  | 'none'
+  // Fractals
+  | 'julia' | 'mandelbrot' | 'burningship' | 'newton' | 'attractor'
+  | 'apollonian' | 'koch'
+  // Sound
+  | 'resonance' | 'terrain' | 'tunnel' | 'ribbon'
+  | 'spectrum' | 'radial' | 'orb' | 'aurora'
+  // Ambient
+  | 'gol' | 'starfield' | 'particles' | 'matrix'
+  | 'voronoi' | 'ripples' | 'lissajous' | 'sinewaves';
+
+export interface BackgroundGroup {
+  group: string;
+  /** One line of shelf label, shown under the group heading. */
+  hint: string;
+  items: { key: BackgroundKey; label: string }[];
+}
+
+export const BACKGROUND_GROUPS: BackgroundGroup[] = [
+  {
+    group: 'Fractals',
+    hint: 'escape-time and iterated maps, drawn on the GPU',
+    items: [
+      { key: 'julia',       label: 'Julia Set' },
+      { key: 'mandelbrot',  label: 'Mandelbrot' },
+      { key: 'burningship', label: 'Burning Ship' },
+      { key: 'newton',      label: 'Newton Basins' },
+      { key: 'attractor',   label: 'Clifford Attractor' },
+      { key: 'apollonian',  label: 'Apollonian' },
+      { key: 'koch',        label: 'Koch Curve' },
+    ],
+  },
+  {
+    group: 'Sound',
+    hint: 'driven by whatever BarFoo is playing',
+    items: [
+      { key: 'resonance', label: 'Resonant Julia' },
+      { key: 'terrain',   label: 'Spectral Terrain' },
+      { key: 'tunnel',    label: 'Frequency Tunnel' },
+      { key: 'ribbon',    label: 'Waveform Ribbon' },
+      { key: 'spectrum',  label: 'Spectrum' },
+      { key: 'radial',    label: 'Radial Bars' },
+      { key: 'orb',       label: 'Orb' },
+      { key: 'aurora',    label: 'Aurora' },
+    ],
+  },
+  {
+    group: 'Ambient',
+    hint: 'slow, self-contained, nothing to feed them',
+    items: [
+      { key: 'gol',       label: 'Game of Life' },
+      { key: 'starfield', label: 'Starfield' },
+      { key: 'particles', label: 'Flow Field' },
+      { key: 'matrix',    label: 'Matrix Rain' },
+      { key: 'voronoi',   label: 'Voronoi' },
+      { key: 'ripples',   label: 'Ripples' },
+      { key: 'lissajous', label: 'Lissajous' },
+      { key: 'sinewaves', label: 'Sine Waves' },
+    ],
+  },
+];
+
+/** Backgrounds that read the audio analyser and go still without a track. */
+export const AUDIO_BACKGROUNDS: ReadonlySet<BackgroundKey> = new Set(
+  BACKGROUND_GROUPS.find(g => g.group === 'Sound')!.items.map(i => i.key)
+);
+
+/**
+ * Backgrounds the standalone wallpaper can actually draw. Wallpaper Engine
+ * and Lively run the exported HTML with no page audio to tap, so the Sound
+ * shelf can't come along — the export panel says so rather than shipping a
+ * wallpaper with a silently blank backdrop.
+ */
+export const EXPORTABLE_BACKGROUNDS: ReadonlySet<BackgroundKey> = new Set<BackgroundKey>([
+  'none', 'gol', 'julia', 'mandelbrot', 'burningship', 'newton', 'attractor',
+  'koch', 'starfield', 'particles', 'matrix', 'voronoi', 'ripples',
+  'lissajous', 'sinewaves', 'apollonian',
+]);
+
+export function backgroundLabel(key: BackgroundKey): string {
+  if (key === 'none') return 'None';
+  for (const g of BACKGROUND_GROUPS) {
+    const hit = g.items.find(i => i.key === key);
+    if (hit) return hit.label;
+  }
+  return key;
+}
+
 export interface RingConfig {
   seconds: boolean;
   minutes: boolean;

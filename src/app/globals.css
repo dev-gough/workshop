@@ -893,6 +893,149 @@
 .mb-chip:hover { transform: translateY(-2px); }
 
 /* ─────────────────────────────────────────────────────────────
+   Observatory scope — applied to /projects/polar-clock shell.
+   Material metaphor: a planetarium dome after hours. The clock is
+   an orrery of oxidised-copper rings under glass; the dome behind
+   it shows whatever the projector is throwing tonight (a Julia
+   set, a spectrum, a colony of cells). All chrome is etched
+   instrument plate, and the only warm light in the room is the
+   reading lamp over the dial.
+
+   DELIBERATELY DARK-ONLY, like cc-scope's instruments and
+   gol-theme's slate. This page exists to be a wallpaper: every
+   visualizer in it is authored for a black sky, and a daylight
+   dome would be a different room. The consequence is intentional
+   — the RM 05 homepage tile stays dark in light mode too.
+   ──────────────────────────────────────────────────────────── */
+.pc-theme {
+  /* Palette — night sky, oxidised copper, one warm lamp */
+  --pc-void:   #05070e;               /* the dome interior */
+  --pc-deep:   #090d18;               /* instrument panels */
+  --pc-raise:  #101728;               /* raised plate / hover */
+  --pc-line:   hsl(222 28% 21%);      /* scribed hairline */
+  --pc-ink:    #e9eefc;
+  --pc-dim:    #8e9cbd;               /* engraved label */
+  --pc-faint:  #55618a;               /* graduation marks */
+  --pc-verd:   #57cfb6;               /* verdigris — the instrument itself */
+  --pc-lamp:   #f2b76a;               /* the reading lamp — live readouts only */
+  --pc-star:   #cfe0ff;
+
+  /* Remap the shared tokens so utilities + shadcn/lucide follow suit. */
+  --color-background:        var(--pc-void);
+  --color-foreground:        var(--pc-ink);
+  --color-card:              var(--pc-deep);
+  --color-card-foreground:   var(--pc-ink);
+  --color-popover:           var(--pc-deep);
+  --color-popover-foreground:var(--pc-ink);
+  --color-muted:             var(--pc-raise);
+  --color-muted-foreground:  var(--pc-dim);
+  --color-secondary:         var(--pc-raise);
+  --color-secondary-foreground: var(--pc-ink);
+  --color-border:            var(--pc-line);
+  --color-input:             var(--pc-line);
+  --color-ring:              var(--pc-verd);
+  --color-primary:           var(--pc-verd);
+  --color-primary-foreground:#04120f;
+  --color-accent:            var(--pc-star);
+  --color-accent-foreground: var(--pc-void);
+  --color-destructive:       #e8697f;
+
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  color: var(--pc-ink);
+  background-color: var(--pc-void);
+}
+
+/* The dome itself: a projection surface that darkens toward the rim so
+   the dial stays readable over ANY background the projector throws. */
+.pc-vignette {
+  background:
+    radial-gradient(ellipse 78% 78% at 50% 48%, transparent 34%, hsl(224 45% 3% / 0.55) 100%),
+    linear-gradient(180deg, hsl(224 45% 3% / 0.42), transparent 26%, transparent 72%, hsl(224 45% 3% / 0.55));
+}
+
+/* A floating instrument panel — smoked glass in a scribed copper frame. */
+.pc-glass {
+  background: linear-gradient(165deg, hsl(222 32% 10% / 0.9), hsl(224 40% 5% / 0.92));
+  border: 1px solid color-mix(in srgb, var(--pc-verd) 18%, var(--pc-line));
+  border-radius: 10px;
+  box-shadow:
+    0 8px 22px hsl(224 60% 1% / 0.42),
+    inset 0 1px 0 hsl(180 40% 90% / 0.06);
+  backdrop-filter: blur(10px);
+}
+
+/* Engraved label — a hairline of lamplight caught in the cut. */
+.pc-etch {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--pc-dim);
+  text-shadow: 0 1px 0 hsl(224 60% 2% / 0.8);
+}
+
+/* Instrument numerals. */
+.pc-readout {
+  font-family: var(--font-readout), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A selectable control on the desk: recessed when off, lit when on. */
+.pc-chip {
+  border: 1px solid var(--pc-line);
+  background: hsl(222 30% 12% / 0.75);
+  color: var(--pc-dim);
+  border-radius: 5px;
+  transition: color 140ms ease, border-color 140ms ease, background-color 140ms ease;
+}
+.pc-chip:hover { color: var(--pc-ink); border-color: color-mix(in srgb, var(--pc-verd) 35%, var(--pc-line)); }
+.pc-chip-on {
+  color: var(--pc-void);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--pc-verd) 92%, #fff), var(--pc-verd));
+  border-color: color-mix(in srgb, var(--pc-verd) 70%, #000);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--pc-verd) 35%, transparent);
+}
+.pc-chip-on:hover { color: var(--pc-void); }
+
+/* Graduated bezel — the minute scale scribed along an edge. Give it a
+   height and it reads as the rim of the instrument. */
+.pc-bezel {
+  background-image:
+    repeating-linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--pc-faint) 85%, transparent) 0 1px,
+      transparent 1px 11px
+    );
+  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+}
+
+/* Header, tailored to the dome: a solid night bar whose bottom lip is
+   the graduated rim of the instrument, lit faintly from below. Applied
+   alongside .pc-theme via useHeaderConfig({ scopeClass: 'pc-theme pc-header' }). */
+.pc-header {
+  background-color: hsl(224 45% 4% / 0.94);
+  background-image:
+    radial-gradient(ellipse 46% 190% at 50% 128%, color-mix(in srgb, var(--pc-verd) 13%, transparent), transparent 68%),
+    linear-gradient(180deg, #070a13, #04060d);
+  border-bottom-color: color-mix(in srgb, var(--pc-verd) 22%, var(--pc-line));
+}
+.pc-header::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 5px;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--pc-verd) 45%, transparent) 0 1px,
+    transparent 1px 14px
+  );
+  mask-image: linear-gradient(180deg, transparent, #000);
+}
+
+/* ─────────────────────────────────────────────────────────────
    Hallway scope — the homepage corridor. A neutral gallery shell
    whose only job is to frame each project tile rendered in its
    OWN theme (cc-scope, ws-theme, lol-theme, …). Light: warm

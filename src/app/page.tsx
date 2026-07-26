@@ -53,7 +53,7 @@ export default function HomePage() {
               <MusicRoom music={data.music} albums={data.albums} className="col-span-2 row-span-2" />
               <TradingRoom accounts={data.accounts} className="col-span-2" />
               <ChallengesRoom challenges={data.challenges} games={data.games} className="col-span-2" />
-              <PolarRoom className="col-span-2 row-span-2" />
+              <PolarRoom className="col-span-2" />
               <GolRoom className="col-span-2" />
               <BrainfuckRoom brainfuck={data.brainfuck} className="col-span-2" />
               <JellyfinRoom fetches={data.fetches} className="col-span-2" />

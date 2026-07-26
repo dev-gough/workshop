@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { useTheme } from '@/components/ThemeProvider';
+import { useDomeTheme } from './dome';
 
 // ── Background: Koch Snowflake ───────────────────────────────────
 export function KochBackground({ width, height }: { width: number; height: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { theme } = useTheme();
+  const { theme } = useDomeTheme();
   const depthRef = useRef(0);
   const growingRef = useRef(true);
   const lastTickRef = useRef(0);
