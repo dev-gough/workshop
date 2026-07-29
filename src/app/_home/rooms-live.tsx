@@ -7,7 +7,7 @@ import {
   cleanSongName, timeAgo,
   type ServerStats, type ServiceInfo, type MusicStats, type AlbumRow,
   type ChallengeData, type GameData, type PtAccount, type FetchRow,
-  type SwActivity, type BfRun, type SlskStats,
+  type SwActivity, type BfRun, type SlskStats, type SpaceflightStats,
 } from './use-home-data';
 
 // ── 01 · Control Center — a window into the phosphor instrument wall ──
@@ -454,6 +454,74 @@ export function SoulseekRoom({ soulseek, className }: { soulseek: SlskStats | nu
           </>
         ) : (
           <p className="text-xs text-zinc-600">No peers on the line…</p>
+        )}
+      </div>
+    </Door>
+  );
+}
+
+// ── 17 · Mission Control — tonnes to orbit on the firing-room wall ──
+
+// Hex values mirror the .sf-theme vehicle/chrome vars in globals.css; the
+// tile renders outside that scope so it carries its own copies.
+const SF_VEHICLE: Record<string, string> = {
+  'Falcon 1': '#9085e9',
+  'Falcon 9': '#199e70',
+  'Falcon Heavy': '#c98500',
+  Starship: '#3987e5',
+};
+
+export function SpaceflightRoom({ spaceflight, className }: {
+  spaceflight: SpaceflightStats | null;
+  className?: string;
+}) {
+  const vehicles = spaceflight?.vehicles ?? [];
+  const totalT = vehicles.reduce((s, v) => s + v.tonnes_delivered, 0);
+  const next = spaceflight?.nextLaunch ?? null;
+  const tMinus = useMemo(() => {
+    if (!next) return null;
+    const h = Math.max(Math.floor((new Date(next.net).getTime() - Date.now()) / 3600_000), 0);
+    return h >= 24 ? `T-${Math.floor(h / 24)}d ${h % 24}h` : `T-${h}h`;
+  }, [next]);
+
+  return (
+    <Door href="/projects/spaceflight" number="RM 17" room="Mission Control" className={className}>
+      <div className="flex h-full flex-col justify-center gap-2 bg-[#060a08] p-4 pb-9">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#46d17e]">The firing room</p>
+        {vehicles.length > 0 ? (
+          <>
+            <p className="font-mono text-2xl font-semibold tabular-nums text-[#46d17e]">
+              {Math.round(totalT).toLocaleString('en-US')}
+              <span className="text-sm font-normal text-zinc-500"> t to orbit</span>
+            </p>
+            {/* One stacked bar, vehicles in fixed order — a 3px floor keeps
+                Falcon 1's sliver visible next to Falcon 9's wall. */}
+            <div className="flex h-2 w-full items-stretch gap-[2px]">
+              {vehicles.map((v) => (
+                <span
+                  key={v.vehicle}
+                  title={`${v.vehicle}: ${Math.round(v.tonnes_delivered).toLocaleString('en-US')} t`}
+                  className="rounded-[2px]"
+                  style={{
+                    background: SF_VEHICLE[v.vehicle] ?? '#57685e',
+                    flexGrow: Math.max(v.tonnes_delivered / Math.max(totalT, 1), 0.012),
+                    flexBasis: 3,
+                  }}
+                />
+              ))}
+            </div>
+            <p className="truncate text-[11px] text-zinc-500">
+              {vehicles.reduce((s, v) => s + v.flights, 0)} flights
+              {tMinus && next && (
+                <>
+                  {' · '}next: <span className="text-zinc-300">{tMinus}</span>{' '}
+                  {next.name.split('|').pop()?.trim()}
+                </>
+              )}
+            </p>
+          </>
+        ) : (
+          <p className="text-xs text-zinc-600">Telemetry dark…</p>
         )}
       </div>
     </Door>

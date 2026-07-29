@@ -1559,3 +1559,120 @@
     cursor: pointer;
   }
 }
+
+/* ─── Mission Control scope (RM 17) — applied to /projects/spaceflight ───
+   A launch-control firing room: lights off, phosphor telemetry on glass,
+   tabular numerals counting tonnes to orbit. Deliberately dark-always —
+   firing rooms don't have a day shift. Voice kept distinct from cc-scope
+   (the server instrument wall): green-cast console instead of cyan bezels,
+   fine plot-paper grid instead of scanlines.
+   Vehicle series colors are categorical and validated (dataviz six checks,
+   surface #060a08): violet F1 → aqua-green F9 → amber FH → ice-blue Starship.
+   The bright phosphor green is UI chrome only, never a data series. */
+.sf-theme {
+  /* Palette */
+  --sf-void:   #060a08;               /* the dark firing room */
+  --sf-panel:  #0a100d;               /* console housings */
+  --sf-raise:  #101913;               /* raised plate / hover */
+  --sf-line:   hsl(150 12% 16%);      /* panel seams */
+  --sf-ink:    #e8f2ea;
+  --sf-dim:    #8fa398;               /* stencilled label */
+  --sf-faint:  #57685e;               /* graduation marks */
+  --sf-green:  #46d17e;               /* phosphor — chrome, GO states */
+  --sf-amber:  #d9a13c;               /* caution — estimates, holds */
+  --sf-red:    #e0596b;               /* failures */
+  /* Vehicle series (fixed categorical order, do not cycle) */
+  --sf-f1: #9085e9;
+  --sf-f9: #199e70;
+  --sf-fh: #c98500;
+  --sf-ss: #3987e5;
+
+  /* Remap the shared tokens so utilities + shadcn/lucide follow suit. */
+  --color-background:           var(--sf-void);
+  --color-foreground:           var(--sf-ink);
+  --color-card:                 var(--sf-panel);
+  --color-card-foreground:      var(--sf-ink);
+  --color-popover:              var(--sf-panel);
+  --color-popover-foreground:   var(--sf-ink);
+  --color-muted:                var(--sf-raise);
+  --color-muted-foreground:     var(--sf-dim);
+  --color-secondary:            var(--sf-raise);
+  --color-secondary-foreground: var(--sf-ink);
+  --color-border:               var(--sf-line);
+  --color-input:                var(--sf-line);
+  --color-ring:                 var(--sf-green);
+  --color-primary:              var(--sf-green);
+  --color-primary-foreground:   #041008;
+  --color-accent:               var(--sf-amber);
+  --color-accent-foreground:    var(--sf-void);
+  --color-destructive:          var(--sf-red);
+  --color-chart-1:              var(--sf-f9);
+  --color-chart-2:              var(--sf-fh);
+  --color-chart-3:              var(--sf-ss);
+  --color-chart-4:              var(--sf-f1);
+
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  color: var(--sf-ink);
+  background-color: var(--sf-void);
+  /* Plot paper: fine 24px grid + surveyor's 120px grid, barely there. */
+  background-image:
+    radial-gradient(ellipse 75% 40% at 50% -5%, hsl(150 60% 40% / 0.06), transparent 70%),
+    linear-gradient(to right,  hsl(150 25% 14% / 0.5) 1px, transparent 1px),
+    linear-gradient(to bottom, hsl(150 25% 14% / 0.5) 1px, transparent 1px),
+    linear-gradient(to right,  hsl(150 35% 18% / 0.35) 1px, transparent 1px),
+    linear-gradient(to bottom, hsl(150 35% 18% / 0.35) 1px, transparent 1px);
+  background-size: 100% 100%, 24px 24px, 24px 24px, 120px 120px, 120px 120px;
+  background-attachment: fixed, scroll, scroll, scroll, scroll;
+}
+
+/* A console housing: squared corners — flight hardware isn't round. */
+.sf-console {
+  background: linear-gradient(170deg, hsl(150 18% 8% / 0.92), hsl(160 22% 4% / 0.94));
+  border: 1px solid var(--sf-line);
+  border-radius: 4px;
+  box-shadow:
+    0 6px 18px hsl(160 60% 1% / 0.5),
+    inset 0 1px 0 hsl(150 30% 85% / 0.05);
+}
+
+/* Stencilled panel label. */
+.sf-etch {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--sf-dim);
+}
+
+/* Instrument numerals. */
+.sf-readout {
+  font-family: var(--font-readout), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Console pushbutton: recessed when off, phosphor-lit when engaged. */
+.sf-chip {
+  border: 1px solid var(--sf-line);
+  background: hsl(150 18% 9% / 0.8);
+  color: var(--sf-dim);
+  border-radius: 3px;
+  transition: color 140ms ease, border-color 140ms ease,
+    background-color 140ms ease, box-shadow 140ms ease;
+}
+.sf-chip:hover { color: var(--sf-ink); border-color: var(--sf-faint); }
+.sf-chip[data-on='true'] {
+  color: var(--sf-green);
+  border-color: color-mix(in srgb, var(--sf-green) 55%, var(--sf-line));
+  background: color-mix(in srgb, var(--sf-green) 10%, hsl(150 18% 9%));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--sf-green) 25%, transparent);
+}
+
+/* Status lamp. */
+.sf-led {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  box-shadow: 0 0 6px currentColor;
+}
+@keyframes sf-blink { 50% { opacity: 0.25; } }
+.sf-led[data-live='true'] { animation: sf-blink 1.6s steps(2, start) infinite; }

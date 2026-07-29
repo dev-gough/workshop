@@ -6,7 +6,7 @@ import { useHeaderConfig } from '@/components/header-config';
 import { useHomeData, formatUptime } from './_home/use-home-data';
 import {
   ServerRoom, MusicRoom, TradingRoom, ChallengesRoom,
-  BrainfuckRoom, JellyfinRoom, SplitwiserRoom, SoulseekRoom,
+  BrainfuckRoom, JellyfinRoom, SplitwiserRoom, SoulseekRoom, SpaceflightRoom,
 } from './_home/rooms-live';
 import {
   PolarRoom, GrooveRoom, GolRoom, HouseRoom, EcosystemRoom, NeuroRoom, ImageEvolverRoom, MegabonkRoom,
@@ -36,7 +36,7 @@ export default function HomePage() {
                   Devy&apos;s Workshop
                 </h1>
                 <p className="mt-1.5 text-sm text-muted-foreground">
-                  Sixteen rooms off one hallway — pick a door.
+                  Seventeen rooms off one hallway — pick a door.
                 </p>
               </div>
               <DirectoryPlaque data={data} />
@@ -61,6 +61,7 @@ export default function HomePage() {
               <SplitwiserRoom splitwiser={data.splitwiser} className="col-span-2" />
               <SoulseekRoom soulseek={data.soulseek} className="col-span-2" />
               <MegabonkRoom className="col-span-2" />
+              <SpaceflightRoom spaceflight={data.spaceflight} className="col-span-2" />
               <HouseRoom className="col-span-1" />
               <EcosystemRoom className="col-span-1" />
               <NeuroRoom className="col-span-1" />

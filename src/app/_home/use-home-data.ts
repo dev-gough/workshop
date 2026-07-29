@@ -102,6 +102,17 @@ export interface SlskStats {
   };
 }
 
+export interface SpaceflightStats {
+  vehicles: {
+    vehicle: string;
+    flights: number;
+    tonnes_delivered: number;
+    first_launch: string;
+    last_launch: string;
+  }[];
+  nextLaunch: { name: string; net: string } | null;
+}
+
 export interface HomeData {
   server: ServerStats | null;
   services: ServiceInfo[];
@@ -114,6 +125,7 @@ export interface HomeData {
   splitwiser: SwActivity[];
   brainfuck: BfRun[];
   soulseek: SlskStats | null;
+  spaceflight: SpaceflightStats | null;
 }
 
 // ── Small shared helpers ──
@@ -166,6 +178,7 @@ export function useHomeData(): HomeData {
   const [splitwiser, setSplitwiser] = useState<SwActivity[]>([]);
   const [brainfuck, setBrainfuck] = useState<BfRun[]>([]);
   const [soulseek, setSoulseek] = useState<SlskStats | null>(null);
+  const [spaceflight, setSpaceflight] = useState<SpaceflightStats | null>(null);
 
   const fetchServer = useCallback(async () => {
     const [stats, svcs] = await Promise.all([
@@ -185,7 +198,7 @@ export function useHomeData(): HomeData {
 
   useEffect(() => {
     (async () => {
-      const [m, a, c, g, acct, jf, sw, bf, slsk] = await Promise.all([
+      const [m, a, c, g, acct, jf, sw, bf, slsk, sf] = await Promise.all([
         getJson<MusicStats>('/api/music/stats'),
         getJson<AlbumRow[]>('/api/music'),
         getJson<ChallengeData>('/api/challenges'),
@@ -195,6 +208,7 @@ export function useHomeData(): HomeData {
         getJson<{ activity: SwActivity[] }>('/api/splitwiser/activity?limit=5'),
         getJson<{ activity: BfRun[] }>('/api/brainfuck/activity?limit=5'),
         getJson<SlskStats>('/api/soulseek/stats'),
+        getJson<SpaceflightStats>('/api/spaceflight/stats'),
       ]);
       if (m?.summary) setMusic(m);
       if (Array.isArray(a)) setAlbums(a);
@@ -205,8 +219,9 @@ export function useHomeData(): HomeData {
       if (sw?.activity) setSplitwiser(sw.activity);
       if (bf?.activity) setBrainfuck(bf.activity);
       if (slsk?.downloads) setSoulseek(slsk);
+      if (sf?.vehicles?.length) setSpaceflight(sf);
     })();
   }, []);
 
-  return { server, services, music, albums, challenges, games, accounts, fetches, splitwiser, brainfuck, soulseek };
+  return { server, services, music, albums, challenges, games, accounts, fetches, splitwiser, brainfuck, soulseek, spaceflight };
 }

@@ -1,0 +1,10 @@
+[Unit]
+Description=Sync SpaceX launches from Launch Library (RM 17)
+After=postgresql.service network-online.target
+
+[Service]
+Type=oneshot
+User=$SERVER_USER
+WorkingDirectory=$WORKSHOP_DIR
+ExecStart=/usr/bin/env npx tsx scripts/sync-spaceflight.ts
+TimeoutStartSec=120
