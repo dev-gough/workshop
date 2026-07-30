@@ -9,6 +9,7 @@ import {
   countedKg,
   fmtTonnes,
   isEstimate,
+  type Accounting,
   type Launch,
   type Mode,
   type UpcomingLaunch,
@@ -155,13 +156,21 @@ const STATUS_GLYPH: Record<string, { glyph: string; color: string }> = {
   Failure: { glyph: '▽', color: 'var(--sf-red)' },
 };
 
-export function LaunchLog({ launches, mode }: { launches: Launch[]; mode: Mode }) {
+export function LaunchLog({
+  launches,
+  mode,
+  acct,
+}: {
+  launches: Launch[];
+  mode: Mode;
+  acct: Accounting;
+}) {
   const recent = launches.slice(-9).reverse();
   return (
     <ul className="space-y-0">
       {recent.map((l) => {
         const st = STATUS_GLYPH[l.status] ?? { glyph: '·', color: 'var(--sf-faint)' };
-        const t = countedKg(l, mode) / 1000;
+        const t = countedKg(l, mode, acct) / 1000;
         return (
           <li
             key={l.ll2_id}
@@ -188,35 +197,5 @@ export function LaunchLog({ launches, mode }: { launches: Launch[]; mode: Mode }
         );
       })}
     </ul>
-  );
-}
-
-// ── Mode pushbuttons ────────────────────────────────────────────────────────
-
-export function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => void }) {
-  return (
-    <div
-      className="flex gap-1.5"
-      role="radiogroup"
-      aria-label="Tonnage counting mode"
-    >
-      {(
-        [
-          ['delivered', 'Delivered to orbit'],
-          ['launched', 'Total launched'],
-        ] as const
-      ).map(([m, label]) => (
-        <button
-          key={m}
-          role="radio"
-          aria-checked={mode === m}
-          data-on={mode === m}
-          onClick={() => onChange(m)}
-          className="sf-chip px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em]"
-        >
-          {label}
-        </button>
-      ))}
-    </div>
   );
 }

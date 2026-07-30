@@ -465,10 +465,10 @@ export function SoulseekRoom({ soulseek, className }: { soulseek: SlskStats | nu
 // Hex values mirror the .sf-theme vehicle/chrome vars in globals.css; the
 // tile renders outside that scope so it carries its own copies.
 const SF_VEHICLE: Record<string, string> = {
-  'Falcon 1': '#9085e9',
+  'Falcon 1': '#3987e5',
   'Falcon 9': '#199e70',
   'Falcon Heavy': '#c98500',
-  Starship: '#3987e5',
+  Starship: '#9085e9',
 };
 
 function fmtTMinus(deltaMs: number): string {

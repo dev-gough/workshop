@@ -1581,11 +1581,14 @@
   --sf-green:  #46d17e;               /* phosphor — chrome, GO states */
   --sf-amber:  #d9a13c;               /* caution — estimates, holds */
   --sf-red:    #e0596b;               /* failures */
-  /* Vehicle series (fixed categorical order, do not cycle) */
-  --sf-f1: #9085e9;
+  /* Vehicle series (fixed categorical order, do not cycle). Starship wears
+     violet, not blue: the world range assigns blue to Shuttle/SLS, and the
+     two share tables and the time machine. Validated 2026-07 on this
+     surface (adjacent CVD 8.4 with direct labels as secondary encoding). */
+  --sf-f1: #3987e5;
   --sf-f9: #199e70;
   --sf-fh: #c98500;
-  --sf-ss: #3987e5;
+  --sf-ss: #9085e9;
 
   /* Remap the shared tokens so utilities + shadcn/lucide follow suit. */
   --color-background:           var(--sf-void);

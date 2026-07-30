@@ -34,15 +34,48 @@ export interface ChartSeries {
   pts: CumPoint[];
 }
 
-export function Legend({ items }: { items: Array<{ label: string; color: string }> }) {
+export function Legend({
+  items,
+  hidden,
+  onToggle,
+}: {
+  items: Array<{ key?: string; label: string; color: string }>;
+  /** keys currently muted — chips render dimmed */
+  hidden?: Set<string>;
+  /** when present the legend is interactive: click a chip to mute/unmute */
+  onToggle?: (key: string) => void;
+}) {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-      {items.map((it) => (
-        <span key={it.label} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <span className="inline-block h-2 w-2 rounded-[2px]" style={{ background: it.color }} />
-          {it.label}
-        </span>
-      ))}
+      {items.map((it) => {
+        const k = it.key ?? it.label;
+        const off = hidden?.has(k) ?? false;
+        const inner = (
+          <>
+            <span
+              className="inline-block h-2 w-2 rounded-[2px]"
+              style={{ background: off ? 'transparent' : it.color, boxShadow: `inset 0 0 0 1.5px ${it.color}` }}
+            />
+            {it.label}
+          </>
+        );
+        return onToggle ? (
+          <button
+            key={k}
+            onClick={() => onToggle(k)}
+            aria-pressed={!off}
+            title={off ? 'Show series' : 'Hide series'}
+            className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground transition-opacity hover:text-foreground"
+            style={{ opacity: off ? 0.45 : 1 }}
+          >
+            {inner}
+          </button>
+        ) : (
+          <span key={k} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            {inner}
+          </span>
+        );
+      })}
     </div>
   );
 }
@@ -64,9 +97,11 @@ const fmtDay = (t: number) =>
 interface CumProps {
   series: ChartSeries[];
   now: number;
+  /** override the left edge of the time axis (year-window start) */
+  from?: number;
 }
 
-export function CumulativeChart({ series, now }: CumProps) {
+export function CumulativeChart({ series, now, from }: CumProps) {
   const [ref, width] = useWidth();
   const [hover, setHover] = useState<number | null>(null); // ms epoch
 
@@ -76,7 +111,14 @@ export function CumulativeChart({ series, now }: CumProps) {
   const ih = H - pad.t - pad.b;
 
   const all = series.map((s) => s.pts).filter((p) => p.length > 0);
-  const t0 = Math.min(...all.map((p) => p[0].t));
+  if (all.length === 0) {
+    return (
+      <div ref={ref} className="flex h-[120px] items-center justify-center">
+        <p className="text-[11px] text-muted-foreground">No series in view — everything is muted or out of window.</p>
+      </div>
+    );
+  }
+  const t0 = from ?? Math.min(...all.map((p) => p[0].t));
   const t1 = now;
   const vMax = niceMax(Math.max(...all.map((p) => p[p.length - 1].v)));
 
@@ -264,6 +306,14 @@ export function CumulativeChart({ series, now }: CumProps) {
 export function YearlyChart({ rows }: { rows: YearRow[] }) {
   const [ref, width] = useWidth();
   const [hover, setHover] = useState<number | null>(null); // year
+
+  if (rows.length === 0) {
+    return (
+      <div className="flex h-[120px] items-center justify-center">
+        <p className="text-[11px] text-muted-foreground">No flights in window.</p>
+      </div>
+    );
+  }
 
   const H = 260;
   const pad = { l: 46, r: 8, t: 20, b: 26 };
