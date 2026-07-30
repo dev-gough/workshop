@@ -12,21 +12,36 @@ function Chip({
   on,
   label,
   onClick,
+  tip,
 }: {
   on: boolean;
   label: string;
   onClick: () => void;
+  /** hover/focus tooltip explaining what the pushbutton changes */
+  tip?: string;
 }) {
-  return (
+  const btn = (
     <button
       role="radio"
       aria-checked={on}
-      data-on={on}
       onClick={onClick}
+      data-on={on}
       className="sf-chip px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] whitespace-nowrap"
     >
       {label}
     </button>
+  );
+  if (!tip) return btn;
+  return (
+    <span className="group relative inline-flex">
+      {btn}
+      <span
+        role="tooltip"
+        className="sf-console pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 w-56 -translate-x-1/2 px-3 py-2 text-left text-[10px] normal-case leading-relaxed tracking-normal text-muted-foreground opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 group-hover:delay-200"
+      >
+        {tip}
+      </span>
+    </span>
   );
 }
 
@@ -172,17 +187,42 @@ export function TrackingConsole({
         <div role="radiogroup" aria-label="Counting mode">
           <p className="sf-etch">Counting</p>
           <div className="mt-2 flex gap-1.5">
-            <Chip on={mode === 'delivered'} label="Delivered" onClick={() => onMode('delivered')} />
-            <Chip on={mode === 'launched'} label="Launched" onClick={() => onMode('launched')} />
+            <Chip
+              on={mode === 'delivered'}
+              label="Delivered"
+              onClick={() => onMode('delivered')}
+              tip="Only mass that reached orbit and stayed there. Failures and Starship's suborbital test arcs count zero."
+            />
+            <Chip
+              on={mode === 'launched'}
+              label="Launched"
+              onClick={() => onMode('launched')}
+              tip="Everything that left the pad — failures count at their intended mass, and Starship's test arcs count in full."
+            />
           </div>
         </div>
 
         <div role="radiogroup" aria-label="Accounting basis">
           <p className="sf-etch">Accounting</p>
           <div className="mt-2 flex gap-1.5">
-            <Chip on={acct === 'payload'} label="Payload" onClick={() => onAcct('payload')} />
-            <Chip on={acct === 'craft'} label="+ Spacecraft" onClick={() => onAcct('craft')} />
-            <Chip on={acct === 'stages'} label="+ Stages" onClick={() => onAcct('stages')} />
+            <Chip
+              on={acct === 'payload'}
+              label="Payload"
+              onClick={() => onAcct('payload')}
+              tip="Satellites, cargo and crew capsules only — the strictest ledger. Orbiters, ships and spent stages don't count."
+            />
+            <Chip
+              on={acct === 'craft'}
+              label="+ Spacecraft"
+              onClick={() => onAcct('craft')}
+              tip="Also counts vehicles that fly to orbit as spacecraft: Shuttle orbiters (~94.5 t), Buran, and Starship ships (120 t). This is GCAT's own convention."
+            />
+            <Chip
+              on={acct === 'stages'}
+              label="+ Stages"
+              onClick={() => onAcct('stages')}
+              tip="Also counts the upper stage each rocket leaves in orbit, at approximate dry mass — Falcon 9's S2 (4 t), Saturn V's S-IVB (13.5 t), R-7's Blok-I (2.5 t)…"
+            />
           </div>
           <p className="mt-1.5 text-[10px] text-muted-foreground">{ACCT_HINT[acct]}</p>
         </div>
