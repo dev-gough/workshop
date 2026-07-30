@@ -110,7 +110,7 @@ export interface SpaceflightStats {
     first_launch: string;
     last_launch: string;
   }[];
-  nextLaunch: { name: string; net: string } | null;
+  nextLaunch: { name: string; net: string; status: string } | null;
 }
 
 export interface HomeData {

@@ -24,7 +24,7 @@ export async function GET() {
           ORDER BY min(net)`
       ),
       pool.query(
-        `SELECT name, net FROM spaceflight_launches
+        `SELECT name, net, status FROM spaceflight_launches
           WHERE is_upcoming AND net > now()
           ORDER BY net LIMIT 1`
       ),

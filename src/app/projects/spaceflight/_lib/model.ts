@@ -1,4 +1,4 @@
-// Client-side aggregation for RM 17. The API hands over every past launch;
+// Client-side aggregation for RM 03. The API hands over every past launch;
 // everything the room displays — per-vehicle consoles, both charts, the log —
 // derives from that one list so the delivered/launched toggle is instant.
 

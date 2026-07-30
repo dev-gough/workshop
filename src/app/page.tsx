@@ -51,7 +51,7 @@ export default function HomePage() {
             >
               <ServerRoom server={data.server} services={data.services} className="col-span-2 row-span-2" />
               <MusicRoom music={data.music} albums={data.albums} className="col-span-2 row-span-2" />
-              <TradingRoom accounts={data.accounts} className="col-span-2" />
+              <SpaceflightRoom spaceflight={data.spaceflight} className="col-span-2" />
               <ChallengesRoom challenges={data.challenges} games={data.games} className="col-span-2" />
               <PolarRoom className="col-span-2" />
               <GrooveRoom className="col-span-2" />
@@ -61,7 +61,7 @@ export default function HomePage() {
               <SplitwiserRoom splitwiser={data.splitwiser} className="col-span-2" />
               <SoulseekRoom soulseek={data.soulseek} className="col-span-2" />
               <MegabonkRoom className="col-span-2" />
-              <SpaceflightRoom spaceflight={data.spaceflight} className="col-span-2" />
+              <TradingRoom accounts={data.accounts} className="col-span-2" />
               <HouseRoom className="col-span-1" />
               <EcosystemRoom className="col-span-1" />
               <NeuroRoom className="col-span-1" />

@@ -95,7 +95,7 @@ export default function SpaceflightPage() {
             <div className="flex flex-wrap items-start justify-between gap-x-8 gap-y-4">
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary">
-                  RM 17 · Mission Control
+                  RM 03 · Mission Control
                 </p>
                 <h1 className="ws-serif mt-0.5 text-4xl font-semibold tracking-tight sm:text-5xl">
                   Tonnage to Orbit

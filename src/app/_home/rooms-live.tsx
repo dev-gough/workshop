@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { fmtBytes } from '@/lib/format';
 import { Door } from './door';
 import {
@@ -161,7 +161,7 @@ export function TradingRoom({ accounts, className }: { accounts: PtAccount[]; cl
   const positions = accounts.reduce((s, a) => s + a.positionCount, 0);
 
   return (
-    <Door href="/projects/paper-trading" number="RM 03" room="Paper Trading" className={className}>
+    <Door href="/projects/paper-trading" number="RM 17" room="Paper Trading" className={className}>
       <div className="ws-theme flex h-full flex-col justify-between p-4 pb-9">
         <p className="text-[10px] font-semibold uppercase tracking-[0.2em]" style={{ color: 'var(--ws-ink-soft)' }}>
           Portfolio — all accounts
@@ -471,6 +471,17 @@ const SF_VEHICLE: Record<string, string> = {
   Starship: '#3987e5',
 };
 
+function fmtTMinus(deltaMs: number): string {
+  const past = deltaMs < 0;
+  const s = Math.floor(Math.abs(deltaMs) / 1000);
+  const d = Math.floor(s / 86400);
+  const hh = String(Math.floor((s % 86400) / 3600)).padStart(2, '0');
+  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+  const ss = String(s % 60).padStart(2, '0');
+  const sign = past ? 'T+' : 'T-';
+  return d > 0 ? `${sign}${d}d ${hh}:${mm}:${ss}` : `${sign}${hh}:${mm}:${ss}`;
+}
+
 export function SpaceflightRoom({ spaceflight, className }: {
   spaceflight: SpaceflightStats | null;
   className?: string;
@@ -478,25 +489,56 @@ export function SpaceflightRoom({ spaceflight, className }: {
   const vehicles = spaceflight?.vehicles ?? [];
   const totalT = vehicles.reduce((s, v) => s + v.tonnes_delivered, 0);
   const next = spaceflight?.nextLaunch ?? null;
-  const tMinus = useMemo(() => {
-    if (!next) return null;
-    const h = Math.max(Math.floor((new Date(next.net).getTime() - Date.now()) / 3600_000), 0);
-    return h >= 24 ? `T-${Math.floor(h / 24)}d ${h % 24}h` : `T-${h}h`;
+
+  // The clock ticks locally at 1 Hz off the launch time we already have —
+  // it never touches the API (the timer/room sync keep the time fresh).
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!next) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
   }, [next]);
 
+  const go = next?.status === 'Go';
+
   return (
-    <Door href="/projects/spaceflight" number="RM 17" room="Mission Control" className={className}>
-      <div className="flex h-full flex-col justify-center gap-2 bg-[#060a08] p-4 pb-9">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#46d17e]">The firing room</p>
+    <Door href="/projects/spaceflight" number="RM 03" room="Mission Control" className={className}>
+      <div className="flex h-full flex-col justify-center gap-1.5 bg-[#060a08] p-4 pb-9">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#46d17e]">The firing room</p>
+          {next && (
+            <span
+              className="flex items-center gap-1 text-[10px] font-semibold tracking-[0.14em]"
+              style={{ color: go ? '#46d17e' : '#d9a13c' }}
+            >
+              <span
+                className="h-1.5 w-1.5 rounded-full"
+                style={{ background: 'currentcolor', boxShadow: '0 0 5px currentcolor' }}
+              />
+              {go ? 'GO' : next.status.toUpperCase()}
+            </span>
+          )}
+        </div>
         {vehicles.length > 0 ? (
           <>
-            <p className="font-mono text-2xl font-semibold tabular-nums text-[#46d17e]">
-              {Math.round(totalT).toLocaleString('en-US')}
-              <span className="text-sm font-normal text-zinc-500"> t to orbit</span>
-            </p>
+            {next ? (
+              <>
+                <p className="font-mono text-2xl font-semibold tabular-nums text-[#46d17e]">
+                  {fmtTMinus(new Date(next.net).getTime() - now)}
+                </p>
+                <p className="truncate text-[11px] text-zinc-400">
+                  {next.name.split('|').pop()?.trim() ?? next.name}
+                </p>
+              </>
+            ) : (
+              <p className="font-mono text-2xl font-semibold tabular-nums text-[#46d17e]">
+                {Math.round(totalT).toLocaleString('en-US')}
+                <span className="text-sm font-normal text-zinc-500"> t to orbit</span>
+              </p>
+            )}
             {/* One stacked bar, vehicles in fixed order — a 3px floor keeps
                 Falcon 1's sliver visible next to Falcon 9's wall. */}
-            <div className="flex h-2 w-full items-stretch gap-[2px]">
+            <div className="flex h-1.5 w-full items-stretch gap-[2px]">
               {vehicles.map((v) => (
                 <span
                   key={v.vehicle}
@@ -511,13 +553,13 @@ export function SpaceflightRoom({ spaceflight, className }: {
               ))}
             </div>
             <p className="truncate text-[11px] text-zinc-500">
-              {vehicles.reduce((s, v) => s + v.flights, 0)} flights
-              {tMinus && next && (
+              {next && (
                 <>
-                  {' · '}next: <span className="text-zinc-300">{tMinus}</span>{' '}
-                  {next.name.split('|').pop()?.trim()}
+                  <span className="text-zinc-300">{Math.round(totalT).toLocaleString('en-US')} t</span>
+                  {' to orbit · '}
                 </>
               )}
+              {vehicles.reduce((s, v) => s + v.flights, 0)} flights
             </p>
           </>
         ) : (

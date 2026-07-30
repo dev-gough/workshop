@@ -1,4 +1,4 @@
-// Payload-mass estimation for RM 17 (Mission Control).
+// Payload-mass estimation for RM 03 (Mission Control).
 //
 // Launch Library 2 gives us the flight record but not payload masses, and
 // SpaceX stopped publishing them for most flights around the start of the

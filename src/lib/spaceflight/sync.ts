@@ -1,4 +1,4 @@
-// Launch Library 2 → Postgres sync for RM 17 (Mission Control).
+// Launch Library 2 → Postgres sync for RM 03 (Mission Control).
 //
 // LL2's free tier allows 15 requests/hour, so this is strictly cache-through:
 // the browser only ever reads our tables. A full backfill of ~710 SpaceX
