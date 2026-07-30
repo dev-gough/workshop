@@ -171,3 +171,85 @@ export function fmtTonnes(t: number): string {
   if (t >= 1) return `${t.toFixed(1)} t`;
   return `${(t * 1000).toFixed(0)} kg`;
 }
+
+// ── World range (GCAT) ──────────────────────────────────────────────────────
+
+export interface WorldFamily {
+  key: string;
+  spacex: boolean;
+  flights: number;
+  successes: number;
+  tDelivered: number;
+  tLaunched: number;
+  firstYear: number;
+  lastYear: number;
+  yearly: Array<{ y: number; del: number; lau: number }>;
+}
+
+export function worldTonnes(f: WorldFamily, mode: Mode): number {
+  return mode === 'delivered' ? f.tDelivered : f.tLaunched;
+}
+
+/**
+ * Human labels for GCAT's lineage-based family codes. GCAT groups by design
+ * heritage, which produces a few surprises worth naming honestly: the
+ * Shuttle lives in "SRB" together with SLS; Long March 2/3/4 descend from
+ * the DF-5 missile. Unmapped codes pass through as-is.
+ */
+const FAMILY_LABEL: Record<string, string> = {
+  SRB: 'Shuttle / SLS',
+  'R-7': 'R-7 / Soyuz',
+  Proton: 'Proton',
+  DF5: 'Long March 2–4',
+  CZ5: 'Long March 5',
+  Ariane5: 'Ariane 5',
+  Ariane6: 'Ariane 6',
+  Titan: 'Titan',
+  Thor: 'Thor / Delta',
+  'R-36': 'Tsyklon (R-36)',
+  SaturnV: 'Saturn V',
+  Saturn: 'Saturn I / IB',
+  Atlas5: 'Atlas V',
+  Atlas: 'Atlas (classic)',
+  Ariane: 'Ariane 1–4',
+  'R-14': 'Kosmos (R-14)',
+  'R-12': 'Kosmos (R-12)',
+  Delta4: 'Delta IV',
+  H2B: 'H-IIB / H3',
+  H2: 'H-II / H-IIA',
+  Energiya: 'Energia',
+  PSLV: 'PSLV',
+  GSLV: 'GSLV',
+  LVM3: 'LVM3',
+  Angara: 'Angara',
+  Vulcan: 'Vulcan',
+  Electron: 'Electron',
+  NewGlenn: 'New Glenn',
+  N1: 'N-1',
+};
+
+export function familyLabel(key: string): string {
+  return FAMILY_LABEL[key] ?? key;
+}
+
+/** World cumulative series colors, assigned by delivered-tonnage rank at
+ * load and held fixed thereafter (color follows the entity, not its rank).
+ * Order is the validated reference sequence; SpaceX vehicles that chart here
+ * happen to land on their own room colors (Falcon 9 → aqua at rank 3). */
+export const WORLD_RANK_COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181'];
+export const WORLD_OTHER_COLOR = '#57685e';
+
+/** Cumulative tonnes series from a family's yearly sums. */
+export function familyCumulative(
+  yearly: Array<{ y: number; del: number; lau: number }>,
+  mode: Mode
+): CumPoint[] {
+  if (yearly.length === 0) return [];
+  const pts: CumPoint[] = [{ t: Date.UTC(yearly[0].y, 0, 1), v: 0 }];
+  let cum = 0;
+  for (const row of yearly) {
+    cum += mode === 'delivered' ? row.del : row.lau;
+    pts.push({ t: Date.UTC(row.y, 11, 31), v: cum });
+  }
+  return pts;
+}

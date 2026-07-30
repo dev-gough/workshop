@@ -1,0 +1,10 @@
+[Unit]
+Description=Mirror GCAT launch history (RM 03 world range)
+After=postgresql.service network-online.target
+
+[Service]
+Type=oneshot
+User=$SERVER_USER
+WorkingDirectory=$WORKSHOP_DIR
+ExecStart=/usr/bin/env npx tsx scripts/sync-gcat.ts
+TimeoutStartSec=300

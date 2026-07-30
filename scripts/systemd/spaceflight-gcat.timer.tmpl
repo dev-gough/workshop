@@ -1,0 +1,10 @@
+[Unit]
+Description=Run spaceflight-gcat.service weekly
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=7d
+AccuracySec=1h
+
+[Install]
+WantedBy=timers.target

@@ -5,6 +5,7 @@ import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
 import { useHeaderConfig } from '@/components/header-config';
 import {
+  VEHICLE_COLOR,
   cumulativeSeries,
   fmtTonnes,
   isEstimate,
@@ -13,9 +14,12 @@ import {
   type Launch,
   type Mode,
   type UpcomingLaunch,
+  type Vehicle,
+  type WorldFamily,
 } from './_lib/model';
 import { CumulativeChart, Legend, YearlyChart } from './_components/charts';
 import { Countdown, LaunchLog, ModeToggle, VehicleConsole } from './_components/console';
+import { WorldSection } from './_components/world';
 
 interface Payload {
   launches: Launch[];
@@ -27,6 +31,7 @@ export default function SpaceflightPage() {
   useHeaderConfig({ scopeClass: 'sf-theme' });
 
   const [data, setData] = useState<Payload | null>(null);
+  const [world, setWorld] = useState<WorldFamily[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>('delivered');
   const [now, setNow] = useState(0);
@@ -41,6 +46,13 @@ export default function SpaceflightPage() {
       setError(null);
     } catch (e) {
       setError(String(e));
+    }
+    // The world range is additive — if it fails, the SpaceX room still works.
+    try {
+      const res = await fetch('/api/spaceflight/world');
+      if (res.ok) setWorld((await res.json()).families);
+    } catch {
+      /* section simply doesn't render */
     }
   }, []);
 
@@ -101,8 +113,8 @@ export default function SpaceflightPage() {
                   Tonnage to Orbit
                 </h1>
                 <p className="mt-1.5 max-w-xl text-sm text-muted-foreground">
-                  Every SpaceX launch since Falcon 1, weighed: what each vehicle has
-                  actually carried uphill, flight by flight.
+                  Every orbital launch since Sputnik, weighed — with the SpaceX
+                  manifest, flight by flight, up front.
                 </p>
                 <div className="mt-4">
                   <ModeToggle mode={mode} onChange={setMode} />
@@ -168,12 +180,25 @@ export default function SpaceflightPage() {
                 <div className="sf-console mt-4 p-4 sm:p-5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="sf-etch">
-                      Cumulative tonnes {mode === 'delivered' ? 'to orbit' : 'launched'} · 2006–present
+                      SpaceX · cumulative tonnes {mode === 'delivered' ? 'to orbit' : 'launched'} · 2006–present
                     </p>
-                    <Legend vehicles={stats.map((s) => s.vehicle)} />
+                    <Legend
+                      items={stats.map((s) => ({
+                        label: s.vehicle,
+                        color: VEHICLE_COLOR[s.vehicle as Vehicle],
+                      }))}
+                    />
                   </div>
                   <div className="mt-3">
-                    <CumulativeChart series={series} now={now} />
+                    <CumulativeChart
+                      series={stats.map((s) => ({
+                        key: s.vehicle,
+                        label: s.vehicle,
+                        color: VEHICLE_COLOR[s.vehicle as Vehicle],
+                        pts: series.get(s.vehicle) ?? [],
+                      }))}
+                      now={now}
+                    />
                   </div>
                 </div>
               </FadeIn>
@@ -183,8 +208,13 @@ export default function SpaceflightPage() {
                 <FadeIn delay={0.2}>
                   <div className="sf-console h-full p-4 sm:p-5">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="sf-etch">Tonnes per year</p>
-                      <Legend vehicles={stats.map((s) => s.vehicle)} />
+                      <p className="sf-etch">SpaceX · tonnes per year</p>
+                      <Legend
+                        items={stats.map((s) => ({
+                          label: s.vehicle,
+                          color: VEHICLE_COLOR[s.vehicle as Vehicle],
+                        }))}
+                      />
                     </div>
                     <div className="mt-3">
                       <YearlyChart rows={years} />
@@ -201,17 +231,25 @@ export default function SpaceflightPage() {
                 </FadeIn>
               </div>
 
+              {/* ── The world range ── */}
+              {world && world.length > 0 && (
+                <FadeIn delay={0.3}>
+                  <WorldSection families={world} mode={mode} now={now} />
+                </FadeIn>
+              )}
+
               {/* ── Methodology + sync ── */}
               <FadeIn delay={0.3}>
                 <div className="sf-console mt-4 flex flex-wrap items-center justify-between gap-x-8 gap-y-3 px-5 py-3.5">
                   <p className="max-w-3xl text-[11px] leading-relaxed text-muted-foreground">
-                    Masses marked <span className="sf-readout text-accent">~</span> are estimates —
-                    SpaceX stopped publishing payload masses in the Starlink era. Rules:
-                    published figures where they exist ({published} flights), Starlink batch
-                    count × per-generation satellite mass, Dragon capsule masses, else a
-                    typical mass for the target orbit. Delivered mode counts only mass that
-                    reached orbit; launched mode includes failures and Starship&apos;s suborbital
-                    test flights. Flight data:{' '}
+                    Masses marked <span className="sf-readout text-accent">~</span> are estimates.
+                    SpaceX masses use GCAT&apos;s per-launch figures where launches match,
+                    then published figures ({published} flights), then Starlink batch count ×
+                    per-generation satellite mass, Dragon capsule masses, or a typical mass
+                    for the target orbit. Delivered mode counts only mass that reached orbit;
+                    launched mode includes failures and Starship&apos;s suborbital test flights.
+                    Crewed vehicles that reach orbit count as payload — the Shuttle orbiter&apos;s
+                    ~95 t is why that family leads the world table. Live flight data:{' '}
                     <a
                       href="https://thespacedevs.com/llapi"
                       target="_blank"
@@ -220,7 +258,16 @@ export default function SpaceflightPage() {
                     >
                       Launch Library 2
                     </a>
-                    .
+                    ; world history:{' '}
+                    <a
+                      href="https://planet4589.org/space/gcat/"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline decoration-dotted underline-offset-2 hover:text-foreground"
+                    >
+                      GCAT
+                    </a>{' '}
+                    (J. McDowell, CC-BY), mirrored weekly.
                   </p>
                   <div className="flex items-center gap-3">
                     {syncMsg && <span className="text-[11px] text-muted-foreground">{syncMsg}</span>}

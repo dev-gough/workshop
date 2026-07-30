@@ -11,7 +11,6 @@ import {
   VEHICLE_COLOR,
   fmtTonnes,
   type CumPoint,
-  type Vehicle,
   type YearRow,
 } from '../_lib/model';
 
@@ -28,16 +27,20 @@ function useWidth(): [RefObject<HTMLDivElement | null>, number] {
   return [ref, w];
 }
 
-export function Legend({ vehicles }: { vehicles: Vehicle[] }) {
+export interface ChartSeries {
+  key: string;
+  label: string;
+  color: string;
+  pts: CumPoint[];
+}
+
+export function Legend({ items }: { items: Array<{ label: string; color: string }> }) {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-      {vehicles.map((v) => (
-        <span key={v} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <span
-            className="inline-block h-2 w-2 rounded-[2px]"
-            style={{ background: VEHICLE_COLOR[v] }}
-          />
-          {v}
+      {items.map((it) => (
+        <span key={it.label} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span className="inline-block h-2 w-2 rounded-[2px]" style={{ background: it.color }} />
+          {it.label}
         </span>
       ))}
     </div>
@@ -59,7 +62,7 @@ const fmtDay = (t: number) =>
 // ── Cumulative tonnage ──────────────────────────────────────────────────────
 
 interface CumProps {
-  series: Map<Vehicle, CumPoint[]>;
+  series: ChartSeries[];
   now: number;
 }
 
@@ -72,7 +75,7 @@ export function CumulativeChart({ series, now }: CumProps) {
   const iw = Math.max(width - pad.l - pad.r, 50);
   const ih = H - pad.t - pad.b;
 
-  const all = [...series.values()];
+  const all = series.map((s) => s.pts).filter((p) => p.length > 0);
   const t0 = Math.min(...all.map((p) => p[0].t));
   const t1 = now;
   const vMax = niceMax(Math.max(...all.map((p) => p[p.length - 1].v)));
@@ -103,8 +106,9 @@ export function CumulativeChart({ series, now }: CumProps) {
   };
 
   // Direct labels at line ends, nudged apart when lines converge.
-  const ends = [...series.entries()]
-    .map(([v, pts]) => ({ vehicle: v, v: pts[pts.length - 1].v, y: y(pts[pts.length - 1].v) }))
+  const ends = series
+    .filter((s) => s.pts.length > 0)
+    .map((s) => ({ s, y: y(s.pts[s.pts.length - 1].v) }))
     .sort((a, b) => a.y - b.y);
   for (let i = 1; i < ends.length; i++) {
     if (ends[i].y - ends[i - 1].y < 13) ends[i].y = ends[i - 1].y + 13;
@@ -119,7 +123,8 @@ export function CumulativeChart({ series, now }: CumProps) {
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => f * vMax);
   const y0 = new Date(t0).getUTCFullYear();
   const y1 = new Date(t1).getUTCFullYear();
-  const step = width < 640 ? 4 : 2;
+  const span = y1 - y0;
+  const step = span > 50 ? 10 : span > 25 ? 5 : width < 640 ? 4 : 2;
   const xTicks: number[] = [];
   for (let yy = Math.ceil(y0 / step) * step; yy <= y1; yy += step) {
     xTicks.push(Date.UTC(yy, 0, 1));
@@ -179,30 +184,28 @@ export function CumulativeChart({ series, now }: CumProps) {
             </text>
           ))}
 
-          {VEHICLES.map((v) => {
-            const pts = series.get(v);
-            if (!pts) return null;
-            return (
+          {series.map((s) =>
+            s.pts.length > 0 ? (
               <path
-                key={v}
-                d={path(pts)}
+                key={s.key}
+                d={path(s.pts)}
                 fill="none"
-                stroke={VEHICLE_COLOR[v]}
+                stroke={s.color}
                 strokeWidth={2}
                 strokeLinejoin="round"
               />
-            );
-          })}
+            ) : null
+          )}
 
           {ends.map((e) => (
-            <g key={e.vehicle}>
+            <g key={e.s.key}>
               <rect
                 x={pad.l + iw + 5}
                 y={e.y - 4}
                 width={7}
                 height={7}
                 rx={1.5}
-                fill={VEHICLE_COLOR[e.vehicle]}
+                fill={e.s.color}
               />
               <text
                 x={pad.l + iw + 16}
@@ -210,7 +213,7 @@ export function CumulativeChart({ series, now }: CumProps) {
                 fontSize={10}
                 fill="var(--sf-dim)"
               >
-                {e.vehicle}
+                {e.s.label}
               </text>
             </g>
           ))}
@@ -239,15 +242,17 @@ export function CumulativeChart({ series, now }: CumProps) {
           }}
         >
           <p className="sf-readout text-[10px] text-muted-foreground">{fmtDay(hover)}</p>
-          {[...series.entries()].map(([v, pts]) => (
-            <p key={v} className="mt-1 flex items-center justify-between gap-3 text-[11px]">
-              <span className="flex items-center gap-1.5 text-muted-foreground">
-                <span className="h-2 w-2 rounded-[2px]" style={{ background: VEHICLE_COLOR[v] }} />
-                {v}
-              </span>
-              <span className="sf-readout text-foreground">{fmtTonnes(valueAt(pts, hover))}</span>
-            </p>
-          ))}
+          {series.map((s) =>
+            s.pts.length > 0 ? (
+              <p key={s.key} className="mt-1 flex items-center justify-between gap-3 text-[11px]">
+                <span className="flex items-center gap-1.5 text-muted-foreground">
+                  <span className="h-2 w-2 rounded-[2px]" style={{ background: s.color }} />
+                  {s.label}
+                </span>
+                <span className="sf-readout text-foreground">{fmtTonnes(valueAt(s.pts, hover))}</span>
+              </p>
+            ) : null
+          )}
         </div>
       )}
     </div>
