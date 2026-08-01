@@ -121,13 +121,10 @@ export function TimeMachine({
   };
 
   return (
-    <div className="sf-console mt-4 p-4 sm:p-5">
+    <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-start justify-between gap-x-8 gap-y-3">
         <div className="min-w-[240px] flex-1">
-          <p className="sf-etch">
-            The time machine · standings, {mode === 'delivered' ? 'tonnes in orbit' : 'tonnes launched'}
-          </p>
-          <div className="mt-3 flex items-center gap-3">
+          <div className="mt-1 flex items-center gap-3">
             <button
               onClick={() => {
                 if (!playing && yi >= nYears - 1) setYi(0);
@@ -193,7 +190,7 @@ export function TimeMachine({
         </div>
       </div>
 
-      <div className="mt-4 flex flex-col gap-1">
+      <div className="mt-4 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
         {rows.map(({ f, v }, i) => (
           <motion.div
             key={f.key}

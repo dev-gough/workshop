@@ -1,24 +1,33 @@
 'use client';
 
-// The tracking-parameters console: every dial that changes how the room
-// weighs spaceflight. Counting mode (delivered/launched), accounting basis
-// (payload / + spacecraft / + stages) and the year window all recompute the
-// whole page instantly — no refetch.
+// The tracking console: every dial on the firing-room desk. Tracking picks
+// the range (world families vs the SpaceX pad), Display picks what the main
+// screen shows, and counting / accounting / window set how mass is weighed.
+// Every dial reconfigures the screen instantly — no refetch, no navigation.
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { RANGE_MIN, type Accounting, type Mode, type YearRange } from '../_lib/model';
+import {
+  RANGE_MIN,
+  type Accounting,
+  type Display,
+  type Mode,
+  type Scope,
+  type YearRange,
+} from '../_lib/model';
 
 function Chip({
   on,
   label,
   onClick,
   tip,
+  disabled,
 }: {
   on: boolean;
   label: string;
   onClick: () => void;
   /** hover/focus tooltip explaining what the pushbutton changes */
   tip?: string;
+  disabled?: boolean;
 }) {
   const btn = (
     <button
@@ -26,7 +35,8 @@ function Chip({
       aria-checked={on}
       onClick={onClick}
       data-on={on}
-      className="sf-chip px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] whitespace-nowrap"
+      disabled={disabled}
+      className="sf-chip px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-40"
     >
       {label}
     </button>
@@ -156,7 +166,39 @@ function YearBrush({
 
 // ── The console ─────────────────────────────────────────────────────────────
 
+const DISPLAYS: Array<{ key: Display; label: string; tip: string }> = [
+  {
+    key: 'cumulative',
+    label: 'Cumulative',
+    tip: 'Running total of tonnes on the ledger — every series climbs as mass reaches orbit.',
+  },
+  {
+    key: 'yearly',
+    label: 'Per year',
+    tip: 'Tonnes per calendar year, stacked by series — the cadence view.',
+  },
+  {
+    key: 'replay',
+    label: 'Replay',
+    tip: 'The time machine — scrub or play the standings year by year from Sputnik to now.',
+  },
+  {
+    key: 'ledger',
+    label: 'Ledger',
+    tip: 'The full accounting: every family or vehicle in the window, ranked and totalled.',
+  },
+  {
+    key: 'log',
+    label: 'Log',
+    tip: 'Per-launch entries with counted mass. Per-launch resolution exists for the SpaceX range only — dial Tracking to SpaceX.',
+  },
+];
+
 export function TrackingConsole({
+  scope,
+  onScope,
+  display,
+  onDisplay,
   mode,
   onMode,
   acct,
@@ -165,6 +207,10 @@ export function TrackingConsole({
   onRange,
   maxYear,
 }: {
+  scope: Scope;
+  onScope: (s: Scope) => void;
+  display: Display;
+  onDisplay: (d: Display) => void;
   mode: Mode;
   onMode: (m: Mode) => void;
   acct: Accounting;
@@ -182,8 +228,46 @@ export function TrackingConsole({
   ];
 
   return (
-    <div className="sf-console mt-6 px-5 py-4">
+    <div className="sf-console px-5 py-4">
+      {/* What the screen shows */}
       <div className="flex flex-wrap items-start gap-x-10 gap-y-4">
+        <div role="radiogroup" aria-label="Tracking scope">
+          <p className="sf-etch">Tracking</p>
+          <div className="mt-2 flex gap-1.5">
+            <Chip
+              on={scope === 'world'}
+              label="The World"
+              onClick={() => onScope('world')}
+              tip="Every orbital launch family since Sputnik — GCAT's history with live SpaceX telemetry folded in."
+            />
+            <Chip
+              on={scope === 'spacex'}
+              label="SpaceX"
+              onClick={() => onScope('spacex')}
+              tip="The SpaceX range alone, at per-launch resolution from Launch Library 2."
+            />
+          </div>
+        </div>
+
+        <div role="radiogroup" aria-label="Main screen display">
+          <p className="sf-etch">Display</p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {DISPLAYS.map((d) => (
+              <Chip
+                key={d.key}
+                on={display === d.key}
+                label={d.label}
+                onClick={() => onDisplay(d.key)}
+                tip={d.tip}
+                disabled={d.key === 'log' && scope === 'world'}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* How mass is weighed */}
+      <div className="mt-4 flex flex-wrap items-start gap-x-10 gap-y-4 border-t border-border pt-4">
         <div role="radiogroup" aria-label="Counting mode">
           <p className="sf-etch">Counting</p>
           <div className="mt-2 flex gap-1.5">

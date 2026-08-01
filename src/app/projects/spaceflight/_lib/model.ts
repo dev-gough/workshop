@@ -45,6 +45,13 @@ export const VEHICLE_COLOR: Record<Vehicle, string> = {
 
 export type Mode = 'delivered' | 'launched';
 
+/** Which range the main screen tracks: the whole world's families, or the
+ * SpaceX pad alone at per-launch resolution. */
+export type Scope = 'world' | 'spacex';
+
+/** What the main screen displays. */
+export type Display = 'cumulative' | 'yearly' | 'replay' | 'ledger' | 'log';
+
 /**
  * The accounting basis — what counts as "mass in orbit":
  *   payload — satellites, cargo and capsules only
@@ -186,10 +193,12 @@ export function cumulativeSeries(
   return out;
 }
 
+/** One stacked-bar year: tonnes keyed by series (vehicle or family). Totals
+ * are computed at render from whichever series are visible, so muting a
+ * series in the legend rescales the stack honestly. */
 export interface YearRow {
   year: number;
-  byVehicle: Partial<Record<Vehicle, number>>;
-  total: number;
+  by: Record<string, number>;
 }
 
 export function yearlyTotals(launches: Launch[], mode: Mode, acct: Accounting): YearRow[] {
@@ -198,14 +207,12 @@ export function yearlyTotals(launches: Launch[], mode: Mode, acct: Accounting): 
   const last = launchYear(launches[launches.length - 1]);
   const rows: YearRow[] = [];
   for (let y = first; y <= last; y++) {
-    rows.push({ year: y, byVehicle: {}, total: 0 });
+    rows.push({ year: y, by: {} });
   }
   for (const l of launches) {
     const row = rows[launchYear(l) - first];
     const t = countedKg(l, mode, acct) / 1000;
-    const v = l.vehicle as Vehicle;
-    row.byVehicle[v] = (row.byVehicle[v] ?? 0) + t;
-    row.total += t;
+    row.by[l.vehicle] = (row.by[l.vehicle] ?? 0) + t;
   }
   return rows;
 }
@@ -275,6 +282,54 @@ export function familyTotals(
     lastYear = r.y;
   }
   return { tonnes, flights, successes, firstYear, lastYear };
+}
+
+export interface RankedFamily {
+  f: WorldFamily;
+  t: FamilyTotals;
+}
+
+/** Families with at least one flight in the window, sorted by tonnage under
+ * the current dials — the screen's series universe and the ledger's order. */
+export function rankFamilies(
+  families: WorldFamily[],
+  mode: Mode,
+  acct: Accounting,
+  range: YearRange
+): RankedFamily[] {
+  return families
+    .map((f) => ({ f, t: familyTotals(f, mode, acct, range) }))
+    .filter((r) => r.t.flights > 0)
+    .sort((a, b) => b.t.tonnes - a.t.tonnes);
+}
+
+/** Stacked per-year rows for the world: the top families keep their key,
+ * everything else pools into `__other`. */
+export function familyYearRows(
+  families: WorldFamily[],
+  topKeys: Set<string>,
+  mode: Mode,
+  acct: Accounting,
+  range: YearRange
+): YearRow[] {
+  const vals = new Map<number, Record<string, number>>();
+  let y0 = Infinity;
+  let y1 = -Infinity;
+  for (const f of families) {
+    const key = topKeys.has(f.key) ? f.key : '__other';
+    for (const r of f.yearly) {
+      if (r.y < range[0] || r.y > range[1] || r.n === 0) continue;
+      y0 = Math.min(y0, r.y);
+      y1 = Math.max(y1, r.y);
+      let row = vals.get(r.y);
+      if (!row) vals.set(r.y, (row = {}));
+      row[key] = (row[key] ?? 0) + yearValue(r, mode, acct);
+    }
+  }
+  if (y0 === Infinity) return [];
+  const rows: YearRow[] = [];
+  for (let y = y0; y <= y1; y++) rows.push({ year: y, by: vals.get(y) ?? {} });
+  return rows;
 }
 
 /** Cumulative tonnes series from a family's yearly rows, within the window. */

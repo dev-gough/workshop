@@ -160,12 +160,15 @@ export function LaunchLog({
   launches,
   mode,
   acct,
+  limit,
 }: {
   launches: Launch[];
   mode: Mode;
   acct: Accounting;
+  /** cap the list (homepage-style excerpt); omitted = every flight in window */
+  limit?: number;
 }) {
-  const recent = launches.slice(-9).reverse();
+  const recent = (limit ? launches.slice(-limit) : launches).slice().reverse();
   return (
     <ul className="space-y-0">
       {recent.map((l) => {
@@ -177,8 +180,12 @@ export function LaunchLog({
             className="flex items-center gap-2.5 border-b border-border py-2 text-[11px] last:border-b-0"
             title={l.mass_note ?? undefined}
           >
-            <span className="sf-readout w-[52px] shrink-0 text-muted-foreground">
-              {new Date(l.net).toLocaleDateString('en-US', { month: 'short', day: '2-digit' })}
+            <span className="sf-readout w-[76px] shrink-0 text-muted-foreground">
+              {new Date(l.net).toLocaleDateString('en-US', {
+                year: '2-digit',
+                month: 'short',
+                day: '2-digit',
+              })}
             </span>
             <span
               className="h-2 w-2 shrink-0 rounded-[2px]"

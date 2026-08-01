@@ -6,13 +6,7 @@
 // crosshair/tooltip hover on both.
 
 import { useEffect, useRef, useState, type PointerEvent, type RefObject } from 'react';
-import {
-  VEHICLES,
-  VEHICLE_COLOR,
-  fmtTonnes,
-  type CumPoint,
-  type YearRow,
-} from '../_lib/model';
+import { fmtTonnes, type CumPoint, type YearRow } from '../_lib/model';
 
 function useWidth(): [RefObject<HTMLDivElement | null>, number] {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -27,10 +21,14 @@ function useWidth(): [RefObject<HTMLDivElement | null>, number] {
   return [ref, w];
 }
 
-export interface ChartSeries {
+/** A named, colored series — the unit both charts and the legend speak. */
+export interface SeriesDef {
   key: string;
   label: string;
   color: string;
+}
+
+export interface ChartSeries extends SeriesDef {
   pts: CumPoint[];
 }
 
@@ -99,13 +97,15 @@ interface CumProps {
   now: number;
   /** override the left edge of the time axis (year-window start) */
   from?: number;
+  /** fill height (the main screen measures its body); defaults to 300 */
+  height?: number;
 }
 
-export function CumulativeChart({ series, now, from }: CumProps) {
+export function CumulativeChart({ series, now, from, height }: CumProps) {
   const [ref, width] = useWidth();
   const [hover, setHover] = useState<number | null>(null); // ms epoch
 
-  const H = 300;
+  const H = Math.max(height ?? 300, 200);
   const pad = { l: 46, r: 96, t: 12, b: 26 };
   const iw = Math.max(width - pad.l - pad.r, 50);
   const ih = H - pad.t - pad.b;
@@ -303,31 +303,44 @@ export function CumulativeChart({ series, now, from }: CumProps) {
 
 // ── Tonnage per year ────────────────────────────────────────────────────────
 
-export function YearlyChart({ rows }: { rows: YearRow[] }) {
+export function YearlyChart({
+  rows,
+  series,
+  height,
+}: {
+  rows: YearRow[];
+  /** visible series in stack order (bottom → top) */
+  series: SeriesDef[];
+  height?: number;
+}) {
   const [ref, width] = useWidth();
   const [hover, setHover] = useState<number | null>(null); // year
 
-  if (rows.length === 0) {
+  if (rows.length === 0 || series.length === 0) {
     return (
       <div className="flex h-[120px] items-center justify-center">
-        <p className="text-[11px] text-muted-foreground">No flights in window.</p>
+        <p className="text-[11px] text-muted-foreground">
+          No flights in view — everything is muted or out of window.
+        </p>
       </div>
     );
   }
 
-  const H = 260;
+  const H = Math.max(height ?? 260, 180);
   const pad = { l: 46, r: 8, t: 20, b: 26 };
   const iw = Math.max(width - pad.l - pad.r, 50);
   const ih = H - pad.t - pad.b;
 
-  const vMax = niceMax(Math.max(...rows.map((r) => r.total), 1));
+  const sumRow = (r: YearRow) => series.reduce((s, d) => s + (r.by[d.key] ?? 0), 0);
+  const vMax = niceMax(Math.max(...rows.map(sumRow), 1));
   const slot = iw / rows.length;
   const barW = Math.max(Math.min(slot * 0.62, 26), 3);
   const y = (v: number) => pad.t + ih - (v / vMax) * ih;
-  const peak = rows.reduce((a, b) => (b.total > a.total ? b : a), rows[0]);
+  const peak = rows.reduce((a, b) => (sumRow(b) > sumRow(a) ? b : a), rows[0]);
 
   const yTicks = [0, 0.5, 1].map((f) => f * vMax);
-  const labelStep = width < 560 ? 4 : 2;
+  // Long windows label decades; short ones every 2–4 years.
+  const labelStep = rows.length > 48 ? 10 : rows.length > 24 ? 5 : width < 560 ? 4 : 2;
   const hovered = hover !== null ? rows.find((r) => r.year === hover) : null;
   const hoverX = hover !== null ? pad.l + (hover - rows[0].year) * slot + slot / 2 : 0;
 
@@ -360,11 +373,11 @@ export function YearlyChart({ rows }: { rows: YearRow[] }) {
           {rows.map((r, i) => {
             const cx = pad.l + i * slot + slot / 2;
             let cursor = pad.t + ih;
-            const segs = VEHICLES.flatMap((v) => {
-              const t = r.byVehicle[v] ?? 0;
+            const segs = series.flatMap((d) => {
+              const t = r.by[d.key] ?? 0;
               if (t <= 0) return [];
               const h = Math.max((t / vMax) * ih, 1);
-              const seg = { v, top: cursor - h, h };
+              const seg = { key: d.key, color: d.color, top: cursor - h, h };
               cursor -= h + 2; // 2px surface gap between stacked segments
               return [seg];
             });
@@ -373,16 +386,16 @@ export function YearlyChart({ rows }: { rows: YearRow[] }) {
               <g key={r.year}>
                 {segs.map((s) => (
                   <rect
-                    key={s.v}
+                    key={s.key}
                     x={cx - barW / 2}
                     y={s.top}
                     width={barW}
                     height={s.h}
                     rx={s === last ? 2 : 0} // rounded data-end, squared at baseline
-                    fill={VEHICLE_COLOR[s.v]}
+                    fill={s.color}
                   />
                 ))}
-                {r.year === peak.year && r.total > 0 && (
+                {r.year === peak.year && sumRow(r) > 0 && (
                   <text
                     x={cx}
                     y={(last?.top ?? pad.t + ih) - 5}
@@ -391,7 +404,7 @@ export function YearlyChart({ rows }: { rows: YearRow[] }) {
                     fontSize={10}
                     fill="var(--sf-dim)"
                   >
-                    {Math.round(r.total).toLocaleString('en-US')}
+                    {Math.round(sumRow(r)).toLocaleString('en-US')}
                   </text>
                 )}
                 {r.year % labelStep === 0 && (
@@ -426,18 +439,20 @@ export function YearlyChart({ rows }: { rows: YearRow[] }) {
           style={{ left: Math.min(Math.max(hoverX - 80, 0), width - 170), top: 2, width: 164 }}
         >
           <p className="sf-readout text-[10px] text-muted-foreground">{hovered.year}</p>
-          {VEHICLES.filter((v) => (hovered.byVehicle[v] ?? 0) > 0).map((v) => (
-            <p key={v} className="mt-1 flex items-center justify-between gap-3 text-[11px]">
-              <span className="flex items-center gap-1.5 text-muted-foreground">
-                <span className="h-2 w-2 rounded-[2px]" style={{ background: VEHICLE_COLOR[v] }} />
-                {v}
-              </span>
-              <span className="sf-readout text-foreground">{fmtTonnes(hovered.byVehicle[v]!)}</span>
-            </p>
-          ))}
+          {series
+            .filter((d) => (hovered.by[d.key] ?? 0) > 0)
+            .map((d) => (
+              <p key={d.key} className="mt-1 flex items-center justify-between gap-3 text-[11px]">
+                <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+                  <span className="h-2 w-2 shrink-0 rounded-[2px]" style={{ background: d.color }} />
+                  <span className="truncate">{d.label}</span>
+                </span>
+                <span className="sf-readout text-foreground">{fmtTonnes(hovered.by[d.key]!)}</span>
+              </p>
+            ))}
           <p className="mt-1.5 flex items-center justify-between gap-3 border-t border-border pt-1 text-[11px]">
             <span className="text-muted-foreground">Total</span>
-            <span className="sf-readout text-foreground">{fmtTonnes(hovered.total)}</span>
+            <span className="sf-readout text-foreground">{fmtTonnes(sumRow(hovered))}</span>
           </p>
         </div>
       )}

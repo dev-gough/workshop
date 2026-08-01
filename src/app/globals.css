@@ -1670,6 +1670,14 @@
   box-shadow: 0 0 12px color-mix(in srgb, var(--sf-green) 25%, transparent);
 }
 
+/* The cockpit: on desktop the whole room fits the viewport (header is 57px);
+   short windows fall back to 720px and scroll. */
+@media (min-width: 1024px) {
+  .sf-cockpit {
+    height: max(calc(100vh - 57px), 780px);
+  }
+}
+
 /* Status lamp. */
 .sf-led {
   width: 7px;
