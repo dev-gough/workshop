@@ -211,22 +211,53 @@ export function SidePanel({ detailIndex, queueOpen, onCloseDetail, onCloseQueue,
 
   return (
     <>
-      {/* Desktop: docked columns */}
-      <AnimatePresence>
+      {/* Desktop: docked columns. The dock claims its width INSTANTLY —
+          the wall's sleeves carry `layout`, so they glide to their new
+          shelves in the same commit while the columns slide in over the
+          space. Animating the width instead would reflow the grid in
+          discrete snaps mid-spring, with no commit for FLIP to catch. */}
+      <AnimatePresence mode="popLayout">
         {anyOpen && (
           <motion.div
-            initial={{ width: 0, opacity: 0 }}
-            animate={{ width: (detailOpen ? 308 : 0) + (queueOpen ? 300 : 0), opacity: 1 }}
-            exit={{ width: 0, opacity: 0 }}
-            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            className="hidden shrink-0 overflow-hidden border-l border-border lg:flex"
+            key="dock"
+            initial={{ x: 48, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: 48, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 380, damping: 34 }}
+            className="relative hidden shrink-0 overflow-hidden lg:flex"
           >
-            {detailOpen && (
-              <div className={`w-[308px] shrink-0 ${queueOpen ? 'border-r border-border' : ''} flex min-h-0`}>
-                {detail}
-              </div>
-            )}
-            {queueOpen && <div className="flex min-h-0 w-[300px] shrink-0">{queuePanel}</div>}
+            {/* popLayout: a closing column is popped from the flow so its
+                sibling and the wall glide at the same moment it slides
+                away. Each column carries its own left border so the seam
+                travels with it. */}
+            <AnimatePresence initial={false} mode="popLayout">
+              {detailOpen && (
+                <motion.div
+                  key="detail"
+                  layout
+                  initial={{ x: -24, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  exit={{ x: -24, opacity: 0 }}
+                  transition={{ type: 'spring', stiffness: 380, damping: 34 }}
+                  className="flex min-h-0 w-[308px] shrink-0 border-l border-border"
+                >
+                  {detail}
+                </motion.div>
+              )}
+              {queueOpen && (
+                <motion.div
+                  key="queue"
+                  layout
+                  initial={{ x: 64, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  exit={{ x: 64, opacity: 0 }}
+                  transition={{ type: 'spring', stiffness: 380, damping: 34 }}
+                  className="flex min-h-0 w-[300px] shrink-0 border-l border-border"
+                >
+                  {queuePanel}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.div>
         )}
       </AnimatePresence>

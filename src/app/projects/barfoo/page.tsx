@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Disc, Shuffle } from 'lucide-react';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, MotionConfig, motion } from 'motion/react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -219,6 +219,9 @@ export default function BarFooPage() {
 
   return (
     <PlaylistActionsProvider value={{ playlists, addToPlaylist, addAlbumToPlaylist, requestNewPlaylist }}>
+      {/* reducedMotion="user": the wall's FLIP glides and panel slides
+          all switch off for prefers-reduced-motion. */}
+      <MotionConfig reducedMotion="user">
       <div className="bar-theme flex flex-col" style={{ height: 'calc(100vh - 57px)' }}>
 
         {/* ── The counter: masthead, search, view tabs, size fader ── */}
@@ -424,6 +427,7 @@ export default function BarFooPage() {
           </DialogContent>
         </Dialog>
       </div>
+      </MotionConfig>
     </PlaylistActionsProvider>
   );
 }

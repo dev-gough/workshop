@@ -54,13 +54,19 @@ export function AlbumWall({ sizePx, selected, onSelect, loading }: {
           <AlbumContextMenu key={index} albumIndex={index} artist={album.artist} album={album.name}>
           <motion.button
             type="button"
+            // FLIP: any reflow — the size fader, the side panel claiming
+            // width, captions appearing — glides instead of snapping.
+            layout
+            transition={{ layout: { type: 'spring', stiffness: 420, damping: 38 } }}
             data-album-index={index}
             whileTap={{ scale: 0.97 }}
             className="group block text-left focus-visible:outline-none"
             title={captions ? undefined : `${album.name} — ${album.artist}`}
             onClick={() => {
               if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
-              clickTimerRef.current = setTimeout(() => onSelect(isSelected ? null : index), 250);
+              // 200ms: long enough to catch a double-click, short enough
+              // that the open doesn't read as lag before the glide.
+              clickTimerRef.current = setTimeout(() => onSelect(isSelected ? null : index), 200);
             }}
             onDoubleClick={() => {
               if (clickTimerRef.current) { clearTimeout(clickTimerRef.current); clickTimerRef.current = null; }
@@ -93,10 +99,15 @@ export function AlbumWall({ sizePx, selected, onSelect, loading }: {
               )}
             </div>
             {captions && (
-              <div className="mt-1.5 min-w-0 px-0.5">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.25 }}
+                className="mt-1.5 min-w-0 px-0.5"
+              >
                 <p className={`truncate text-xs font-medium leading-tight ${isCurrent ? 'text-primary' : ''}`}>{album.name}</p>
                 <p className="truncate text-[11px] text-muted-foreground">{album.artist}</p>
-              </div>
+              </motion.div>
             )}
           </motion.button>
           </AlbumContextMenu>
