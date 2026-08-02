@@ -4,7 +4,7 @@ import path from 'path';
 import pool from '@/lib/db';
 import { getConfig } from '@/lib/config';
 import { scanSingleAlbum, generateThumbnail } from '@/lib/musicScanner';
-import { sanitizeFilename, cleanSongDisplay } from '@/lib/songUtils';
+import { sanitizeFilename, cleanSongDisplay, DISC_DIR_RE } from '@/lib/songUtils';
 import { parseFile } from 'music-metadata';
 
 export const dynamic = 'force-dynamic';
@@ -106,7 +106,9 @@ export async function POST(request: NextRequest) {
       const sourceFile = await findDownloadFile(DOWNLOADS_DIR, download.filename);
       if (sourceFile) {
         sourceDirs.add(path.dirname(sourceFile));
-        const destFile = path.join(targetDir, sanitizeFilename(path.basename(sourceFile)));
+        const destDir = discDestDir(targetDir, sourceFile);
+        await fs.mkdir(destDir, { recursive: true });
+        const destFile = path.join(destDir, sanitizeFilename(path.basename(sourceFile)));
         await fs.rename(sourceFile, destFile);
       }
 
@@ -124,7 +126,9 @@ export async function POST(request: NextRequest) {
         try {
           await fs.access(fullPath);
           sourceDirs.add(path.dirname(fullPath));
-          const destFile = path.join(targetDir, sanitizeFilename(path.basename(filePath)));
+          const destDir = discDestDir(targetDir, fullPath);
+          await fs.mkdir(destDir, { recursive: true });
+          const destFile = path.join(destDir, sanitizeFilename(path.basename(filePath)));
           await fs.rename(fullPath, destFile);
         } catch {
           // File not found, skip
@@ -216,6 +220,13 @@ async function walkDir(dir: string, relTo: string): Promise<string[]> {
     }
   }
   return results;
+}
+
+// Helper: files that arrived inside a CD1/Disc 2 folder keep a disc subfolder
+// (normalized to "Disc N", which scanSingleAlbum picks up) instead of flattening
+function discDestDir(targetDir: string, sourceFile: string): string {
+  const m = path.basename(path.dirname(sourceFile)).match(DISC_DIR_RE);
+  return m ? path.join(targetDir, `Disc ${parseInt(m[1], 10)}`) : targetDir;
 }
 
 // Helper: find a download file by name in the downloads directory

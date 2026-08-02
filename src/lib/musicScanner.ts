@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { Pool } from 'pg';
 import sharp from 'sharp';
+import { DISC_DIR_RE } from './songUtils';
 
 // music-metadata is ESM-only; a static import breaks the tsx-run scripts
 // (ingest-downloads, scan-music), which are transpiled to CJS. A dynamic
@@ -121,7 +122,7 @@ export async function scanSingleAlbum(
   for (const entry of files) {
     const entryPath = path.join(albumPath, entry);
     const entryStat = await fs.stat(entryPath);
-    if (entryStat.isDirectory() && /^(disc|disk|cd)\s*\d+$/i.test(entry)) {
+    if (entryStat.isDirectory() && DISC_DIR_RE.test(entry)) {
       const discFiles = await fs.readdir(entryPath);
       const discSongs = discFiles
         .filter(f => AUDIO_EXTENSIONS.has(path.extname(f).toLowerCase()))

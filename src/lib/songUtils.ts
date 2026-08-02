@@ -10,6 +10,10 @@ export function sanitizeFilename(name: string): string {
     .trim();
 }
 
+// Directory names that are disc containers (CD1, Disc 2, disk_3), not albums.
+// Captures the disc number.
+export const DISC_DIR_RE = /^(?:disc|disk|cd)[\s._-]*(\d+)$/i;
+
 // Parse a Soulseek remote path into artist/album/filename components
 // Remote paths look like: @@username\Music\Artist\Album\01 - Track.mp3
 // or: /home/user/music/Artist/Album/01 - Track.mp3
@@ -18,10 +22,12 @@ export function cleanDownloadPath(remotePath: string): { artist: string; album: 
   const parts = remotePath.replace(/\\/g, '/').split('/').filter(Boolean);
 
   // We want the last 3 meaningful parts: artist/album/filename
-  // Walk backwards to find the filename, then album, then artist
+  // Walk backwards to find the filename, then album, then artist — skipping
+  // disc folders (…\Artist\Album\CD1\track.flac) so "CD1" never becomes the album
   const filename = parts.length > 0 ? parts[parts.length - 1] : 'Unknown';
-  const album = parts.length > 1 ? parts[parts.length - 2] : 'Unknown Album';
-  const artist = parts.length > 2 ? parts[parts.length - 3] : 'Unknown Artist';
+  const dirs = parts.slice(0, -1).filter(p => !DISC_DIR_RE.test(p));
+  const album = dirs.length > 0 ? dirs[dirs.length - 1] : 'Unknown Album';
+  const artist = dirs.length > 1 ? dirs[dirs.length - 2] : 'Unknown Artist';
 
   return {
     artist: sanitizeFilename(artist),

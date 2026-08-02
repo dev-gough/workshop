@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs';
 import path from 'path';
-import { cleanDownloadPath, sanitizeFilename } from '../src/lib/songUtils';
+import { cleanDownloadPath, sanitizeFilename, DISC_DIR_RE } from '../src/lib/songUtils';
 import { scanSingleAlbum, loadMusicMetadata } from '../src/lib/musicScanner';
 import { getConfig, resetConfigCache } from '../src/lib/config';
 import { slskdGet, flattenTransfers } from '../src/lib/slskd';
@@ -53,7 +53,9 @@ async function extractMetadata(filePath: string): Promise<{ artist?: string; alb
     const { parseFile } = await loadMusicMetadata();
     const metadata = await parseFile(filePath);
     return {
-      artist: metadata.common.artist || metadata.common.albumartist || undefined,
+      // albumartist first: per-track artist tags ("X featuring Y") split one
+      // album into a folder per collaborator
+      artist: metadata.common.albumartist || metadata.common.artist || undefined,
       album: metadata.common.album || undefined,
       title: metadata.common.title || undefined,
       track: metadata.common.track?.no || undefined,
@@ -193,7 +195,12 @@ async function autoIngest() {
       const allFiles = await walkDir(DOWNLOADS_DIR);
       const localFile = allFiles.find(f => path.basename(f) === download.filename);
       if (localFile) {
-        const destFile = path.join(targetDir, sanitizeFilename(path.basename(localFile)));
+        // Keep multi-disc structure: files that arrived inside a CD1/Disc 2
+        // folder go into a disc subfolder the album scanner understands
+        const discMatch = path.basename(path.dirname(localFile)).match(DISC_DIR_RE);
+        const destDir = discMatch ? path.join(targetDir, `Disc ${parseInt(discMatch[1], 10)}`) : targetDir;
+        await fs.mkdir(destDir, { recursive: true });
+        const destFile = path.join(destDir, sanitizeFilename(path.basename(localFile)));
         await fs.rename(localFile, destFile);
       }
 
