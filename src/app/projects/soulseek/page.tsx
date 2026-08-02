@@ -11,6 +11,7 @@ import Link from 'next/link';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
 import { useAudio } from '@/components/AudioProvider';
+import { buildLibraryIndex, matchFolder, type FolderMatch, type LibraryIndex } from '@/lib/libraryMatch';
 import { useHeaderConfig } from '@/components/header-config';
 import { fmtBytes as fmtBytesShared, fmtSpeed, fmtTime } from '@/lib/format';
 import { ProgressBar } from '@/components/ui/ProgressBar';
@@ -142,6 +143,23 @@ function basename(filepath: string): string {
   return filepath.replace(/\\/g, '/').split('/').pop() || filepath;
 }
 
+/** "In Library" — this folder is an album already on the BarFoo shelves.
+    The tooltip says which album and on what evidence. */
+function InLibraryBadge({ match }: { match: FolderMatch | null }) {
+  if (!match) return null;
+  const title = match.via === 'songs'
+    ? `${match.artist} — ${match.album}: ${match.matched} of ${match.of} tracks already shelved`
+    : `Folder name matches ${match.artist} — ${match.album}`;
+  return (
+    <span
+      title={title}
+      className="text-[9px] font-semibold uppercase tracking-[0.08em] px-1.5 py-0.5 rounded-sm border border-primary/40 bg-primary/5 text-primary shrink-0"
+    >
+      In Library
+    </span>
+  );
+}
+
 function transferStateLabel(state: string): { label: string; color: string } {
   if (state.includes('Completed') && state.includes('Succeeded')) return { label: 'Done', color: 'text-primary' };
   if (state.includes('InProgress')) return { label: 'On the wire', color: 'text-primary' };
@@ -234,7 +252,7 @@ function WireMeter({ liveDownloads, liveUploads }: {
 
 // ── Search tab (network search + peer browse) ──
 
-function SearchTab({ libraryArtists, initialSearch }: { libraryArtists: Set<string>; initialSearch: string | null }) {
+function SearchTab({ libraryIndex, initialSearch }: { libraryIndex: LibraryIndex; initialSearch: string | null }) {
   const [mode, setMode] = useState<'network' | 'peer'>('network');
   const [peerSeed, setPeerSeed] = useState<{ name: string; key: number } | null>(null);
   const seedCounter = useRef(0);
@@ -263,17 +281,17 @@ function SearchTab({ libraryArtists, initialSearch }: { libraryArtists: Set<stri
       </div>
 
       <div className={mode === 'network' ? '' : 'hidden'}>
-        <NetworkSearch libraryArtists={libraryArtists} initialSearch={initialSearch} onBrowsePeer={browsePeer} />
+        <NetworkSearch libraryIndex={libraryIndex} initialSearch={initialSearch} onBrowsePeer={browsePeer} />
       </div>
       <div className={mode === 'peer' ? '' : 'hidden'}>
-        <PeerBrowse seed={peerSeed} />
+        <PeerBrowse seed={peerSeed} libraryIndex={libraryIndex} />
       </div>
     </div>
   );
 }
 
-function NetworkSearch({ libraryArtists, initialSearch, onBrowsePeer }: {
-  libraryArtists: Set<string>;
+function NetworkSearch({ libraryIndex, initialSearch, onBrowsePeer }: {
+  libraryIndex: LibraryIndex;
   initialSearch: string | null;
   onBrowsePeer: (username: string) => void;
 }) {
@@ -565,7 +583,7 @@ function NetworkSearch({ libraryArtists, initialSearch, onBrowsePeer }: {
                                 // Show last 2 path segments as folder name
                                 const folderParts = folder.split('/').filter(Boolean);
                                 const folderDisplay = folderParts.slice(-2).join(' / ') || 'Root';
-                                const folderInLibrary = folderParts.some(p => libraryArtists.has(p.toLowerCase()));
+                                const libraryMatch = matchFolder(libraryIndex, folder, files);
 
                                 return (
                                   <div key={folder} className="border-b border-border/40 last:border-b-0">
@@ -573,7 +591,7 @@ function NetworkSearch({ libraryArtists, initialSearch, onBrowsePeer }: {
                                     <div className="flex items-center gap-2 px-3 py-1.5 bg-muted/40">
                                       <Folder className="h-3 w-3 text-accent shrink-0" />
                                       <span className="text-xs font-medium text-foreground truncate flex-1" title={folder}>{folderDisplay}</span>
-                                      {folderInLibrary && <span className="text-[9px] font-semibold uppercase tracking-[0.08em] px-1.5 py-0.5 rounded-sm border border-primary/40 bg-primary/5 text-primary shrink-0">In Library</span>}
+                                      <InLibraryBadge match={libraryMatch} />
                                       <span className="text-[10px] font-mono tabular-nums text-muted-foreground">{files.length} files</span>
                                       {(() => {
                                         const key = `${response.username}:${folder}`;
@@ -656,7 +674,7 @@ function NetworkSearch({ libraryArtists, initialSearch, onBrowsePeer }: {
 
 // ── Peer browse (inside Search tab) ──
 
-function PeerBrowse({ seed }: { seed: { name: string; key: number } | null }) {
+function PeerBrowse({ seed, libraryIndex }: { seed: { name: string; key: number } | null; libraryIndex: LibraryIndex }) {
   const [username, setUsername] = useState('');
   const [dirs, setDirs] = useState<BrowseDir[]>([]);
   const [loading, setLoading] = useState(false);
@@ -688,6 +706,12 @@ function PeerBrowse({ seed }: { seed: { name: string; key: number } | null }) {
     setUsername(seed.name);
     runBrowse(seed.name);
   }, [seed, runBrowse]);
+
+  // A full share can be hundreds of dirs — match once per browse, not per render.
+  const dirMatches = useMemo(
+    () => new Map(dirs.map(d => [d.name, matchFolder(libraryIndex, d.name, d.files)])),
+    [dirs, libraryIndex]
+  );
 
   const toggleDir = (name: string) => {
     setExpandedDirs(prev => {
@@ -762,6 +786,7 @@ function PeerBrowse({ seed }: { seed: { name: string; key: number } | null }) {
                   {expanded ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />}
                   <Folder className="h-3.5 w-3.5 text-accent" />
                   <span className="text-foreground font-mono truncate flex-1 text-left">{dirName}</span>
+                  <InLibraryBadge match={dirMatches.get(dir.name) ?? null} />
                   <span className="text-muted-foreground font-mono tabular-nums">{dir.fileCount} files</span>
                   <button
                     onClick={(e) => { e.stopPropagation(); handleDownloadFiles(dir.files); }}
@@ -1211,12 +1236,8 @@ export default function SoulseekPage() {
     return () => clearInterval(i);
   }, [fetchStaging]);
 
-  // Build a set of lowercase artist names for "In Library" matching
-  const libraryArtists = useMemo(() => {
-    const set = new Set<string>();
-    for (const a of albums) set.add(a.artist.toLowerCase());
-    return set;
-  }, [albums]);
+  // Album-level index for "In Library" matching (song titles + album names)
+  const libraryIndex = useMemo(() => buildLibraryIndex(albums), [albums]);
 
   // Handle ?search= query param from Barfoo links
   const [initialSearch, setInitialSearch] = useState<string | null>(null);
@@ -1296,7 +1317,7 @@ export default function SoulseekPage() {
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.2 }}
               >
-                {activeTab === 'search' && <SearchTab libraryArtists={libraryArtists} initialSearch={initialSearch} />}
+                {activeTab === 'search' && <SearchTab libraryIndex={libraryIndex} initialSearch={initialSearch} />}
                 {activeTab === 'transfers' && (
                   <TransfersTab
                     liveDownloads={liveDownloads}
