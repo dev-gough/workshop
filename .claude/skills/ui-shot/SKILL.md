@@ -36,6 +36,9 @@ node .claude/skills/ui-shot/shot.mjs / --hover '.hall-door' --el '.hall-door' \
 
 # Admin-gated UI (token read from config.json, never printed)
 node .claude/skills/ui-shot/shot.mjs /projects/soulseek --admin
+
+# Cookie-gated UI (e.g. BarFoo's who's-listening overlay; repeatable)
+node .claude/skills/ui-shot/shot.mjs /projects/barfoo --cookie 'barfoo_user=devon'
 ```
 
 Selectors are Playwright locators: CSS (`.hall-door`), `text=History`,

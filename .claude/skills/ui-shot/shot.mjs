@@ -39,6 +39,7 @@ function usage(code = 0) {
   --every <ms>       delay between frames (default 250)
 
   --settle <ms>      post-load settle time before actions (default 900)
+  --cookie <k=v>     set a cookie on the target origin (repeatable)
   --admin            seed localStorage admin token from config.json (value is never printed)
   --clean            delete all .png files in ${SHOTS_DIR} (fs-based, guarded)`);
   process.exit(code);
@@ -68,6 +69,7 @@ let url = null, base = DEFAULT_BASE, out = null, dark = false, full = false,
     el = null, width = 1280, height = 800, scale = 1, frames = 1, every = 250,
     settle = 900, admin = false, clean = false;
 const actions = [];
+const cookies = [];
 
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -86,6 +88,7 @@ for (let i = 0; i < argv.length; i++) {
     case '--frames': frames = Number(argv[++i]); break;
     case '--every':  every = Number(argv[++i]); break;
     case '--settle': settle = Number(argv[++i]); break;
+    case '--cookie': cookies.push(argv[++i]); break;
     case '--hover':  actions.push({ type: 'hover', sel: argv[++i] }); break;
     case '--click':  actions.push({ type: 'click', sel: argv[++i] }); break;
     case '--wait':   actions.push({ type: 'wait', ms: Number(argv[++i]) }); break;
@@ -115,7 +118,13 @@ const context = await browser.newContext({
 });
 // The site persists theme in a cookie (see ThemeScript.tsx) — set it so SSR
 // and the inline theme script agree with colorScheme.
-await context.addCookies([{ name: 'theme', value: dark ? 'dark' : 'light', url: origin }]);
+await context.addCookies([
+  { name: 'theme', value: dark ? 'dark' : 'light', url: origin },
+  ...cookies.map(c => {
+    const eq = c.indexOf('=');
+    return { name: c.slice(0, eq), value: c.slice(eq + 1), url: origin };
+  }),
+]);
 
 if (admin) {
   // config.json sits at the repo root, three levels up from this script.
