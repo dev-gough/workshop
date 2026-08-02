@@ -1827,6 +1827,35 @@
   .bar-record { animation: none; }
 }
 
+/* The record half out of its sleeve on the artist's counter display:
+   grooves cut as rings, amber house label, spindle hole. Pair with
+   .bar-record so the one that's playing actually turns — the rings are
+   rotation-invariant, so the spin reads only through the sheen. */
+.bar-vinyl {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, hsl(20 15% 5%) 0 3.2%, hsl(0 0% 100% / 0.18) 3.6% 4.4%, transparent 4.8%),
+    radial-gradient(circle, var(--bar-lamp-deep) 0 15%, hsl(30 65% 30%) 15% 16.5%, transparent 17%),
+    radial-gradient(circle, transparent 0 48%, hsl(36 45% 70% / 0.14) 49%, transparent 50%),
+    repeating-radial-gradient(circle, hsl(20 9% 10%) 0 1.1%, hsl(26 11% 15%) 1.1% 2.2%);
+  box-shadow:
+    0 6px 18px hsl(20 50% 2% / 0.6),
+    inset 0 0 0 1px hsl(0 0% 100% / 0.08);
+}
+.bar-vinyl::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(from 210deg,
+    transparent 0 40deg, hsl(36 60% 70% / 0.13) 55deg, transparent 95deg 175deg,
+    hsl(36 60% 70% / 0.07) 200deg, transparent 240deg);
+}
+
 /* Segmented view control: brass-edged pushbuttons on the faceplate. */
 .bar-tab {
   border: 1px solid transparent;
