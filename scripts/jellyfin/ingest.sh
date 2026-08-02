@@ -66,18 +66,34 @@ ingest_one() {
     [[ -z "$title" ]] && title="$(parse_movie "$TR_TORRENT_NAME")" && IFS='|' read -r title year <<<"$title"
     final_path="$(build_movie_path "$MOVIE_LIBRARY" "$title" "$year" "$ext")"
   else
-    IFS='|' read -r show year season episode <<<"$(parse_tv "$base")"
-    # Always merge torrent-name fields to fill any missing piece. The torrent
-    # name is more reliable for the show's canonical year than per-episode
-    # filenames, which often omit it. Without this merge, "Severance.S02E01.mkv"
-    # gives year="" and "Severance.2022.S01E01.mkv" gives year="2022", so the
-    # two seasons land under different show folders.
-    IFS='|' read -r show2 year2 season2 episode2 <<<"$(parse_tv "$TR_TORRENT_NAME")"
+    IFS='|' read -r show year season episode eptitle kind <<<"$(parse_tv "$base")"
+    # Merge missing fields from outer context, most-specific first: the file's
+    # parent directory inside the torrent ("Season 2/", "The Final Season -
+    # Season 4/"), then the torrent name. The torrent name is more reliable for
+    # the show's canonical year than per-episode filenames, which often omit
+    # it. Without this merge, "Severance.S02E01.mkv" gives year="" and
+    # "Severance.2022.S01E01.mkv" gives year="2022", so the two seasons land
+    # under different show folders.
+    local rel parent
+    rel="${src#"${TR_TORRENT_DIR}/${TR_TORRENT_NAME}"/}"
+    parent="$(dirname "$rel")"
+    if [[ "$parent" != "." && "$parent" != "$rel" ]]; then
+      local showP yearP seasonP episodeP _etP _kP
+      IFS='|' read -r showP yearP seasonP episodeP _etP _kP <<<"$(parse_tv "$(basename "$parent")")"
+      [[ -z "$year"   ]] && year="$yearP"
+      [[ -z "$season" ]] && season="$seasonP"
+    fi
+    local show2 year2 season2 episode2 _et2 _k2
+    IFS='|' read -r show2 year2 season2 episode2 _et2 _k2 <<<"$(parse_tv "$TR_TORRENT_NAME")"
     [[ -z "$show"    ]] && show="$show2"
     [[ -z "$year"    ]] && year="$year2"
     [[ -z "$season"  ]] && season="$season2"
     [[ -z "$episode" ]] && episode="$episode2"
-    final_path="$(build_tv_path "$TV_LIBRARY" "$show" "$year" "$season" "$episode" "$ext")"
+    if [[ "$kind" == "extra" ]]; then
+      final_path="$(build_tv_extra_path "$TV_LIBRARY" "$show" "$year" "$base")"
+    else
+      final_path="$(build_tv_path "$TV_LIBRARY" "$show" "$year" "$season" "$episode" "$ext" "$eptitle")"
+    fi
   fi
 
   final_dir="$(dirname "$final_path")"
@@ -87,6 +103,17 @@ ingest_one() {
   if [[ -e "$final_path" ]]; then
     log "Already exists, skipping: $final_path"
     return 0
+  fi
+
+  # Same episode already in the library under a different filename (older
+  # naming scheme, different quality tag)? Don't create a duplicate.
+  if [[ "$mode" == "tv" && "${kind:-episode}" == "episode" && -n "${season:-}" && -n "${episode:-}" ]]; then
+    local epmark
+    epmark="$(printf 'S%02dE%02d' "$season" "$episode")"
+    if compgen -G "$final_dir/*- ${epmark}.*" >/dev/null || compgen -G "$final_dir/*- ${epmark} *" >/dev/null; then
+      log "Episode $epmark already present in $final_dir, skipping $src"
+      return 0
+    fi
   fi
 
   # Hardlink first (instant, same filesystem); fall back to copy.
@@ -137,7 +164,7 @@ if [[ "$mode" == "movie" ]]; then
   ext="$(printf '%s' "${videos[0]}" | grep -oEi "$VIDEO_EXTS_RE" || true)"
   final_for_db="$(build_movie_path "$MOVIE_LIBRARY" "$t" "$y" "$ext")"
 else
-  IFS='|' read -r s y se ep <<<"$(parse_tv "$TR_TORRENT_NAME")"
+  IFS='|' read -r s y se ep _et _k <<<"$(parse_tv "$TR_TORRENT_NAME")"
   final_for_db="$TV_LIBRARY/$s${y:+ ($y)}${se:+/Season $(printf %02d "$se")}"
 fi
 
