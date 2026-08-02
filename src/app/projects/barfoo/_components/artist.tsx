@@ -10,7 +10,7 @@ import { motion } from 'motion/react';
 import { Button } from '@/components/ui/button';
 import { useAudio } from '@/components/AudioProvider';
 import { cleanSongDisplay, sortedTrackIndices } from '@/lib/songUtils';
-import { EqBars, SongContextMenu } from './shared';
+import { AlbumContextMenu, EqBars, SongContextMenu } from './shared';
 
 export function ArtistView({ artist, onBack, onOpenAlbum, onShuffled }: {
   artist: string;
@@ -114,6 +114,7 @@ export function ArtistView({ artist, onBack, onOpenAlbum, onShuffled }: {
           const isCurrentAlbum = currentTrack?.albumIndex === index;
           return (
             <div key={index} className="bar-panel overflow-hidden">
+              <AlbumContextMenu albumIndex={index} artist={album.artist} album={album.name}>
               <div className="flex items-center gap-3 p-3">
                 <button
                   className="bar-sleeve h-12 w-12 shrink-0 !transform-none cursor-pointer overflow-hidden focus-visible:ring-2 focus-visible:ring-ring"
@@ -141,6 +142,7 @@ export function ArtistView({ artist, onBack, onOpenAlbum, onShuffled }: {
                   <Play className="mr-1 h-3 w-3" /> Play
                 </Button>
               </div>
+              </AlbumContextMenu>
 
               {/* Track grid — stable layout, no reflow on re-render */}
               <div className="grid grid-cols-2 border-t border-border/60 px-1 py-1 lg:grid-cols-3">

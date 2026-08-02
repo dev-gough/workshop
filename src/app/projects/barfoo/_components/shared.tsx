@@ -7,11 +7,12 @@
 
 import { createContext, useContext, type ReactNode } from 'react';
 import Link from 'next/link';
-import { ListPlus, Plus, Share2 } from 'lucide-react';
+import { ListPlus, Play, Plus, Share2 } from 'lucide-react';
 import {
   ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
   ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger,
 } from '@/components/ui/context-menu';
+import { useAudio } from '@/components/AudioProvider';
 
 export interface Playlist {
   id: number;
@@ -39,16 +40,23 @@ export interface Stats {
   firstPlay: string | null;
 }
 
+/** What the "new playlist" dialog should add once created: a single song
+    (song set) or a whole album (song omitted). */
+export type PendingAdd = { artist: string; album: string; song?: string };
+
 interface PlaylistActions {
   playlists: Playlist[];
   addToPlaylist: (playlistId: number, artist: string, album: string, song: string) => void;
-  /** Open the "new playlist" dialog, optionally pre-loading a song to add. */
-  requestNewPlaylist: (song: { artist: string; album: string; song: string } | null) => void;
+  /** Add every track of an album, in track order. */
+  addAlbumToPlaylist: (playlistId: number, artist: string, album: string) => void;
+  /** Open the "new playlist" dialog, optionally pre-loading songs to add. */
+  requestNewPlaylist: (pending: PendingAdd | null) => void;
 }
 
 const PlaylistActionsContext = createContext<PlaylistActions>({
   playlists: [],
   addToPlaylist: () => {},
+  addAlbumToPlaylist: () => {},
   requestNewPlaylist: () => {},
 });
 
@@ -75,6 +83,46 @@ export function SongContextMenu({ artist, album, song, children }: {
             ))}
             {playlists.length > 0 && <ContextMenuSeparator />}
             <ContextMenuItem onClick={() => requestNewPlaylist({ artist, album, song })}>
+              <Plus className="h-4 w-4 mr-2" />New playlist…
+            </ContextMenuItem>
+          </ContextMenuSubContent>
+        </ContextMenuSub>
+        <ContextMenuSeparator />
+        <ContextMenuItem asChild>
+          <Link href={`/projects/soulseek?search=${encodeURIComponent(artist)}`}>
+            <Share2 className="h-4 w-4 mr-2" />Find artist on Soulseek
+          </Link>
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+/** Right-click menu for a whole sleeve: play it, shelve it in a
+    playlist (every track, in order), or chase the artist on Soulseek. */
+export function AlbumContextMenu({ albumIndex, artist, album, children }: {
+  albumIndex: number; artist: string; album: string; children: ReactNode;
+}) {
+  const { playlists, addAlbumToPlaylist, requestNewPlaylist } = useContext(PlaylistActionsContext);
+  const { playAlbum } = useAudio();
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuContent className="bar-pop">
+        <ContextMenuItem onClick={() => playAlbum(albumIndex)}>
+          <Play className="h-4 w-4 mr-2" />Play album
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuSub>
+          <ContextMenuSubTrigger><ListPlus className="h-4 w-4 mr-2" />Add album to playlist</ContextMenuSubTrigger>
+          <ContextMenuSubContent className="bar-pop">
+            {playlists.map(pl => (
+              <ContextMenuItem key={pl.id} onClick={() => addAlbumToPlaylist(pl.id, artist, album)}>
+                {pl.name}
+              </ContextMenuItem>
+            ))}
+            {playlists.length > 0 && <ContextMenuSeparator />}
+            <ContextMenuItem onClick={() => requestNewPlaylist({ artist, album })}>
               <Plus className="h-4 w-4 mr-2" />New playlist…
             </ContextMenuItem>
           </ContextMenuSubContent>

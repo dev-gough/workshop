@@ -11,7 +11,7 @@ import { Music } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAudio } from '@/components/AudioProvider';
-import { EqBars } from './shared';
+import { AlbumContextMenu, EqBars } from './shared';
 
 const NEW_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -51,8 +51,8 @@ export function AlbumWall({ sizePx, selected, onSelect, loading }: {
         const isNew = album.source === 'soulseek' && album.addedAt &&
           Date.now() - new Date(album.addedAt).getTime() < NEW_WINDOW_MS;
         return (
+          <AlbumContextMenu key={index} albumIndex={index} artist={album.artist} album={album.name}>
           <motion.button
-            key={index}
             type="button"
             data-album-index={index}
             whileTap={{ scale: 0.97 }}
@@ -99,6 +99,7 @@ export function AlbumWall({ sizePx, selected, onSelect, loading }: {
               </div>
             )}
           </motion.button>
+          </AlbumContextMenu>
         );
       })}
     </div>

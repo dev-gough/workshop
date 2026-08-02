@@ -21,7 +21,8 @@ import { SidePanel } from './_components/panel';
 import { PlaylistsView } from './_components/playlists';
 import { SearchBox } from './_components/search';
 import { StatsView } from './_components/stats';
-import { PlaylistActionsProvider, type Playlist, type PlaylistDetail, type Stats } from './_components/shared';
+import { PlaylistActionsProvider, type PendingAdd, type Playlist, type PlaylistDetail, type Stats } from './_components/shared';
+import { sortedTrackIndices } from '@/lib/songUtils';
 
 type View = 'library' | 'playlists' | 'stats';
 
@@ -47,7 +48,7 @@ export default function BarFooPage() {
   const [activePlaylist, setActivePlaylist] = useState<PlaylistDetail | null>(null);
   const [newPlaylistOpen, setNewPlaylistOpen] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState('');
-  const [pendingSong, setPendingSong] = useState<{ artist: string; album: string; song: string } | null>(null);
+  const [pendingAdd, setPendingAdd] = useState<PendingAdd | null>(null);
   const wallRef = useRef<HTMLDivElement>(null);
 
   // ── The size fader — how tightly the wall is shelved ──
@@ -153,6 +154,23 @@ export default function BarFooPage() {
     if (activePlaylist?.id === playlistId) fetchPlaylistDetail(playlistId);
   };
 
+  // Whole-album add: sequential POSTs so the server assigns positions in
+  // track order (the endpoint dedupes repeats itself).
+  const addAlbumToPlaylist = async (playlistId: number, artist: string, album: string) => {
+    if (!username) return;
+    const alb = albums.find(a => a.artist === artist && a.name === album);
+    if (!alb) return;
+    for (const si of sortedTrackIndices(alb.songs)) {
+      await fetch(`/api/music/playlists/${playlistId}/songs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, artist, album, song: alb.songs[si] }),
+      });
+    }
+    fetchPlaylists();
+    if (activePlaylist?.id === playlistId) fetchPlaylistDetail(playlistId);
+  };
+
   const removeFromPlaylist = async (playlistId: number, artist: string, album: string, song: string) => {
     if (!username) return;
     await fetch(`/api/music/playlists/${playlistId}/songs`, {
@@ -173,9 +191,10 @@ export default function BarFooPage() {
     });
     const pl = await res.json();
     await fetchPlaylists();
-    if (pendingSong) {
-      await addToPlaylist(pl.id, pendingSong.artist, pendingSong.album, pendingSong.song);
-      setPendingSong(null);
+    if (pendingAdd) {
+      if (pendingAdd.song) await addToPlaylist(pl.id, pendingAdd.artist, pendingAdd.album, pendingAdd.song);
+      else await addAlbumToPlaylist(pl.id, pendingAdd.artist, pendingAdd.album);
+      setPendingAdd(null);
     }
   };
 
@@ -186,8 +205,8 @@ export default function BarFooPage() {
     if (activePlaylist?.id === id) setActivePlaylist(null);
   };
 
-  const requestNewPlaylist = (song: { artist: string; album: string; song: string } | null) => {
-    setPendingSong(song);
+  const requestNewPlaylist = (pending: PendingAdd | null) => {
+    setPendingAdd(pending);
     setNewPlaylistOpen(true);
   };
 
@@ -199,7 +218,7 @@ export default function BarFooPage() {
   ];
 
   return (
-    <PlaylistActionsProvider value={{ playlists, addToPlaylist, requestNewPlaylist }}>
+    <PlaylistActionsProvider value={{ playlists, addToPlaylist, addAlbumToPlaylist, requestNewPlaylist }}>
       <div className="bar-theme flex flex-col" style={{ height: 'calc(100vh - 57px)' }}>
 
         {/* ── The counter: masthead, search, view tabs, size fader ── */}
@@ -377,7 +396,7 @@ export default function BarFooPage() {
         )}
 
         {/* ── New playlist ── */}
-        <Dialog open={newPlaylistOpen} onOpenChange={(open) => { setNewPlaylistOpen(open); if (!open) { setNewPlaylistName(''); setPendingSong(null); } }}>
+        <Dialog open={newPlaylistOpen} onOpenChange={(open) => { setNewPlaylistOpen(open); if (!open) { setNewPlaylistName(''); setPendingAdd(null); } }}>
           <DialogContent className="bar-pop sm:max-w-sm">
             <DialogHeader>
               <DialogTitle className="bar-serif">New playlist</DialogTitle>

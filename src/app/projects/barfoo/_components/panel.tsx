@@ -10,7 +10,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Button } from '@/components/ui/button';
 import { useAudio } from '@/components/AudioProvider';
 import { cleanSongDisplay, extractTrackNumber, sortedTrackIndices } from '@/lib/songUtils';
-import { EqBars, SongContextMenu } from './shared';
+import { AlbumContextMenu, EqBars, SongContextMenu } from './shared';
 
 function TrackRow({ albumIdx, songIdx, num }: { albumIdx: number; songIdx: number; num: number }) {
   const { albums, currentTrack, isPlaying, playSong } = useAudio();
@@ -96,15 +96,17 @@ export function AlbumDetail({ albumIndex, onClose, onOpenArtist }: {
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="shrink-0 p-4">
         <div className="flex items-start gap-3">
-          <div className="bar-sleeve h-[88px] w-[88px] shrink-0 !transform-none">
-            {album.coverUrl ? (
-              <div className="h-full w-full bg-cover bg-center" style={{ backgroundImage: `url(${album.coverUrl})` }} />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center">
-                <Music className="h-6 w-6 text-muted-foreground" />
-              </div>
-            )}
-          </div>
+          <AlbumContextMenu albumIndex={albumIndex} artist={album.artist} album={album.name}>
+            <div className="bar-sleeve h-[88px] w-[88px] shrink-0 !transform-none">
+              {album.coverUrl ? (
+                <div className="h-full w-full bg-cover bg-center" style={{ backgroundImage: `url(${album.coverUrl})` }} />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center">
+                  <Music className="h-6 w-6 text-muted-foreground" />
+                </div>
+              )}
+            </div>
+          </AlbumContextMenu>
           <div className="min-w-0 flex-1">
             <h3 className="bar-serif truncate text-[15px] font-semibold leading-tight">{album.name}</h3>
             <button
