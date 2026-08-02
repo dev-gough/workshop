@@ -1909,3 +1909,196 @@
   background: var(--bar-lamp);
   box-shadow: 0 0 8px color-mix(in srgb, var(--bar-lamp) 60%, transparent);
 }
+
+/* ─────────────────────────────────────────────────────────────
+   Screening Room scope — applied to /projects/jellyfin shell.
+   "The projection booth" of a single-screen repertory cinema.
+   Warm house-dark walls, tungsten marquee amber for the lamp and
+   for prints in transit, exit-sign green for seeding (the one
+   light that never turns off), velvet-curtain red for faults.
+   Jost caps are the title-card voice. Deliberately dark-always —
+   the house lights stay down (same intent as cc-scope/slsk).
+   ──────────────────────────────────────────────────────────── */
+.cine-theme {
+  /* Palette */
+  --cine-bg:      hsl(18 16% 5.5%);
+  --cine-bg-2:    hsl(18 14% 8%);
+  --cine-card:    hsl(17 15% 9%);
+  --cine-line:    hsl(20 11% 16%);
+  --cine-ink:     hsl(36 32% 92%);
+  --cine-dim:     hsl(26 9% 57%);
+  --cine-lamp:    hsl(39 88% 58%);   /* tungsten / marquee amber */
+  --cine-exit:    hsl(145 52% 50%);  /* exit sign — seeding */
+  --cine-curtain: hsl(354 68% 58%);  /* velvet red — faults */
+
+  /* Remap the shared tokens so utilities + shadcn/lucide follow suit. */
+  --color-background:        var(--cine-bg);
+  --color-foreground:        var(--cine-ink);
+  --color-card:              var(--cine-card);
+  --color-card-foreground:   var(--cine-ink);
+  --color-popover:           var(--cine-bg-2);
+  --color-popover-foreground:var(--cine-ink);
+  --color-muted:             var(--cine-bg-2);
+  --color-muted-foreground:  var(--cine-dim);
+  --color-secondary:         var(--cine-bg-2);
+  --color-secondary-foreground: var(--cine-ink);
+  --color-border:            var(--cine-line);
+  --color-input:             var(--cine-line);
+  --color-ring:              var(--cine-lamp);
+  --color-primary:           var(--cine-lamp);
+  --color-primary-foreground:hsl(20 30% 6%);
+  --color-accent:            var(--cine-exit);
+  --color-accent-foreground: hsl(20 30% 6%);
+  --color-destructive:       var(--cine-curtain);
+  --color-destructive-foreground: hsl(20 30% 6%);
+
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  color: var(--cine-ink);
+  background-color: var(--cine-bg);
+  /* The beam from the booth window, dust hanging in it. */
+  background-image:
+    radial-gradient(ellipse 58% 42% at 50% -12%, hsl(40 85% 55% / 0.085), transparent 70%);
+  background-attachment: fixed;
+}
+
+/* Title-card voice — the marquee and section headings. */
+.cine-title {
+  font-family: var(--font-ws-sans), 'Futura', system-ui, sans-serif;
+  text-transform: uppercase;
+}
+
+/* The marquee board: joinery frame with a run of bulbs top and bottom. */
+.cine-marquee {
+  border: 1px solid var(--cine-line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: linear-gradient(178deg, hsl(18 15% 10%), hsl(18 16% 6.5%));
+  box-shadow:
+    0 10px 30px hsl(20 50% 2% / 0.55),
+    inset 0 0 0 1px hsl(39 80% 60% / 0.06);
+}
+.cine-bulbs {
+  height: 9px;
+  background-image: radial-gradient(circle 2.2px at 50% 50%,
+    hsl(41 92% 64% / 0.9) 1.3px, hsl(41 92% 62% / 0.14) 2px, transparent 2.6px);
+  background-size: 16px 9px;
+  background-position: center;
+  background-repeat: repeat-x;
+  animation: cine-twinkle 2.8s ease-in-out infinite;
+}
+@keyframes cine-twinkle { 50% { opacity: 0.55; } }
+
+/* Vertical sprocket rail down a frame's left edge — the holes punch
+   through to the page wall. Color override via --cine-hole. */
+.cine-rail {
+  width: 14px;
+  flex-shrink: 0;
+  background-color: hsl(18 13% 12%);
+  background-image: radial-gradient(circle 2.4px at 50% 50%,
+    var(--cine-hole, var(--cine-bg)) 2.3px, transparent 2.8px);
+  background-size: 14px 12px;
+  background-position: center;
+  background-repeat: repeat-y;
+}
+
+/* Film gauge — progress as frames passing the gate. The fill is lamp
+   light; frame lines ride on top of both track and fill. */
+.cine-gauge {
+  position: relative;
+  height: 10px;
+  flex: 1;
+  border-radius: 2px;
+  overflow: hidden;
+  background: hsl(0 0% 100% / 0.05);
+}
+.cine-gauge::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: repeating-linear-gradient(90deg,
+    transparent 0 9px, hsl(18 16% 5% / 0.65) 9px 11px);
+  pointer-events: none;
+}
+.cine-gauge > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--cine-lamp) 92%, white 8%),
+    color-mix(in srgb, var(--cine-lamp) 82%, black 18%));
+  transition: width 0.7s ease-out;
+}
+.cine-gauge > span[data-done='true'] { background: linear-gradient(180deg,
+  color-mix(in srgb, var(--cine-exit) 92%, white 8%),
+  color-mix(in srgb, var(--cine-exit) 80%, black 20%)); }
+.cine-gauge > span[data-paused='true'] { background: hsl(24 6% 34%); }
+
+/* The exit sign — always-on glow for the held-over (seeding) marker. */
+.cine-exit-sign {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--cine-exit) 45%, transparent);
+  border-radius: 3px;
+  color: var(--cine-exit);
+  text-shadow: 0 0 9px color-mix(in srgb, var(--cine-exit) 65%, transparent);
+  box-shadow:
+    0 0 10px color-mix(in srgb, var(--cine-exit) 22%, transparent),
+    inset 0 0 6px color-mix(in srgb, var(--cine-exit) 12%, transparent);
+}
+
+/* Indicator lamp — the projector bulb on the status line. */
+.cine-lamp-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor, inset 0 0 2px hsl(0 0% 100% / 0.4);
+  flex-shrink: 0;
+}
+.cine-lamp-off { color: hsl(20 8% 28%); box-shadow: none; }
+
+/* Segmented pushbuttons — filter pills and the feature/series toggle. */
+.cine-tab {
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--cine-dim);
+  transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease;
+}
+.cine-tab:hover { color: var(--cine-ink); }
+.cine-tab[data-on='true'] {
+  color: var(--cine-lamp);
+  border-color: color-mix(in srgb, var(--cine-lamp) 40%, var(--cine-line));
+  background: color-mix(in srgb, var(--cine-lamp) 9%, transparent);
+}
+
+/* Ticket stub — the "Open Jellyfin" pass. Perforated leading edge. */
+.cine-ticket {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 14px;
+  border: 1px solid color-mix(in srgb, var(--cine-lamp) 40%, var(--cine-line));
+  border-radius: 3px;
+  color: var(--cine-lamp);
+  background:
+    radial-gradient(circle 1.5px at 6px 50%, var(--cine-bg) 1.4px, transparent 1.6px)
+      left center / 12px 7px repeat-y,
+    linear-gradient(hsl(39 80% 58% / 0.07), hsl(39 80% 58% / 0.07));
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.cine-ticket:hover {
+  border-color: color-mix(in srgb, var(--cine-lamp) 70%, var(--cine-line));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--cine-lamp) 25%, transparent);
+}
+
+/* Reel numerals — sizes, speeds, ratios. */
+.cine-readout {
+  font-family: var(--font-readout), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cine-bulbs { animation: none; }
+}

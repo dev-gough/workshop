@@ -356,14 +356,14 @@ export function JellyfinRoom({ fetches, className }: { fetches: FetchRow[]; clas
   const latest = fetches[0];
   const statusColor =
     latest?.status === 'ingested' ? 'text-emerald-400' :
-    latest?.status === 'downloading' ? 'text-sky-400' : 'text-amber-400';
+    latest?.status === 'downloading' ? 'text-amber-400' : 'text-amber-200/80';
 
   return (
     <Door href="/projects/jellyfin" number="RM 08" room="Screening Room" className={className}>
       <div className="flex h-full flex-col bg-zinc-950" style={{ ['--hall-hole' as string]: 'hsl(240 6% 3%)' }}>
         <div className="hall-sprockets shrink-0 bg-zinc-900" />
         <div className="flex flex-1 flex-col justify-center gap-1 px-4 pb-6">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-400">Now showing</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-400">Now showing</p>
           {latest ? (
             <>
               <p className="truncate text-sm font-medium text-zinc-100">{fetchDisplay(latest)}</p>

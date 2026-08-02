@@ -41,9 +41,14 @@ const Header = () => {
 
 	// Build the Jellyfin server URL from whatever hostname the user is hitting,
 	// so it works the same whether they came in via tailnet, LAN, or localhost.
+	// If they're already on an mDNS name, jellyfin.local resolves too — use the
+	// portless nginx vhost.
 	useEffect(() => {
 		if (typeof window === 'undefined') return;
-		setJellyfinUrl(`${window.location.protocol}//${window.location.hostname}:8096`);
+		const { protocol, hostname } = window.location;
+		setJellyfinUrl(hostname.endsWith('.local')
+			? `${protocol}//jellyfin.local`
+			: `${protocol}//${hostname}:8096`);
 	}, []);
 
 	const isActive = (href: string) => {
@@ -55,7 +60,7 @@ const Header = () => {
 		{ href: '/projects/barfoo',     icon: Music,  label: 'BarFoo',          sublabel: 'Music library',     color: '#a78bfa' },
 		{ href: '/projects/splitwiser', icon: Wallet, label: 'SplitWiser',      sublabel: 'Split expenses',    color: '#fbbf24' },
 		{ href: '/projects/paper-trading', icon: CandlestickChart, label: 'Paper Trading', sublabel: 'Test strategies', color: '#34d399' },
-		{ href: '/projects/jellyfin',   icon: Film,   label: 'Jellyfin Fetcher', sublabel: 'Add torrents',     color: '#22d3ee' },
+		{ href: '/projects/jellyfin',   icon: Film,   label: 'Screening Room',   sublabel: 'Add torrents',     color: '#ecb144' },
 	];
 
 	return (

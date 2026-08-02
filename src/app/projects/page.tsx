@@ -247,22 +247,23 @@ function PaperTradingVisual() {
 }
 
 function JellyfinVisual() {
-  // Stylized clapperboard + progress ticks hinting at active downloads
+  // Stylized clapperboard + progress ticks hinting at active downloads —
+  // marquee amber, matching the Screening Room's tungsten palette.
   return (
     <svg viewBox="0 0 120 60" className="w-full h-14">
       {/* Clapperboard body */}
-      <rect x={10} y={20} width={48} height={30} rx={2} fill="hsl(195,80%,55%)" fillOpacity={0.18} stroke="hsl(195,80%,55%)" strokeOpacity={0.4} strokeWidth={0.6} />
+      <rect x={10} y={20} width={48} height={30} rx={2} fill="hsl(39,80%,55%)" fillOpacity={0.18} stroke="hsl(39,80%,55%)" strokeOpacity={0.4} strokeWidth={0.6} />
       {/* Clapperboard top diagonal stripes */}
-      <polygon points="10,20 18,12 26,20" fill="hsl(195,80%,65%)" fillOpacity={0.3} />
-      <polygon points="26,20 34,12 42,20" fill="hsl(195,80%,65%)" fillOpacity={0.45} />
-      <polygon points="42,20 50,12 58,20" fill="hsl(195,80%,65%)" fillOpacity={0.3} />
+      <polygon points="10,20 18,12 26,20" fill="hsl(41,85%,62%)" fillOpacity={0.3} />
+      <polygon points="26,20 34,12 42,20" fill="hsl(41,85%,62%)" fillOpacity={0.45} />
+      <polygon points="42,20 50,12 58,20" fill="hsl(41,85%,62%)" fillOpacity={0.3} />
       {/* Mini active-transfer bars */}
       <rect x={68} y={18} width={42} height={2} rx={1} fill="white" fillOpacity={0.08} />
-      <rect x={68} y={18} width={32} height={2} rx={1} fill="hsl(195,90%,60%)" fillOpacity={0.7} />
+      <rect x={68} y={18} width={32} height={2} rx={1} fill="hsl(39,88%,58%)" fillOpacity={0.7} />
       <rect x={68} y={26} width={42} height={2} rx={1} fill="white" fillOpacity={0.08} />
-      <rect x={68} y={26} width={18} height={2} rx={1} fill="hsl(195,90%,60%)" fillOpacity={0.5} />
+      <rect x={68} y={26} width={18} height={2} rx={1} fill="hsl(39,88%,58%)" fillOpacity={0.5} />
       <rect x={68} y={34} width={42} height={2} rx={1} fill="white" fillOpacity={0.08} />
-      <rect x={68} y={34} width={42} height={2} rx={1} fill="hsl(150,80%,55%)" fillOpacity={0.6} />
+      <rect x={68} y={34} width={42} height={2} rx={1} fill="hsl(145,52%,50%)" fillOpacity={0.6} />
       {/* TV/movie glyphs inside clapper */}
       <text x={34} y={42} textAnchor="middle" fontSize={11} fill="white" fillOpacity={0.55} fontFamily="monospace" fontWeight={700}>JF</text>
     </svg>
@@ -551,12 +552,12 @@ export default function ProjectsPage() {
 
             {/* ── Jellyfin Fetcher ── */}
             <ProjectCard href="/projects/jellyfin" delay={0.33}
-              className="bg-gradient-to-br from-sky-950/70 to-cyan-950/40">
+              className="bg-gradient-to-br from-amber-950/70 to-orange-950/40">
               <div className="flex items-center gap-2 mb-3">
-                <Film className="h-4 w-4 text-sky-400" />
-                <span className="text-[10px] uppercase tracking-[0.2em] text-sky-400/60 font-medium">Media</span>
+                <Film className="h-4 w-4 text-amber-400" />
+                <span className="text-[10px] uppercase tracking-[0.2em] text-amber-400/60 font-medium">Media</span>
               </div>
-              <h2 className="text-lg font-bold text-white mb-1.5">Jellyfin Fetcher</h2>
+              <h2 className="text-lg font-bold text-white mb-1.5">Screening Room</h2>
               <p className="text-sm text-white/45 leading-relaxed mb-2">
                 Drop in a magnet or .torrent and it&#39;s downloaded, cleaned, and filed into Jellyfin&#39;s movie/TV layout automatically.
               </p>

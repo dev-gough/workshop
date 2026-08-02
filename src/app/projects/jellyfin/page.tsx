@@ -3,16 +3,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Film, Tv, Download, Loader, WifiOff, Plus, X,
-  CheckCircle, AlertTriangle, ArrowRight, Clock, Trash2, Eye,
-  Upload, HeartHandshake, Share2, ExternalLink, Pause, Play,
-  Search, Archive, ListFilter,
+  Film, Tv, Loader, Plus, X, CheckCircle, AlertTriangle, ArrowRight,
+  Clock, Trash2, ExternalLink, Pause, Play, Search, Archive,
 } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
+import { useHeaderConfig } from '@/components/header-config';
 import { fmtBytes, fmtSpeed, fmtEta, fmtDuration, fmtTime } from '@/lib/format';
-import { ProgressBar } from '@/components/ui/ProgressBar';
-import { ConnectionBadge } from '@/components/ui/ConnectionBadge';
 
 // ── Types ──
 
@@ -54,11 +51,13 @@ function groupOf(t: Transfer): StatusGroup {
 
 const GROUP_ORDER: StatusGroup[] = ['downloading', 'verifying', 'seeding', 'paused'];
 
-const GROUP_META: Record<StatusGroup, { label: string; icon: React.ElementType; color: string; dot: string }> = {
-  downloading: { label: 'Downloading', icon: Download, color: 'text-blue-400', dot: 'bg-blue-400' },
-  seeding:     { label: 'Seeding',     icon: Share2,   color: 'text-emerald-400', dot: 'bg-emerald-400' },
-  verifying:   { label: 'Verifying',   icon: Loader,   color: 'text-amber-400', dot: 'bg-amber-400' },
-  paused:      { label: 'Paused',      icon: Pause,    color: 'text-zinc-400',  dot: 'bg-zinc-500' },
+// Projection-booth vocabulary: prints arrive, get inspected, are held over
+// for the crowd (seeding), or sit through an intermission (paused).
+const GROUP_META: Record<StatusGroup, { label: string; color: string; dot: string }> = {
+  downloading: { label: 'Arriving',     color: 'text-primary',          dot: 'text-primary' },
+  verifying:   { label: 'Inspecting',   color: 'text-foreground/80',    dot: 'text-foreground/70' },
+  seeding:     { label: 'Held over',    color: 'text-accent',           dot: 'text-accent' },
+  paused:      { label: 'Intermission', color: 'text-muted-foreground', dot: 'text-muted-foreground' },
 };
 
 interface IngestFile {
@@ -102,17 +101,11 @@ interface HistoryRow {
   completed_at: string | null;
   ingested_at: string | null;
   files: IngestFile[];
+  jellyfin_item_id: string | null;
+  jellyfin_server_id: string | null;
 }
 
 // ── Helpers ──
-
-function statusColor(status: string): string {
-  if (status === 'Downloading') return 'text-blue-400';
-  if (status === 'Seeding') return 'text-emerald-400';
-  if (status === 'Verifying') return 'text-amber-400';
-  if (status === 'Stopped' || status === 'Paused') return 'text-zinc-500';
-  return 'text-zinc-400';
-}
 
 // Pull the show/movie folder name out of a final_path like
 // "/Media/TV Shows/Severance (2022)/Season 02" → "Severance (2022)".
@@ -129,116 +122,118 @@ function searchableTitle(name: string): string {
   return name.replace(/\s*\(\d{4}\)\s*$/, '').trim();
 }
 
-function jellyfinSearchUrl(serverBase: string, finalPath: string | null): string | null {
-  const title = titleFromPath(finalPath);
+// Prefer a resolved library item (details page); fall back to a search link.
+function jellyfinOpenUrl(serverBase: string, row: HistoryRow): string | null {
+  if (row.jellyfin_item_id) {
+    const sid = row.jellyfin_server_id ? `&serverId=${row.jellyfin_server_id}` : '';
+    return `${serverBase}/web/#/details?id=${row.jellyfin_item_id}${sid}`;
+  }
+  const title = titleFromPath(row.final_path);
   if (!title) return null;
   return `${serverBase}/web/#/search.html?query=${encodeURIComponent(searchableTitle(title))}`;
 }
 
-function modeBadge(mode: Mode) {
-  return mode === 'tv'
-    ? { label: 'TV', icon: Tv, color: 'text-purple-400 bg-purple-400/10' }
-    : { label: 'Movie', icon: Film, color: 'text-amber-400 bg-amber-400/10' };
+function ModeChip({ mode }: { mode: Mode }) {
+  const Icon = mode === 'tv' ? Tv : Film;
+  return (
+    <span className="cine-title mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-[3px] border border-border px-1.5 py-0.5 text-[9px] font-semibold tracking-[0.14em] text-muted-foreground">
+      <Icon className="h-3 w-3" /> {mode === 'tv' ? 'Series' : 'Feature'}
+    </span>
+  );
 }
-
-// ── Seeding stats ──
 
 function ratioColor(r: number): string {
-  if (r >= 5) return 'text-emerald-400';
-  if (r >= 2) return 'text-lime-400';
-  if (r >= 1) return 'text-amber-400';
-  return 'text-zinc-400';
+  if (r >= 2) return 'text-accent';
+  if (r >= 1) return 'text-primary';
+  return 'text-muted-foreground';
 }
 
-function StatTile({
-  label, value, sublabel, icon: Icon, accent = 'text-cyan-400',
-}: {
-  label: string; value: string; sublabel?: string; icon: React.ElementType; accent?: string;
+function Eyebrow({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  return (
+    <h2 className={`cine-title text-[10px] font-semibold tracking-[0.22em] text-muted-foreground ${className}`}>
+      {children}
+    </h2>
+  );
+}
+
+// ── Box office (seeding stats rail) ──
+
+function StatRow({ label, value, valueClass, sub }: {
+  label: string; value: string; valueClass?: string; sub?: string;
 }) {
   return (
-    <div className="rounded-lg bg-card/60 border border-border/40 p-3 flex-1 min-w-[140px]">
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1">
-        <Icon className={`h-3 w-3 ${accent}`} />
-        {label}
-      </div>
-      <div className="text-lg font-semibold text-foreground tabular-nums">{value}</div>
-      {sublabel && <div className="text-[10px] text-muted-foreground mt-0.5">{sublabel}</div>}
+    <div className="flex items-baseline justify-between gap-3 py-1.5">
+      <span className="text-[11px] text-muted-foreground">{label}</span>
+      <span className="text-right">
+        <span className={`cine-readout text-sm ${valueClass ?? 'text-foreground'}`}>{value}</span>
+        {sub && <span className="cine-readout ml-2 text-[10px] text-muted-foreground">{sub}</span>}
+      </span>
     </div>
   );
 }
 
-function SeedingPanel({ stats }: { stats: SeedStats | null }) {
-  if (!stats) return null;
+function BoxOffice({ stats }: { stats: SeedStats }) {
   const { session, ratio, seedingNow, topSeeded } = stats;
   const cum = session.cumulative;
   return (
-    <div className="rounded-xl bg-card border border-border/60 p-4 space-y-3">
-      <div className="flex items-center gap-2">
-        <HeartHandshake className="h-4 w-4 text-emerald-400" />
-        <h3 className="text-sm font-semibold text-foreground">Seeding</h3>
-        <span className="text-[10px] text-muted-foreground ml-auto">
-          across {session.cumulative.sessionCount} session{session.cumulative.sessionCount === 1 ? '' : 's'}
-        </span>
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        <StatTile
-          label="Ratio"
-          value={ratio.toFixed(2)}
-          sublabel={`target 10.00`}
-          icon={Share2}
-          accent={ratioColor(ratio)}
-        />
-        <StatTile
-          label="Uploaded"
-          value={fmtBytes(cum.uploadedBytes)}
-          sublabel={`↑ ${fmtSpeed(session.uploadSpeed, '0')} now`}
-          icon={Upload}
-          accent="text-amber-400"
-        />
-        <StatTile
-          label="Downloaded"
-          value={fmtBytes(cum.downloadedBytes)}
-          sublabel={`↓ ${fmtSpeed(session.downloadSpeed, '0')} now`}
-          icon={Download}
-          accent="text-blue-400"
-        />
-        <StatTile
-          label="Active"
-          value={`${seedingNow} / ${session.torrentCount}`}
-          sublabel={`${session.pausedTorrentCount} paused`}
-          icon={CheckCircle}
-          accent="text-emerald-400"
-        />
-      </div>
+    <div className="space-y-6">
+      <section className="rounded-md border border-border bg-card p-4">
+        <div className="flex items-baseline justify-between">
+          <Eyebrow>Box office</Eyebrow>
+          <span className="text-[10px] text-muted-foreground">
+            {cum.sessionCount} session{cum.sessionCount === 1 ? '' : 's'}
+          </span>
+        </div>
+        <div className="mt-3 flex items-baseline gap-2">
+          <span className={`cine-readout text-3xl ${ratioColor(ratio)}`}>×{ratio.toFixed(2)}</span>
+          <span className="text-[11px] text-muted-foreground">given back · target ×10</span>
+        </div>
+        <div className="mt-3 divide-y divide-border/60 border-t border-border/60">
+          <StatRow
+            label="Shared out"
+            value={fmtBytes(cum.uploadedBytes)}
+            valueClass="text-accent"
+            sub={`↑ ${fmtSpeed(session.uploadSpeed, '0')}`}
+          />
+          <StatRow
+            label="Taken in"
+            value={fmtBytes(cum.downloadedBytes)}
+            valueClass="text-primary"
+            sub={`↓ ${fmtSpeed(session.downloadSpeed, '0')}`}
+          />
+          <StatRow
+            label="Reels on hand"
+            value={`${seedingNow} / ${session.torrentCount}`}
+            sub={`${session.pausedTorrentCount} paused`}
+          />
+        </div>
+      </section>
 
       {topSeeded.length > 0 && (
-        <div className="space-y-1 pt-1">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-            Top contributors
+        <section className="rounded-md border border-border bg-card p-4">
+          <Eyebrow>Long runs</Eyebrow>
+          <p className="mt-0.5 text-[10px] text-muted-foreground">Most shared back, all time</p>
+          <div className="mt-2 space-y-2">
+            {topSeeded.map((t, i) => (
+              <div key={i} className="flex items-baseline gap-2 text-xs">
+                <span className="cine-readout w-3 shrink-0 text-right text-muted-foreground">{i + 1}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-foreground/80">{t.name}</span>
+                <span className="cine-readout shrink-0 text-accent">{fmtBytes(t.uploadedEver)}</span>
+                <span className={`cine-readout w-12 shrink-0 text-right ${ratioColor(t.ratio)}`}>
+                  ×{t.ratio.toFixed(2)}
+                </span>
+              </div>
+            ))}
           </div>
-          {topSeeded.map((t, i) => (
-            <div key={i} className="flex items-center gap-3 text-xs py-1">
-              <span className="text-muted-foreground tabular-nums w-4 text-right">{i + 1}.</span>
-              <span className="flex-1 truncate font-mono text-foreground/80">{t.name}</span>
-              <span className="text-amber-400 tabular-nums">{fmtBytes(t.uploadedEver)}</span>
-              <span className={`tabular-nums w-12 text-right ${ratioColor(t.ratio)}`}>
-                {t.ratio.toFixed(2)}x
-              </span>
-              <span className="text-muted-foreground tabular-nums w-10 text-right">
-                {fmtDuration(t.secondsSeeding)}
-              </span>
-            </div>
-          ))}
-        </div>
+        </section>
       )}
     </div>
   );
 }
 
-// ── Submit form ──
+// ── Booking (submit form) ──
 
-function SubmitForm({ onSubmitted }: { onSubmitted: () => void }) {
+function BookingForm({ onSubmitted }: { onSubmitted: () => void }) {
   const [link, setLink] = useState('');
   const [mode, setMode] = useState<Mode>('movie');
   const [submitting, setSubmitting] = useState(false);
@@ -311,113 +306,97 @@ function SubmitForm({ onSubmitted }: { onSubmitted: () => void }) {
   };
 
   return (
-    <div className="rounded-xl bg-card border border-border/60 p-5 space-y-4">
-      <div className="flex items-center gap-2">
-        <Plus className="h-4 w-4 text-cyan-400" />
-        <h3 className="text-sm font-semibold text-foreground">Add a torrent</h3>
+    <section className="rounded-md border border-border bg-card p-4 sm:p-5">
+      <div className="flex items-baseline justify-between">
+        <Eyebrow>Booking</Eyebrow>
+        <span className="text-[10px] text-muted-foreground">magnet link or .torrent URL</span>
       </div>
 
-      {/* Mode toggle */}
-      <div className="flex gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         {(['movie', 'tv'] as const).map((m) => {
-          const badge = modeBadge(m);
-          const Icon = badge.icon;
-          const active = mode === m;
+          const Icon = m === 'movie' ? Film : Tv;
           return (
             <button
               key={m}
               onClick={() => setMode(m)}
-              className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors border ${
-                active
-                  ? 'bg-primary/15 border-primary/40 text-foreground'
-                  : 'bg-muted/30 border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50'
-              }`}
+              data-on={mode === m}
+              className="cine-tab cine-title flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold tracking-[0.14em]"
             >
               <Icon className="h-3.5 w-3.5" />
-              {m === 'movie' ? 'Movie' : 'TV Show'}
+              {m === 'movie' ? 'Feature' : 'Series'}
             </button>
           );
         })}
       </div>
 
-      {/* Link input */}
-      <div className="space-y-2">
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
         <input
           type="text"
           value={link}
           onChange={(e) => setLink(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-          placeholder="magnet:?xt=urn:btih:…  or  https://…/file.torrent"
-          className="w-full px-3 py-2.5 rounded-lg bg-muted/40 border border-border/60 text-sm font-mono text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/50 transition-colors"
+          placeholder="magnet:?xt=urn:btih:…"
+          className="min-w-0 flex-1 rounded-[4px] border border-border bg-muted/50 px-3 py-2.5 font-mono text-sm text-foreground placeholder:text-muted-foreground/70 transition-colors focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
         />
-
-        {preview && (
-          <motion.div
-            initial={{ opacity: 0, y: -2 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="text-xs text-muted-foreground flex items-start gap-2 px-1"
-          >
-            <Eye className="h-3 w-3 mt-0.5 flex-shrink-0 text-cyan-400/70" />
-            <span className="font-mono break-all">
-              <span className="text-zinc-500">→ </span>
-              <span className="text-cyan-300/80">{preview}</span>
-            </span>
-          </motion.div>
-        )}
-      </div>
-
-      {/* Submit + status */}
-      <div className="flex items-center gap-3">
         <button
           onClick={handleSubmit}
           disabled={submitting || !link.trim()}
-          className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+          className="cine-title flex shrink-0 items-center justify-center gap-2 rounded-[4px] bg-primary px-4 py-2 text-[11px] font-bold tracking-[0.14em] text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {submitting ? <Loader className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-          Submit
+          {submitting ? <Loader className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+          Add to program
         </button>
-
-        <AnimatePresence mode="wait">
-          {error && (
-            <motion.div
-              key="err"
-              initial={{ opacity: 0, x: -8 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -8 }}
-              className="text-xs text-red-400 flex items-center gap-1.5"
-            >
-              <AlertTriangle className="h-3 w-3" /> {error}
-            </motion.div>
-          )}
-          {okFlash && (
-            <motion.div
-              key="ok"
-              initial={{ opacity: 0, x: -8 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -8 }}
-              className="text-xs text-emerald-400 flex items-center gap-1.5"
-            >
-              <CheckCircle className="h-3 w-3" />
-              <span className="truncate max-w-xs">Added: {okFlash}</span>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
-    </div>
+
+      {preview && (
+        <motion.div
+          initial={{ opacity: 0, y: -2 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mt-2 flex items-start gap-1.5 px-1 text-xs"
+        >
+          <ArrowRight className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 font-mono text-primary/85 break-all">{preview}</span>
+        </motion.div>
+      )}
+
+      <AnimatePresence mode="wait">
+        {error && (
+          <motion.div
+            key="err"
+            initial={{ opacity: 0, y: -2 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="mt-2 flex items-center gap-1.5 text-xs text-destructive"
+          >
+            <AlertTriangle className="h-3 w-3" /> {error}
+          </motion.div>
+        )}
+        {okFlash && (
+          <motion.div
+            key="ok"
+            initial={{ opacity: 0, y: -2 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="mt-2 flex items-center gap-1.5 text-xs text-accent"
+          >
+            <CheckCircle className="h-3 w-3" />
+            <span className="max-w-xs truncate">On the program: {okFlash}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </section>
   );
 }
 
-// ── Torrent row ──
+// ── A frame on the strip (torrent row) ──
 
-function TorrentRow({
+function FrameRow({
   t, onRemove, onSeed,
 }: {
   t: Transfer;
   onRemove: (t: Transfer, deleteData: boolean) => void;
   onSeed: (t: Transfer, action: 'start' | 'stop') => void;
 }) {
-  const badge = modeBadge(t.mode);
-  const Icon = badge.icon;
   const grp = groupOf(t);
   const meta = GROUP_META[grp];
   const pct = Math.round(t.percent * 100);
@@ -430,110 +409,109 @@ function TorrentRow({
       layout
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
-      className={`relative rounded-lg bg-card border border-border/60 p-4 pl-5 space-y-2.5 overflow-hidden ${
-        paused ? 'opacity-60' : ''
-      }`}
+      className={`flex overflow-hidden rounded-[4px] border border-border bg-card ${paused ? 'opacity-60' : ''}`}
     >
-      {/* Status spine on the left edge */}
-      <div className={`absolute left-0 top-0 bottom-0 w-1 ${meta.dot}`} />
-
-      <div className="flex items-start gap-3">
-        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${badge.color} flex items-center gap-1 mt-0.5`}>
-          <Icon className="h-3 w-3" /> {badge.label}
-        </span>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <div className="text-sm text-foreground truncate font-mono flex-1 min-w-0">{t.name}</div>
-            {t.archived && (
-              <span title="Archived (.torrent saved)" className="text-cyan-400/60">
-                <Archive className="h-3 w-3" />
-              </span>
-            )}
-          </div>
-          <div className="text-xs text-muted-foreground flex items-center gap-3 mt-1 flex-wrap">
-            <span className={statusColor(t.status)}>{t.status}</span>
-            <span>{fmtBytes(t.totalBytes)}</span>
-            {!isDone && !paused && (
-              <>
-                <span className="text-blue-400">↓ {fmtSpeed(t.downBps, '0')}</span>
-                <span className="text-amber-400">↑ {fmtSpeed(t.upBps, '0')}</span>
-                {t.eta > 0 && <span>ETA {fmtEta(t.eta)}</span>}
-              </>
-            )}
-            {isDone && !paused && (
-              <>
-                <span className="text-amber-400">↑ {fmtSpeed(t.upBps, '0')}</span>
-                <span className={`tabular-nums ${ratioColor(t.ratio)}`}>ratio {t.ratio.toFixed(2)}</span>
-                {t.uploadedEver > 0 && <span>shared {fmtBytes(t.uploadedEver)}</span>}
-                {seeding && t.secondsSeeding > 0 && <span>{fmtDuration(t.secondsSeeding)} seeded</span>}
-              </>
-            )}
-            {paused && t.uploadedEver > 0 && (
-              <span>shared {fmtBytes(t.uploadedEver)} · ratio {t.ratio.toFixed(2)}</span>
-            )}
-          </div>
-          {t.error && (
-            <div className="text-xs text-red-400 mt-1 flex items-center gap-1">
-              <AlertTriangle className="h-3 w-3" /> {t.error}
+      <div className="cine-rail" />
+      <div className="min-w-0 flex-1 space-y-2.5 p-3.5">
+        <div className="flex items-start gap-2.5">
+          <ModeChip mode={t.mode} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <div className="min-w-0 flex-1 truncate font-mono text-sm text-foreground">{t.name}</div>
+              {t.archived && (
+                <span title="Print archived (.torrent saved)" className="text-primary/50">
+                  <Archive className="h-3 w-3" />
+                </span>
+              )}
             </div>
-          )}
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <span className={`flex items-center gap-1.5 ${meta.color}`}>
+                <span className={`cine-lamp-dot ${paused ? 'cine-lamp-off' : meta.dot}`} style={{ width: 6, height: 6 }} />
+                {t.status}
+              </span>
+              <span className="cine-readout">{fmtBytes(t.totalBytes)}</span>
+              {!isDone && !paused && (
+                <>
+                  <span className="cine-readout text-primary">↓ {fmtSpeed(t.downBps, '0')}</span>
+                  <span className="cine-readout text-accent">↑ {fmtSpeed(t.upBps, '0')}</span>
+                  {t.eta > 0 && <span className="cine-readout">ETA {fmtEta(t.eta)}</span>}
+                </>
+              )}
+              {isDone && !paused && (
+                <>
+                  <span className="cine-readout text-accent">↑ {fmtSpeed(t.upBps, '0')}</span>
+                  <span className={`cine-readout ${ratioColor(t.ratio)}`}>×{t.ratio.toFixed(2)}</span>
+                  {t.uploadedEver > 0 && <span className="cine-readout">shared {fmtBytes(t.uploadedEver)}</span>}
+                  {seeding && t.secondsSeeding > 0 && <span className="cine-readout">{fmtDuration(t.secondsSeeding)} run</span>}
+                </>
+              )}
+              {paused && t.uploadedEver > 0 && (
+                <span className="cine-readout">shared {fmtBytes(t.uploadedEver)} · ×{t.ratio.toFixed(2)}</span>
+              )}
+            </div>
+            {t.error && (
+              <div className="mt-1 flex items-center gap-1 text-xs text-destructive">
+                <AlertTriangle className="h-3 w-3" /> {t.error}
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-1">
+            {paused ? (
+              <button
+                onClick={() => onSeed(t, 'start')}
+                className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent/15 hover:text-accent"
+                title="Resume"
+              >
+                <Play className="h-3.5 w-3.5" />
+              </button>
+            ) : (
+              <button
+                onClick={() => onSeed(t, 'stop')}
+                className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-primary/15 hover:text-primary"
+                title="Pause"
+              >
+                <Pause className="h-3.5 w-3.5" />
+              </button>
+            )}
+            <button
+              onClick={() => {
+                if (confirm(`Remove "${t.name}" from transmission?\n(Data on disk is kept.)`)) {
+                  onRemove(t, false);
+                }
+              }}
+              className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+              title="Remove (keep files)"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => {
+                if (confirm(`Remove "${t.name}" AND delete its files in staging?`)) {
+                  onRemove(t, true);
+                }
+              }}
+              className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive"
+              title="Remove and delete files"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-1">
-          {paused ? (
-            <button
-              onClick={() => onSeed(t, 'start')}
-              className="p-1.5 rounded hover:bg-emerald-500/15 text-muted-foreground hover:text-emerald-400 transition-colors"
-              title="Resume"
-            >
-              <Play className="h-3.5 w-3.5" />
-            </button>
-          ) : (
-            <button
-              onClick={() => onSeed(t, 'stop')}
-              className="p-1.5 rounded hover:bg-amber-500/15 text-muted-foreground hover:text-amber-400 transition-colors"
-              title={seeding ? 'Pause seeding' : 'Pause'}
-            >
-              <Pause className="h-3.5 w-3.5" />
-            </button>
-          )}
-          <button
-            onClick={() => {
-              if (confirm(`Remove "${t.name}" from transmission?\n(Data on disk is kept.)`)) {
-                onRemove(t, false);
-              }
-            }}
-            className="p-1.5 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
-            title="Remove (keep data)"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-          <button
-            onClick={() => {
-              if (confirm(`Remove "${t.name}" AND delete its files in staging?`)) {
-                onRemove(t, true);
-              }
-            }}
-            className="p-1.5 rounded hover:bg-red-500/15 text-muted-foreground hover:text-red-400 transition-colors"
-            title="Remove and delete data"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
+        <div className="flex items-center gap-3">
+          <div className="cine-gauge">
+            <span data-done={isDone} data-paused={paused} style={{ width: `${t.percent * 100}%` }} />
+          </div>
+          <span className="cine-readout w-10 text-right text-xs text-muted-foreground">{pct}%</span>
         </div>
       </div>
-      <div className="flex items-center gap-3">
-        <ProgressBar
-          percent={t.percent * 100}
-          color={paused ? 'bg-zinc-500' : isDone ? 'bg-emerald-500' : 'bg-blue-500'}
-        />
-        <span className="text-xs text-muted-foreground tabular-nums w-10 text-right">{pct}%</span>
-      </div>
+      <div className="cine-rail" />
     </motion.div>
   );
 }
 
-// ── Torrents (unified, filterable, grouped) ──
+// ── The program (unified, filterable, grouped) ──
 
-function TorrentsPanel({
+function ProgramPanel({
   transfers, onRemove, onSeed, daemonOk,
 }: {
   transfers: Transfer[];
@@ -569,55 +547,49 @@ function TorrentsPanel({
 
   if (!daemonOk) {
     return (
-      <div className="rounded-xl border border-border/60 p-5 text-center text-sm text-muted-foreground">
-        <WifiOff className="h-5 w-5 mx-auto mb-2 text-red-400/60" />
-        Can&#39;t reach transmission-daemon. Run <span className="font-mono text-foreground">scripts/jellyfin/setup-daemon.sh</span>.
+      <div className="rounded-md border border-border bg-card p-6 text-center text-sm text-muted-foreground">
+        <span className="cine-lamp-dot cine-lamp-off mx-auto mb-3 block h-2.5 w-2.5" />
+        The projection booth isn&#39;t answering — transmission-daemon looks offline.
+        <div className="mt-1">
+          Run <span className="font-mono text-foreground">scripts/jellyfin/setup-daemon.sh</span> to relight it.
+        </div>
       </div>
     );
   }
 
   const filterPills: { value: Filter; label: string }[] = [
     { value: 'all',         label: 'All' },
-    { value: 'downloading', label: 'Downloading' },
-    { value: 'seeding',     label: 'Seeding' },
-    { value: 'paused',      label: 'Paused' },
+    { value: 'downloading', label: 'Arriving' },
+    { value: 'verifying',   label: 'Inspecting' },
+    { value: 'seeding',     label: 'Held over' },
+    { value: 'paused',      label: 'Intermission' },
   ];
 
   return (
     <div className="space-y-3">
       {/* Filter + search bar */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <ListFilter className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-        <div className="flex items-center gap-1 flex-wrap">
-          {filterPills.map((p) => {
-            const active = filter === p.value;
-            const count = counts[p.value];
-            return (
-              <button
-                key={p.value}
-                onClick={() => setFilter(p.value)}
-                className={`text-xs px-2.5 py-1 rounded-full border transition-colors flex items-center gap-1.5 ${
-                  active
-                    ? 'bg-primary/15 border-primary/40 text-foreground'
-                    : 'bg-muted/30 border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50'
-                }`}
-              >
-                {p.label}
-                <span className={`tabular-nums text-[10px] ${active ? 'text-foreground/70' : 'text-muted-foreground/70'}`}>
-                  {count}
-                </span>
-              </button>
-            );
-          })}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1">
+          {filterPills.map((p) => (
+            <button
+              key={p.value}
+              onClick={() => setFilter(p.value)}
+              data-on={filter === p.value}
+              className="cine-tab flex items-center gap-1.5 px-2.5 py-1 text-xs"
+            >
+              {p.label}
+              <span className="cine-readout text-[10px] opacity-70">{counts[p.value]}</span>
+            </button>
+          ))}
         </div>
-        <div className="relative ml-auto flex-1 min-w-[180px] max-w-xs">
-          <Search className="h-3 w-3 text-muted-foreground absolute left-2.5 top-1/2 -translate-y-1/2" />
+        <div className="relative ml-auto min-w-[170px] max-w-xs flex-1">
+          <Search className="absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Filter by name…"
-            className="w-full pl-7 pr-7 py-1.5 rounded-md bg-muted/40 border border-border/60 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/50 transition-colors"
+            placeholder="Find a print…"
+            className="w-full rounded-[4px] border border-border bg-muted/50 py-1.5 pl-7 pr-7 text-xs text-foreground placeholder:text-muted-foreground/70 transition-colors focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
           />
           {query && (
             <button
@@ -632,37 +604,42 @@ function TorrentsPanel({
       </div>
 
       {filtered.length === 0 ? (
-        <div className="rounded-xl border border-border/60 p-5 text-center text-sm text-muted-foreground">
+        <div className="rounded-md border border-border bg-card p-6 text-center text-sm text-muted-foreground">
           {transfers.length === 0
-            ? 'No torrents yet. Submit a link above to start.'
+            ? 'Nothing on the program — book a picture above.'
             : q
-              ? <>No torrents match <span className="font-mono text-foreground">&ldquo;{query}&rdquo;</span>.</>
-              : 'No torrents in this state.'}
+              ? <>No prints match <span className="font-mono text-foreground">&ldquo;{query}&rdquo;</span>.</>
+              : 'No prints in this state.'}
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-5">
           {GROUP_ORDER.map((g) => {
             const items = grouped[g];
             if (items.length === 0) return null;
             const meta = GROUP_META[g];
-            const GIcon = meta.icon;
             // Hide the section header when filter narrows to one group anyway.
             const showHeader = filter === 'all';
             return (
               <div key={g} className="space-y-2">
                 {showHeader && (
-                  <div className="sticky top-[57px] z-10 -mx-1 px-1 py-1 backdrop-blur-sm bg-background/80 border-b border-border/30">
-                    <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider font-semibold">
-                      <span className={`inline-block h-1.5 w-1.5 rounded-full ${meta.dot}`} />
-                      <GIcon className={`h-3 w-3 ${meta.color}`} />
-                      <span className={meta.color}>{meta.label}</span>
-                      <span className="text-muted-foreground tabular-nums">{items.length}</span>
-                    </div>
+                  <div className="sticky top-[57px] z-10 -mx-1 border-b border-border/50 bg-background/85 px-1 py-1.5 backdrop-blur-sm">
+                    {g === 'seeding' ? (
+                      <span className="cine-exit-sign cine-title text-[10px] font-bold tracking-[0.2em]">
+                        Held over
+                        <span className="cine-readout font-normal opacity-80">{items.length}</span>
+                      </span>
+                    ) : (
+                      <div className={`cine-title flex items-center gap-2 text-[10px] font-semibold tracking-[0.2em] ${meta.color}`}>
+                        <span className={`cine-lamp-dot ${meta.dot}`} style={{ width: 6, height: 6 }} />
+                        {meta.label}
+                        <span className="cine-readout text-muted-foreground">{items.length}</span>
+                      </div>
+                    )}
                   </div>
                 )}
                 <div className="space-y-2">
                   {items.map((t) => (
-                    <TorrentRow key={t.id} t={t} onRemove={onRemove} onSeed={onSeed} />
+                    <FrameRow key={t.id} t={t} onRemove={onRemove} onSeed={onSeed} />
                   ))}
                 </div>
               </div>
@@ -674,26 +651,32 @@ function TorrentsPanel({
   );
 }
 
-// ── History ──
+// ── Program archive (history) ──
 
-function History({ history, jellyfinBase }: { history: HistoryRow[]; jellyfinBase: string | null }) {
+function statusWord(status: string): { word: string; className: string } {
+  if (status === 'ingested') return { word: 'in the library', className: 'text-accent' };
+  if (status === 'downloading') return { word: 'arriving', className: 'text-primary' };
+  if (status === 'removed') return { word: 'removed', className: 'text-muted-foreground' };
+  return { word: status, className: 'text-primary' };
+}
+
+function ProgramArchive({ history, jellyfinBase }: { history: HistoryRow[]; jellyfinBase: string | null }) {
   if (history.length === 0) {
     return (
-      <div className="rounded-xl border border-border/60 p-5 text-center text-sm text-muted-foreground">
-        No history yet.
+      <div className="rounded-md border border-border bg-card p-6 text-center text-sm text-muted-foreground">
+        No screenings on record yet.
       </div>
     );
   }
   return (
     <div className="space-y-1.5">
       {history.map((row) => {
-        const badge = modeBadge(row.mode);
-        const Icon = badge.icon;
         const ingested = row.status === 'ingested';
-        const openUrl = ingested && jellyfinBase ? jellyfinSearchUrl(jellyfinBase, row.final_path) : null;
+        const openUrl = ingested && jellyfinBase ? jellyfinOpenUrl(jellyfinBase, row) : null;
         const handleOpen = openUrl
           ? () => window.open(openUrl, '_blank', 'noopener,noreferrer')
           : undefined;
+        const st = statusWord(row.status);
         return (
           <motion.div
             key={row.id}
@@ -701,47 +684,41 @@ function History({ history, jellyfinBase }: { history: HistoryRow[]; jellyfinBas
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             onClick={handleOpen}
-            className={`rounded-lg bg-card/60 border border-border/40 p-3 transition-colors ${
-              handleOpen
-                ? 'cursor-pointer hover:bg-card hover:border-cyan-400/30 active:bg-card/80'
-                : ''
+            className={`rounded-[4px] border border-border bg-card/70 p-3 transition-colors ${
+              handleOpen ? 'cursor-pointer hover:border-primary/50 hover:bg-card active:bg-card/80' : ''
             }`}
-            title={handleOpen ? 'Open in Jellyfin' : undefined}
+            title={handleOpen ? (row.jellyfin_item_id ? 'Open in Jellyfin' : 'Search in Jellyfin') : undefined}
           >
             <div className="flex items-start gap-3">
-              <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${badge.color} flex items-center gap-1 mt-0.5`}>
-                <Icon className="h-3 w-3" /> {badge.label}
-              </span>
-              <div className="flex-1 min-w-0 space-y-0.5">
-                <div className="text-sm text-foreground/90 truncate font-mono">
+              <ModeChip mode={row.mode} />
+              <div className="min-w-0 flex-1 space-y-0.5">
+                <div className="truncate font-mono text-sm text-foreground/90">
                   {(row.original_name || '(unknown)').replace(/\+/g, ' ')}
                 </div>
                 {row.final_path && (
-                  <div className="text-xs text-cyan-300/70 flex items-start gap-1.5 font-mono">
-                    <ArrowRight className="h-3 w-3 mt-0.5 flex-shrink-0 text-zinc-500" />
+                  <div className="flex items-start gap-1.5 font-mono text-xs text-primary/75">
+                    <ArrowRight className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/60" />
                     <span className="break-all">{row.final_path}</span>
                   </div>
                 )}
-                <div className="text-xs text-muted-foreground flex items-center gap-3 flex-wrap pt-0.5">
+                <div className="flex flex-wrap items-center gap-3 pt-0.5 text-xs text-muted-foreground">
                   <span className="flex items-center gap-1">
                     <Clock className="h-3 w-3" /> {fmtTime(row.submitted_at)}
                   </span>
-                  <span className={ingested ? 'text-emerald-400' : 'text-amber-400'}>
-                    {row.status}
-                  </span>
+                  <span className={st.className}>{st.word}</span>
                   {row.files.length > 0 && (
                     <span>{row.files.length} file{row.files.length === 1 ? '' : 's'}</span>
                   )}
                   {row.error_message && (
-                    <span className="text-red-400">{row.error_message}</span>
+                    <span className="text-destructive">{row.error_message}</span>
                   )}
                 </div>
               </div>
               {ingested && (
                 handleOpen ? (
-                  <ExternalLink className="h-4 w-4 text-cyan-400/80 mt-0.5" />
+                  <ExternalLink className="mt-0.5 h-4 w-4 text-primary/80" />
                 ) : (
-                  <CheckCircle className="h-4 w-4 text-emerald-400 mt-0.5" />
+                  <CheckCircle className="mt-0.5 h-4 w-4 text-accent" />
                 )
               )}
             </div>
@@ -755,16 +732,22 @@ function History({ history, jellyfinBase }: { history: HistoryRow[]; jellyfinBas
 // ── Page ──
 
 export default function JellyfinPage() {
+  useHeaderConfig({ scopeClass: 'cine-theme' });
+
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [stats, setStats] = useState<SeedStats | null>(null);
   const [daemonOk, setDaemonOk] = useState<boolean | null>(null);
   const [jellyfinBase, setJellyfinBase] = useState<string | null>(null);
 
-  // Build the Jellyfin server URL from whatever hostname the user is on.
+  // Jellyfin's web address as seen from this browser: portless jellyfin.local
+  // when we're already browsing over mDNS, otherwise the same host on :8096.
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    setJellyfinBase(`${window.location.protocol}//${window.location.hostname}:8096`);
+    const { protocol, hostname } = window.location;
+    setJellyfinBase(
+      hostname.endsWith('.local') ? `${protocol}//jellyfin.local` : `${protocol}//${hostname}:8096`,
+    );
   }, []);
 
   const refreshTransfers = useCallback(async () => {
@@ -830,78 +813,94 @@ export default function JellyfinPage() {
     refreshTransfers();
   }, [refreshTransfers]);
 
+  const arriving = transfers.filter((t) => groupOf(t) === 'downloading').length;
+  const heldOver = transfers.filter((t) => groupOf(t) === 'seeding').length;
+  const marqueeLine =
+    daemonOk === false
+      ? 'Projector offline'
+      : transfers.length === 0
+        ? 'Projector idle'
+        : [
+            arriving > 0 ? `${arriving} arriving` : null,
+            heldOver > 0 ? `${heldOver} held over` : null,
+          ].filter(Boolean).join(' · ') || `${transfers.length} on the program`;
+
   return (
     <PageTransition>
-      <div className="p-6 md:p-8">
-        <div className="container mx-auto max-w-4xl space-y-6">
+      <div className="cine-theme min-h-[calc(100vh-57px)]">
+        <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
           <FadeIn>
-            <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
-              <div>
-                <h1 className="text-3xl font-bold flex items-center gap-3">
-                  <Film className="h-7 w-7 text-cyan-400" />
-                  Jellyfin Fetcher
+            <div className="cine-marquee">
+              <div className="cine-bulbs" />
+              <div className="px-6 py-6 text-center">
+                <p className="cine-title text-[10px] font-semibold tracking-[0.3em] text-muted-foreground">
+                  RM 08 · The projection booth
+                </p>
+                <h1 className="cine-title mt-1.5 text-2xl font-bold tracking-[0.28em] text-foreground sm:text-3xl">
+                  Screening Room
                 </h1>
-                <p className="text-muted-foreground text-sm mt-1">
-                  Submit a magnet or .torrent. Files are auto-cleaned and dropped into the right Jellyfin folder.
+                <p className={`cine-title mt-2 text-[11px] font-semibold tracking-[0.25em] ${
+                  daemonOk === false ? 'text-destructive' : 'text-primary'
+                }`}>
+                  {marqueeLine}
                 </p>
               </div>
-              <div className="flex items-center gap-3 flex-wrap">
-                <ConnectionBadge ok={daemonOk} upLabel="Daemon up" downLabel="Daemon down" />
-                {jellyfinBase && (
-                  <a
-                    href={jellyfinBase}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 px-2 py-1 rounded-md hover:bg-cyan-400/10 transition-colors"
-                  >
-                    Open Jellyfin
-                    <ExternalLink className="h-3 w-3" />
-                  </a>
-                )}
-              </div>
+              <div className="cine-bulbs" />
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <span className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                <span className={`cine-lamp-dot ${daemonOk ? 'text-primary' : 'cine-lamp-off'}`} />
+                {daemonOk == null ? 'Checking the projector…' : daemonOk ? 'Projector running' : 'Projector offline'}
+              </span>
+              {jellyfinBase && (
+                <a href={jellyfinBase} target="_blank" rel="noreferrer" className="cine-ticket text-xs">
+                  Open Jellyfin
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              )}
             </div>
           </FadeIn>
 
-          <FadeIn delay={0.05}>
-            <SubmitForm onSubmitted={() => { refreshTransfers(); refreshHistory(); }} />
-          </FadeIn>
+          <div className="mt-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
+            <div className="min-w-0 space-y-6">
+              <FadeIn delay={0.05}>
+                <BookingForm onSubmitted={() => { refreshTransfers(); refreshHistory(); }} />
+              </FadeIn>
 
-          {daemonOk && stats && (
-            <FadeIn delay={0.07}>
-              <SeedingPanel stats={stats} />
-            </FadeIn>
-          )}
+              <FadeIn delay={0.1}>
+                <div className="space-y-3">
+                  <Eyebrow>
+                    On the program
+                    {transfers.length > 0 && (
+                      <span className="cine-readout ml-2 normal-case tracking-normal">{transfers.length}</span>
+                    )}
+                  </Eyebrow>
+                  <ProgramPanel
+                    transfers={transfers}
+                    onRemove={handleRemove}
+                    onSeed={handleSeed}
+                    daemonOk={daemonOk !== false}
+                  />
+                </div>
+              </FadeIn>
 
-          <FadeIn delay={0.1}>
-            <div className="space-y-3">
-              <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                <Download className="h-4 w-4 text-blue-400" />
-                Torrents
-                {transfers.length > 0 && (
-                  <span className="text-xs text-muted-foreground">({transfers.length})</span>
-                )}
-              </h2>
-              <TorrentsPanel
-                transfers={transfers}
-                onRemove={handleRemove}
-                onSeed={handleSeed}
-                daemonOk={daemonOk !== false}
-              />
+              <FadeIn delay={0.15}>
+                <div className="space-y-3">
+                  <Eyebrow>Program archive</Eyebrow>
+                  <ProgramArchive history={history} jellyfinBase={jellyfinBase} />
+                </div>
+              </FadeIn>
             </div>
-          </FadeIn>
 
-          <FadeIn delay={0.15}>
-            <div className="space-y-2">
-              <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                <Clock className="h-4 w-4 text-violet-400" />
-                Recent
-                {history.length > 0 && (
-                  <span className="text-xs text-muted-foreground">({history.length})</span>
-                )}
-              </h2>
-              <History history={history} jellyfinBase={jellyfinBase} />
+            <div className="space-y-6">
+              {daemonOk && stats && (
+                <FadeIn delay={0.07}>
+                  <BoxOffice stats={stats} />
+                </FadeIn>
+              )}
             </div>
-          </FadeIn>
+          </div>
         </div>
       </div>
     </PageTransition>

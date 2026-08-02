@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
+import { resolveItemsByPath } from '@/lib/jellyfin';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,6 +27,24 @@ export async function GET(request: NextRequest) {
     params.push(limit);
 
     const { rows } = await pool.query(sql, params);
+
+    // Best-effort: attach real Jellyfin item ids to ingested rows so the UI
+    // can deep-link to the item instead of a search page. Needs an API key
+    // in services.jellyfin; silently skipped otherwise.
+    try {
+      const paths = [...new Set(
+        rows
+          .filter((r) => r.status === 'ingested' && typeof r.final_path === 'string')
+          .map((r) => r.final_path as string),
+      )];
+      const resolved = await resolveItemsByPath(paths);
+      for (const r of rows) {
+        const hit = r.final_path ? resolved.get(r.final_path) : undefined;
+        r.jellyfin_item_id = hit?.itemId ?? null;
+        r.jellyfin_server_id = hit?.serverId ?? null;
+      }
+    } catch { /* history still renders without deep links */ }
+
     return NextResponse.json({ history: rows });
   } catch (error) {
     return NextResponse.json(
