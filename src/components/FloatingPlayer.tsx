@@ -1,5 +1,10 @@
 'use client';
 
+// The bar's takeaway player — BarFoo's amplifier console in miniature,
+// carried into the hallway. It wears the bar's own scope (`bar-pop`)
+// whatever room it floats over: deliberately dark-always, like the room
+// it came from.
+
 import { useState, useEffect, useRef, type CSSProperties } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Volume1, Music, X } from 'lucide-react';
@@ -129,31 +134,33 @@ export default function FloatingPlayer() {
           transition={{ type: 'spring', stiffness: 300, damping: 30 }}
           style={{ cursor: 'grab' }}
           whileDrag={{ cursor: 'grabbing', scale: 1.02 }}
-          className="fixed bottom-4 right-4 z-50 w-80 rounded-xl border border-border/60 bg-card/95 backdrop-blur-xl shadow-2xl overflow-visible select-none"
+          className="bar-pop bar-panel fixed bottom-4 right-4 z-50 w-80 backdrop-blur-xl overflow-visible select-none"
         >
           <div className="p-3">
             {/* Top row: track info + close */}
             <div className="flex items-center gap-2.5 mb-2.5">
-              {currentAlbum?.coverUrl ? (
-                <button
-                  type="button"
-                  onPointerUp={() => currentAlbum && navigate({ artist: currentAlbum.artist, album: currentAlbum.name })}
-                  className="w-10 h-10 rounded-lg bg-cover bg-center shadow-md shrink-0 hover:ring-2 hover:ring-primary/60 transition-all cursor-pointer"
-                  style={{ backgroundImage: `url(${currentAlbum.coverUrl})` }}
-                  title="Open album in BarFoo"
-                  aria-label="Open album"
-                />
-              ) : (
-                <button
-                  type="button"
-                  onPointerUp={() => currentAlbum && navigate({ artist: currentAlbum.artist, album: currentAlbum.name })}
-                  className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center shrink-0 hover:bg-muted/80 transition-colors"
-                  title="Open album in BarFoo"
-                  aria-label="Open album"
+              {/* The record on the platter — spins while it plays */}
+              <button
+                type="button"
+                onPointerUp={() => currentAlbum && navigate({ artist: currentAlbum.artist, album: currentAlbum.name })}
+                className="relative h-10 w-10 shrink-0 cursor-pointer"
+                title="Open album in BarFoo"
+                aria-label="Open album"
+              >
+                <span
+                  className="bar-record block h-10 w-10 bg-cover bg-center shadow-[0_0_0_2px_#141010,0_0_0_3px_var(--bar-line),0_3px_8px_hsl(20_50%_2%/0.6)]"
+                  data-spinning={isPlaying}
+                  style={currentAlbum?.coverUrl ? { backgroundImage: `url(${currentAlbum.coverUrl})` } : undefined}
                 >
-                  <Music className="h-4 w-4 text-muted-foreground" />
-                </button>
-              )}
+                  {!currentAlbum?.coverUrl && (
+                    <span className="flex h-full w-full items-center justify-center rounded-full bg-muted">
+                      <Music className="h-4 w-4 text-muted-foreground" />
+                    </span>
+                  )}
+                </span>
+                {/* spindle */}
+                <span className="pointer-events-none absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#141010] shadow-[inset_0_0_0_1px_var(--bar-line)]" />
+              </button>
               <div className="min-w-0 flex-1">
                 <button
                   type="button"
@@ -209,7 +216,7 @@ export default function FloatingPlayer() {
                 <SkipForward className="h-3 w-3" fill="currentColor" />
               </button>
 
-              <span className="text-[10px] text-muted-foreground/80 tabular-nums shrink-0 ml-1 select-none">{formatTime(sliderValue)}</span>
+              <span className="bar-readout text-[10px] text-muted-foreground/80 shrink-0 ml-1 select-none">{formatTime(sliderValue)}</span>
               <input
                 type="range"
                 min={0}
@@ -229,7 +236,7 @@ export default function FloatingPlayer() {
                 style={{ ['--fp-pct']: `${seekPct}%` } as CSSProperties}
                 aria-label="Seek"
               />
-              <span className="text-[10px] text-muted-foreground/80 tabular-nums shrink-0 select-none">{formatTime(duration)}</span>
+              <span className="bar-readout text-[10px] text-muted-foreground/80 shrink-0 select-none">{formatTime(duration)}</span>
 
               <div
                 className="relative flex items-center shrink-0"
@@ -262,10 +269,10 @@ export default function FloatingPlayer() {
                       style={{ paddingLeft: 14, paddingRight: 14 }}
                     >
                       <div
-                        className="flex flex-col items-center gap-2 rounded-lg border border-border/60 bg-popover/95 backdrop-blur-xl shadow-xl px-2 py-3"
+                        className="bar-panel flex flex-col items-center gap-2 backdrop-blur-xl px-2 py-3"
                         style={{ width: 36 }}
                       >
-                        <span className="text-[10px] text-muted-foreground tabular-nums">{Math.round(volPct)}</span>
+                        <span className="bar-readout text-[10px] text-muted-foreground">{Math.round(volPct)}</span>
                         <div className="flex items-center justify-center" style={{ height: 80, width: 14 }}>
                           <input
                             type="range"
