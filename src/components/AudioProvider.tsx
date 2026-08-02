@@ -443,7 +443,7 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
   const handleVolumeWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const delta = e.deltaY > 0 ? -0.05 : 0.05;
+    const delta = e.deltaY > 0 ? -0.01 : 0.01;
     setVolumeValue((mutedRef.current ? 0 : volumeRef.current) + delta);
   }, [setVolumeValue]);
 

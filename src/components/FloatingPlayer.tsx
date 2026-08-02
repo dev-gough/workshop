@@ -262,7 +262,7 @@ export default function FloatingPlayer() {
                       onMouseEnter={cancelVolumeClose}
                       onMouseLeave={scheduleVolumeClose}
                       onPointerDown={e => e.stopPropagation()}
-                      onWheel={e => { e.preventDefault(); const delta = e.deltaY > 0 ? -0.05 : 0.05; setVolumeValue((muted ? 0 : volume) + delta); }}
+                      onWheel={e => { e.preventDefault(); const delta = e.deltaY > 0 ? -0.01 : 0.01; setVolumeValue((muted ? 0 : volume) + delta); }}
                       className={`absolute right-0 z-10 ${
                         volumeDirection === 'down' ? 'top-full pt-2' : 'bottom-full pb-2'
                       }`}
