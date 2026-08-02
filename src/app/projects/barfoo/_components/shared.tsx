@@ -38,6 +38,16 @@ export interface Stats {
   streaks: { current: number; longest: number };
   mostActiveDay: { date: string; count: number } | null;
   firstPlay: string | null;
+  /** Weekly plays split into the all-time top-5 artists + '__other'. */
+  weeklyEras: { week: string; artist: string; count: number }[];
+  records: {
+    longestSitting: { username: string; songs: number; startedAt: string; hours: number } | null;
+    totalSittings: number;
+    avgSittingSongs: number;
+    biggestBinge: { username: string; artist: string; album: string; song: string; date: string; count: number } | null;
+  };
+  frontToBack: { artist: string; album: string; played_tracks: number; plays: number; total_tracks: number; coverUrl?: string | null }[];
+  listenerProfiles: { username: string; plays: number; days_active: number; first_play: string; top_artist: string | null; peak_hour: number | null }[];
 }
 
 /** What the "new playlist" dialog should add once created: a single song
