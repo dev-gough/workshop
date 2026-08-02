@@ -1687,3 +1687,196 @@
 }
 @keyframes sf-blink { 50% { opacity: 0.25; } }
 .sf-led[data-live='true'] { animation: sf-blink 1.6s steps(2, start) infinite; }
+
+/* ─── BarFoo Records scope (RM 02) — applied to /projects/barfoo ───
+   A hi-fi listening bar after dark: a dim room walled floor-to-ceiling
+   with records, lit by lamplight and the amber of the amplifier's VU
+   meters. DELIBERATELY DARK-ALWAYS — the bar has no windows, and on a
+   dim warm surround the album art is the only saturated color in the
+   room (gallery lighting for the record wall). Voice kept distinct from
+   the Groove next door (a daylight record shop on cream paper) and the
+   Soulseek exchange (green-black wire room): here everything is warm
+   wood, brass hardware, and meter glow.
+   `.bar-pop` is the same voice for portaled surfaces (context menus,
+   dialogs) that must carry the tokens WITHOUT the wall paint — being
+   unlayered, a background here would trump their bg-popover utility. */
+.bar-theme,
+.bar-pop {
+  /* Palette — mahogany shadow, warm ink, one amber lamp */
+  --bar-wood:   hsl(18 16% 6%);      /* the room after dark */
+  --bar-wood-2: hsl(20 15% 8.5%);    /* panel / card */
+  --bar-raise:  hsl(23 14% 12%);     /* raised plate / hover */
+  --bar-line:   hsl(26 12% 17%);     /* seams */
+  --bar-ink:    hsl(34 32% 92%);     /* warm white */
+  --bar-dim:    hsl(28 9% 59%);      /* pencil on the placard */
+  --bar-lamp:   hsl(36 92% 58%);     /* VU amber — the accent */
+  --bar-lamp-deep: hsl(33 75% 46%);  /* filled chart marks (lamp is too hot) */
+  --bar-red:    hsl(4 64% 56%);      /* the meter's red zone */
+
+  /* Remap the shared tokens so utilities + shadcn/lucide follow suit. */
+  --color-background:           var(--bar-wood);
+  --color-foreground:           var(--bar-ink);
+  --color-card:                 var(--bar-wood-2);
+  --color-card-foreground:      var(--bar-ink);
+  --color-popover:              var(--bar-wood-2);
+  --color-popover-foreground:   var(--bar-ink);
+  --color-muted:                var(--bar-raise);
+  --color-muted-foreground:     var(--bar-dim);
+  --color-secondary:            var(--bar-raise);
+  --color-secondary-foreground: var(--bar-ink);
+  --color-border:               var(--bar-line);
+  --color-input:                var(--bar-line);
+  --color-ring:                 var(--bar-lamp);
+  --color-primary:              var(--bar-lamp);
+  --color-primary-foreground:   hsl(20 40% 8%);
+  /* Accent stays quiet: shadcn uses it for ghost/outline hover + menu
+     highlight, and a full-lamp hover would shout. The lamp lives in
+     primary. */
+  --color-accent:               var(--bar-raise);
+  --color-accent-foreground:    var(--bar-ink);
+  --color-destructive:          var(--bar-red);
+  --color-destructive-foreground: hsl(34 32% 96%);
+  --color-chart-1:              var(--bar-lamp-deep);
+
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  color: var(--bar-ink);
+}
+
+/* The wall paint itself — the page shell only. */
+.bar-theme {
+  background-color: var(--bar-wood);
+  /* A pool of lamplight from the ceiling; barely-there wood grain. */
+  background-image:
+    radial-gradient(ellipse 70% 42% at 50% -8%, hsl(36 70% 45% / 0.07), transparent 70%),
+    repeating-linear-gradient(90deg, transparent 0 3px, hsl(24 30% 12% / 0.12) 3px 4px);
+  background-attachment: fixed, scroll;
+}
+
+/* The shop's serif voice — signage moments only. */
+.bar-serif {
+  font-family: var(--font-ws-serif), Georgia, serif;
+}
+
+/* Panel surface: the bar's joinery. Slight gradient, brass-warm seams. */
+.bar-panel {
+  background: linear-gradient(172deg, hsl(21 15% 9.5% / 0.96), hsl(18 16% 7% / 0.97));
+  border: 1px solid var(--bar-line);
+  border-radius: 6px;
+  box-shadow:
+    0 6px 18px hsl(20 40% 2% / 0.5),
+    inset 0 1px 0 hsl(34 40% 85% / 0.045);
+}
+
+/* Placard label — pencil small-caps on the shelf edge. */
+.bar-etch {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--bar-dim);
+}
+
+/* Tape-counter numerals: track numbers, times, play counts. */
+.bar-readout {
+  font-family: var(--font-readout), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A sleeve on the wall: cut square like card stock, lifts into the
+   lamplight on hover. The <img>/art fills it; caption sits below. */
+.bar-sleeve {
+  border: 1px solid var(--bar-line);
+  border-radius: 3px;
+  background: var(--bar-raise);
+  overflow: hidden;
+  transition: transform 180ms cubic-bezier(.2,.9,.2,1), box-shadow 180ms ease,
+    border-color 180ms ease;
+}
+.bar-sleeve:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--bar-lamp) 45%, var(--bar-line));
+  box-shadow: 0 12px 26px -10px hsl(20 50% 2% / 0.7);
+}
+.bar-sleeve[data-selected='true'] {
+  border-color: color-mix(in srgb, var(--bar-lamp) 70%, var(--bar-line));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--bar-lamp) 55%, transparent),
+    0 8px 20px -8px hsl(20 50% 2% / 0.7);
+}
+
+/* Indicator lamp — playing markers, the LINE dot on the console. */
+.bar-lamp-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor, inset 0 0 2px hsl(0 0% 100% / 0.4);
+  flex-shrink: 0;
+}
+
+/* The record on the platter (console cover art). Spin is paused, not
+   removed, when playback stops — the tonearm stays down. */
+@keyframes bar-spin { to { transform: rotate(360deg); } }
+.bar-record {
+  border-radius: 50%;
+  animation: bar-spin 3.6s linear infinite;
+  animation-play-state: paused;
+}
+.bar-record[data-spinning='true'] { animation-play-state: running; }
+@media (prefers-reduced-motion: reduce) {
+  .bar-record { animation: none; }
+}
+
+/* Segmented view control: brass-edged pushbuttons on the faceplate. */
+.bar-tab {
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--bar-dim);
+  transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease;
+}
+.bar-tab:hover { color: var(--bar-ink); }
+.bar-tab[data-on='true'] {
+  color: var(--bar-lamp);
+  border-color: color-mix(in srgb, var(--bar-lamp) 40%, var(--bar-line));
+  background: color-mix(in srgb, var(--bar-lamp) 9%, transparent);
+}
+
+/* The size slider — a small brass fader, quiet until touched. */
+.bar-fader {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 2px;
+  border-radius: 9999px;
+  background: var(--bar-line);
+  cursor: pointer;
+  transition: background-color 140ms ease;
+}
+.bar-fader::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--bar-dim);
+  border: none;
+  transition: background-color 140ms ease, box-shadow 140ms ease;
+}
+.bar-fader::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--bar-dim);
+  border: none;
+  transition: background-color 140ms ease, box-shadow 140ms ease;
+}
+.bar-fader:hover { background: color-mix(in srgb, var(--bar-dim) 40%, var(--bar-line)); }
+.bar-fader:hover::-webkit-slider-thumb,
+.bar-fader:focus-visible::-webkit-slider-thumb {
+  background: var(--bar-lamp);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--bar-lamp) 60%, transparent);
+}
+.bar-fader:hover::-moz-range-thumb,
+.bar-fader:focus-visible::-moz-range-thumb {
+  background: var(--bar-lamp);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--bar-lamp) 60%, transparent);
+}

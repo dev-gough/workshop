@@ -127,7 +127,8 @@ export function MusicRoom({ music, albums, className }: {
         <div className="absolute inset-x-0 bottom-0 space-y-1 p-4 pb-9">
           {last ? (
             <>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-sky-400">Last spin · {timeAgo(last.played_at)}</p>
+              {/* Lamp amber — the room's --bar-lamp, mirrored here (tiles carry hex copies) */}
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#f6a831]">Last spin · {timeAgo(last.played_at)}</p>
               <p className="truncate text-sm font-semibold text-zinc-50">{cleanSongName(last.song)}</p>
               <p className="truncate text-xs text-zinc-400">
                 {last.artist}
