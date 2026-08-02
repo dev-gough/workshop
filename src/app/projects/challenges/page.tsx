@@ -454,6 +454,7 @@ export default function ChallengesPage() {
         ready={!loading}
         pulse={tierUpPulse}
         onOpenHistory={() => setTab('games')}
+        onSelect={setSelected}
       />
 
       {canHover && hover && !selected && (

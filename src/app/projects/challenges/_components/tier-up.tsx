@@ -35,7 +35,7 @@ const WATERMARK_KEY = 'lol:tierups:seen';
 const HERALD_LIMIT = 5;
 /** How many plates share the corner before the rest wait their turn. */
 const STACK_MAX = 3;
-const DWELL_MS = 8000;
+const DWELL_MS = 16000;
 const STAGGER_MS = 420;
 
 const SPRING = { type: 'spring' as const, stiffness: 260, damping: 24 };
@@ -153,13 +153,18 @@ function TierPip({ tier, dim = false }: { tier: string; dim?: boolean }) {
  * hands the existing 700ms `stroke-dasharray` transition in `ChallengeToken`
  * the job of drawing the moment the tier was earned. Two rings bloom out behind
  * it in the new tier's colour; both are dropped under reduced motion.
+ *
+ * When the page can resolve the challenge, the plate itself is a button that
+ * opens it (`onOpen`) — the X stays a separate control so dismissing never
+ * navigates.
  */
 function Herald({
-  ev, node, onDismiss, reduced,
+  ev, node, onDismiss, onOpen, reduced,
 }: {
   ev: TierUpEvent;
   node: ChallengeNode | undefined;
   onDismiss: () => void;
+  onOpen?: () => void;
   reduced: boolean;
 }) {
   const [ringFull, setRingFull] = useState(reduced);
@@ -239,45 +244,62 @@ function Herald({
         <X className="h-3 w-3" />
       </button>
 
-      <div className="flex items-center gap-3 py-3 pl-4 pr-3">
-        <div className="relative flex-shrink-0">
-          {!reduced && [0, 0.22].map((delay) => (
-            <motion.span
-              key={delay}
-              aria-hidden
-              className="absolute inset-0 rounded-full border"
-              style={{ borderColor: c }}
-              initial={{ scale: 0.6, opacity: 0.7 }}
-              animate={{ scale: 2.1, opacity: 0 }}
-              transition={{ duration: 1.05, ease: 'easeOut', delay }}
-            />
-          ))}
-          <motion.div
-            initial={reduced ? false : { scale: 0.45, rotate: -10 }}
-            animate={{ scale: 1, rotate: 0 }}
-            transition={{ ...SPRING, delay: 0.05 }}
-          >
-            <ChallengeToken node={tokenNode} size={46} />
-          </motion.div>
-        </div>
+      {(() => {
+        const inner = (
+          <>
+            <div className="relative flex-shrink-0">
+              {!reduced && [0, 0.22].map((delay) => (
+                <motion.span
+                  key={delay}
+                  aria-hidden
+                  className="absolute inset-0 rounded-full border"
+                  style={{ borderColor: c }}
+                  initial={{ scale: 0.6, opacity: 0.7 }}
+                  animate={{ scale: 2.1, opacity: 0 }}
+                  transition={{ duration: 1.05, ease: 'easeOut', delay }}
+                />
+              ))}
+              <motion.div
+                initial={reduced ? false : { scale: 0.45, rotate: -10 }}
+                animate={{ scale: 1, rotate: 0 }}
+                transition={{ ...SPRING, delay: 0.05 }}
+              >
+                <ChallengeToken node={tokenNode} size={46} />
+              </motion.div>
+            </div>
 
-        <div className="min-w-0 flex-1 pr-3">
-          {/* Brass, not the tier colour: this label is the room's ceremonial
-              voice, and Iron/Bronze are too dim to carry it legibly. */}
-          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-primary">
-            Tier up
-          </p>
-          <p className="truncate text-sm font-semibold text-foreground">{name}</p>
-          <div className="mt-1 flex items-center gap-1.5">
-            <TierPip tier={ev.oldLevel} dim />
-            <ChevronRight className="h-3 w-3 flex-shrink-0" style={{ color: c }} />
-            <TierPip tier={ev.newLevel} />
-          </div>
-          <p className="mt-1 truncate text-[10px] text-muted-foreground/80">
-            {earned ? `${earned} of players earned · ` : ''}{timeAgo(ev.at)}
-          </p>
-        </div>
-      </div>
+            <div className="min-w-0 flex-1 pr-3">
+              {/* Brass, not the tier colour: this label is the room's ceremonial
+                  voice, and Iron/Bronze are too dim to carry it legibly. */}
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-primary">
+                Tier up
+              </p>
+              <p className="truncate text-sm font-semibold text-foreground">{name}</p>
+              <div className="mt-1 flex items-center gap-1.5">
+                <TierPip tier={ev.oldLevel} dim />
+                <ChevronRight className="h-3 w-3 flex-shrink-0" style={{ color: c }} />
+                <TierPip tier={ev.newLevel} />
+              </div>
+              <p className="mt-1 truncate text-[10px] text-muted-foreground/80">
+                {earned ? `${earned} of players earned · ` : ''}{timeAgo(ev.at)}
+              </p>
+            </div>
+          </>
+        );
+        return onOpen ? (
+          <button
+            type="button"
+            onClick={onOpen}
+            title="View challenge"
+            aria-label={`View challenge: ${name}`}
+            className="flex w-full cursor-pointer items-center gap-3 py-3 pl-4 pr-3 text-left"
+          >
+            {inner}
+          </button>
+        ) : (
+          <div className="flex items-center gap-3 py-3 pl-4 pr-3">{inner}</div>
+        );
+      })()}
 
       {/* Dwell bar — decoration for the clock above, and it stalls on hover too. */}
       <span
@@ -300,12 +322,14 @@ function Herald({
  * tab is open, and renders nothing at all until there is something to say.
  */
 export default function TierUpHerald({
-  challenges, ready, pulse, onOpenHistory,
+  challenges, ready, pulse, onOpenHistory, onSelect,
 }: {
   challenges: ChallengeNode[];
   ready: boolean;
   pulse: number;
   onOpenHistory: () => void;
+  /** Open a challenge's detail sheet — clicking a plate shows what tiered up. */
+  onSelect: (node: ChallengeNode) => void;
 }) {
   const batch = useTierUpFeed(ready, pulse);
   const reduced = useReducedMotion();
@@ -349,15 +373,26 @@ export default function TierUpHerald({
   return createPortal(
     <div className="lol-theme pointer-events-none fixed bottom-4 right-4 z-[60] flex w-[302px] flex-col items-end gap-2">
       <AnimatePresence initial={false}>
-        {live.map((ev) => (
-          <Herald
-            key={keyOf(ev)}
-            ev={ev}
-            node={byId.get(ev.challengeId)}
-            reduced={reduced}
-            onDismiss={() => dismiss(keyOf(ev))}
-          />
-        ))}
+        {live.map((ev) => {
+          const node = byId.get(ev.challengeId);
+          return (
+            <Herald
+              key={keyOf(ev)}
+              ev={ev}
+              node={node}
+              reduced={reduced}
+              onDismiss={() => dismiss(keyOf(ev))}
+              onOpen={
+                node
+                  ? () => {
+                      onSelect(node);
+                      dismiss(keyOf(ev));
+                    }
+                  : undefined
+              }
+            />
+          );
+        })}
       </AnimatePresence>
 
       {overflow > 0 && (
