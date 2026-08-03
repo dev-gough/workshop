@@ -2224,3 +2224,167 @@
 @media (min-width: 1024px) {
   .bp-board { height: calc(100vh - 57px); }
 }
+
+/* ─── Vivarium scope (RM 12) — applied to /projects/ecosystem ───
+   A field station's observation room: one lit glass tank set into a wall of
+   enamelled cabinetry, every parameter of the world turned by a labelled dial
+   and every result inked onto an instrument. Light is the station by day
+   (bone enamel, olive ink); dark is the same room after hours, lit by the
+   tank's own lamp. The tank interior is deliberately dark in BOTH modes — it
+   is a lit vessel, not a page, and the species colours have to mean the same
+   thing whichever way the room's lights are set.
+   Species colours are the only saturated hues and never used as chrome:
+   fern for grazers, vermilion for hunters, pollen for plants. The lamp amber
+   is chrome — controls, active states, the room number — never a data series.
+   ──────────────────────────────────────────────────────────── */
+.eco-theme {
+  /* Palette — enamel, nickel, and lamplight */
+  --eco-annex:  #e9e7dc;             /* station walls by day */
+  --eco-panel:  #f4f2e8;             /* cabinet face */
+  --eco-raise:  #dedbcb;             /* raised plate / hover */
+  --eco-line:   #ccc9b6;             /* cabinet seams */
+  --eco-ink:    #24281c;             /* olive ink */
+  --eco-dim:    #6c7263;             /* engraved label */
+  --eco-faint:  #9aa08f;             /* graduation marks */
+  --eco-lamp:   #8f6413;             /* the tank lamp — chrome accent */
+
+  /* Species, as they appear on the cabinet — charts, labels, readouts. These
+     darken in light mode because they sit on paper. */
+  --eco-prey:   #2f7f57;             /* grazers — fern */
+  --eco-pred:   #bf4133;             /* hunters — vermilion */
+  --eco-plant:  #7d7a2c;             /* plants — pollen */
+
+  /* The same three species inside the tank. The tank is lit from within and
+     dark in both modes, so these must NOT follow the room's lights — the hue
+     is what carries the meaning, and it stays put. */
+  --eco-lit-prey:  #6cc190;
+  --eco-lit-pred:  #e2624e;
+  --eco-lit-plant: #d3d089;
+
+  /* The tank interior. Identical in both modes. */
+  --eco-peat:   #0d120d;
+  --eco-peat-2: #141b13;
+  --eco-glass:  hsl(90 15% 55% / 0.22);
+
+  --color-background:           var(--eco-annex);
+  --color-foreground:           var(--eco-ink);
+  --color-card:                 var(--eco-panel);
+  --color-card-foreground:      var(--eco-ink);
+  --color-popover:              var(--eco-panel);
+  --color-popover-foreground:   var(--eco-ink);
+  --color-muted:                var(--eco-raise);
+  --color-muted-foreground:     var(--eco-dim);
+  --color-secondary:            var(--eco-raise);
+  --color-secondary-foreground: var(--eco-ink);
+  --color-border:               var(--eco-line);
+  --color-input:                var(--eco-line);
+  --color-ring:                 var(--eco-lamp);
+  --color-primary:              var(--eco-lamp);
+  --color-primary-foreground:   #fbf7ea;
+  --color-accent:               var(--eco-raise);
+  --color-accent-foreground:    var(--eco-ink);
+  --color-destructive:          var(--eco-pred);
+  --color-chart-1:              var(--eco-prey);
+  --color-chart-2:              var(--eco-pred);
+  --color-chart-3:              var(--eco-plant);
+
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  color: var(--eco-ink);
+  background-color: var(--eco-annex);
+}
+
+.dark .eco-theme {
+  --eco-annex:  #101410;
+  --eco-panel:  #171c17;
+  --eco-raise:  #1f261f;
+  --eco-line:   hsl(110 8% 22%);
+  --eco-ink:    #e5e9dd;
+  --eco-dim:    #949c8f;
+  --eco-faint:  #5c6459;
+  --eco-lamp:   #dda43f;
+
+  --eco-prey:   #6cc190;
+  --eco-pred:   #e2624e;
+  --eco-plant:  #d3d089;
+
+  --color-primary-foreground:   #16120a;
+}
+
+/* A cabinet face. Squared corners — lab casework isn't round. */
+.eco-case {
+  background: var(--eco-panel);
+  border: 1px solid var(--eco-line);
+  border-radius: 4px;
+}
+
+/* Engraved enamel label. */
+.eco-etch {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--eco-dim);
+}
+
+/* Instrument numerals. */
+.eco-readout {
+  font-family: var(--font-readout), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The tank: a window cut into the cabinetry. The canvas paints the mount in
+   panel tone and the world in peat, so the letterbox around a world that
+   isn't the container's aspect reads as frame rather than as empty ground. */
+.eco-tank {
+  position: relative;
+  background: var(--eco-panel);
+  border: 1px solid var(--eco-line);
+  border-radius: 4px;
+  box-shadow: 0 8px 24px hsl(120 30% 3% / 0.22);
+}
+
+/* Pushbutton / overlay toggle. */
+.eco-chip {
+  border: 1px solid var(--eco-line);
+  background: transparent;
+  color: var(--eco-dim);
+  border-radius: 3px;
+  transition: color 130ms ease, border-color 130ms ease, background-color 130ms ease;
+}
+.eco-chip:hover { color: var(--eco-ink); border-color: var(--eco-faint); background: var(--eco-raise); }
+.eco-chip[data-on='true'] {
+  color: var(--eco-lamp);
+  border-color: color-mix(in srgb, var(--eco-lamp) 55%, var(--eco-line));
+  background: color-mix(in srgb, var(--eco-lamp) 12%, transparent);
+}
+
+/* Dials. The rack has ~60 of them, so they shrink to a nickel-thumbed
+   hairline and lose the shadcn ring. */
+.eco-dial [data-slot='slider-track'] {
+  height: 3px;
+  background: var(--eco-raise);
+  border: 1px solid color-mix(in srgb, var(--eco-line) 70%, transparent);
+}
+.eco-dial [data-slot='slider-thumb'] {
+  width: 11px;
+  height: 11px;
+  background: var(--eco-panel);
+  border: 1.5px solid var(--eco-lamp);
+  box-shadow: 0 1px 2px hsl(120 30% 5% / 0.35);
+}
+.eco-dial [data-slot='slider-thumb']:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(--eco-lamp) 22%, transparent); }
+
+/* A dial whose change only lands on the next restock. */
+.eco-staged { color: var(--eco-lamp); }
+
+/* Rack drawer chevron. */
+.eco-drawer summary::-webkit-details-marker { display: none; }
+.eco-drawer summary { list-style: none; cursor: pointer; }
+.eco-drawer[open] .eco-caret { transform: rotate(90deg); }
+.eco-caret { transition: transform 160ms ease; }
+
+/* The room fits the viewport under the 57px header on desktop. */
+.eco-room { min-height: calc(100vh - 57px); }
+@media (min-width: 1024px) {
+  .eco-room { height: calc(100vh - 57px); }
+}

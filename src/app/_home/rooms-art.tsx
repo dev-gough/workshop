@@ -185,46 +185,75 @@ export function HouseRoom({ className }: { className?: string }) {
   );
 }
 
-// ── 12 · Ecosystem — critters drifting on a night meadow ──
+// ── 12 · The Vivarium — a lit tank set into the cabinetry ──
+// A miniature of the room: grazers as discs, hunters as arrowheads, plants as
+// pollen specks, all on peat under the lamp. Positions are hand-placed rather
+// than random so the server and the client agree on the scene.
 
-const CRITTERS = [
-  { x: 22, y: 26, r: 3.5, hue: 150, dur: 7.5, delay: 0 },
-  { x: 62, y: 20, r: 2.5, hue: 90, dur: 9, delay: 1.2 },
-  { x: 44, y: 52, r: 4.5, hue: 160, dur: 8, delay: 2.4 },
-  { x: 76, y: 58, r: 3, hue: 45, dur: 6.5, delay: 0.8 },
-  { x: 28, y: 70, r: 2.5, hue: 100, dur: 10, delay: 3 },
-  { x: 68, y: 78, r: 3.5, hue: 150, dur: 7, delay: 1.8 },
+const GRAZERS = [
+  { x: 20, y: 34, r: 3.4, dur: 8, delay: 0 },
+  { x: 47, y: 24, r: 2.6, dur: 9.5, delay: 1.4 },
+  { x: 34, y: 62, r: 4.2, dur: 7.5, delay: 2.6 },
+  { x: 71, y: 52, r: 3, dur: 10, delay: 0.7 },
+  { x: 58, y: 76, r: 2.4, dur: 8.5, delay: 3.1 },
 ];
-const FOOD = [
-  [14, 44], [36, 32], [56, 66], [82, 30], [48, 84], [88, 74], [20, 86],
+// Hunters point where they're headed — the arrowhead is the heading.
+const HUNTERS = [
+  { x: 80, y: 28, rot: 205 },
+  { x: 26, y: 80, rot: 340 },
+];
+const POLLEN = [
+  [12, 52], [30, 20], [41, 44], [55, 60], [64, 32], [76, 70], [88, 46],
+  [18, 66], [50, 88], [84, 84], [38, 14], [68, 14],
 ] as const;
 
 export function EcosystemRoom({ className }: { className?: string }) {
   return (
-    <Door href="/projects/ecosystem" number="RM 12" room="Ecosystem" className={className}>
-      <div className="relative h-full overflow-hidden bg-gradient-to-b from-[hsl(160_45%_8%)] to-[hsl(150_40%_13%)]">
-        {FOOD.map(([x, y], i) => (
-          <span
-            key={i}
-            className="absolute h-[3px] w-[3px] rounded-full bg-lime-300/50"
-            style={{ left: `${x}%`, top: `${y}%` }}
+    <Door href="/projects/ecosystem" number="RM 12" room="The Vivarium" className={className}>
+      <div className="relative h-full overflow-hidden bg-[#171c17] p-[7px]">
+        <div className="relative h-full w-full overflow-hidden rounded-[2px] bg-[#0d120d] ring-1 ring-white/[0.07]">
+          {/* the lamp, pooling from above */}
+          <div
+            className="absolute inset-x-0 top-0 h-2/3"
+            style={{ background: 'radial-gradient(ellipse 60% 100% at 50% 0%, rgba(221,164,63,0.13), transparent 70%)' }}
           />
-        ))}
-        {CRITTERS.map((c, i) => (
-          <span
-            key={i}
-            className="absolute rounded-full"
-            style={{
-              left: `${c.x}%`,
-              top: `${c.y}%`,
-              width: c.r * 2,
-              height: c.r * 2,
-              background: `hsl(${c.hue} 70% 55%)`,
-              boxShadow: `0 0 8px hsl(${c.hue} 70% 55% / 0.5)`,
-              animation: `hall-drift ${c.dur}s ease-in-out ${c.delay}s infinite`,
-            }}
-          />
-        ))}
+          {POLLEN.map(([x, y], i) => (
+            <span
+              key={i}
+              className="absolute h-[2px] w-[2px] bg-[#d3d089]/70"
+              style={{ left: `${x}%`, top: `${y}%` }}
+            />
+          ))}
+          {GRAZERS.map((g, i) => (
+            <span
+              key={i}
+              className="absolute rounded-full bg-[#6cc190]"
+              style={{
+                left: `${g.x}%`,
+                top: `${g.y}%`,
+                width: g.r * 2,
+                height: g.r * 2,
+                boxShadow: '0 0 7px rgba(108,193,144,0.45)',
+                animation: `hall-drift ${g.dur}s ease-in-out ${g.delay}s infinite`,
+              }}
+            />
+          ))}
+          {HUNTERS.map((h, i) => (
+            <span
+              key={i}
+              className="absolute h-0 w-0"
+              style={{
+                left: `${h.x}%`,
+                top: `${h.y}%`,
+                borderTop: '3px solid transparent',
+                borderBottom: '3px solid transparent',
+                borderLeft: '8px solid #e2624e',
+                transform: `rotate(${h.rot}deg)`,
+                filter: 'drop-shadow(0 0 5px rgba(226,98,78,0.45))',
+              }}
+            />
+          ))}
+        </div>
       </div>
     </Door>
   );
