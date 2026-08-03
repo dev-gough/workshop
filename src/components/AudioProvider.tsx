@@ -77,6 +77,10 @@ function setCookie(name: string, value: string) {
   document.cookie = `${name}=${encodeURIComponent(value)};path=/;max-age=31536000`;
 }
 
+function streamUrl(artist: string, album: string, song: string): string {
+  return `/api/music/stream?artist=${encodeURIComponent(artist)}&album=${encodeURIComponent(album)}&song=${encodeURIComponent(song)}`;
+}
+
 const AudioContext = createContext<AudioContextType | undefined>(undefined);
 
 export const useAudio = () => {
@@ -228,7 +232,7 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
       // Set up the audio source at the saved position, but don't auto-play
       const album = albums[albumIndex];
       const song = album.songs[songIndex];
-      const url = `/api/music/stream?artist=${encodeURIComponent(album.artist)}&album=${encodeURIComponent(album.name)}&song=${encodeURIComponent(song)}`;
+      const url = streamUrl(album.artist, album.name, song);
       const audio = audioRef.current;
       if (audio) {
         audio.src = url;
@@ -308,11 +312,44 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
   useEffect(() => { queueRef.current = queue; }, [queue]);
   useEffect(() => { queueIndexRef.current = queueIndex; }, [queueIndex]);
 
+  // ── Prefetch the next queue track (one ahead) ──
+  // The stream route isn't cacheable, so we pull the next file into a blob and
+  // play from the blob URL — instant track changes, no re-download.
+  const prefetchRef = useRef<{ url: string; blobUrl: string } | null>(null);
+  const prefetchAbortRef = useRef<AbortController | null>(null);
+  const activeBlobUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const next = queue[queueIndex + 1];
+    const album = next ? albums[next.albumIndex] : null;
+    const song = album?.songs[next!.songIndex];
+    if (!album || !song) return;
+    const url = streamUrl(album.artist, album.name, song);
+    if (prefetchRef.current?.url === url) return;
+
+    // A different track is next now — drop the stale prefetch.
+    prefetchAbortRef.current?.abort();
+    if (prefetchRef.current) {
+      URL.revokeObjectURL(prefetchRef.current.blobUrl);
+      prefetchRef.current = null;
+    }
+
+    const controller = new AbortController();
+    prefetchAbortRef.current = controller;
+    fetch(url, { signal: controller.signal })
+      .then(r => (r.ok ? r.blob() : Promise.reject(new Error(`${r.status}`))))
+      .then(blob => {
+        if (controller.signal.aborted) return;
+        prefetchRef.current = { url, blobUrl: URL.createObjectURL(blob) };
+      })
+      .catch(() => { /* aborted or failed — playback falls back to streaming */ });
+  }, [queue, queueIndex, albums]);
+
   const playTrack = useCallback((albumIndex: number, songIndex: number) => {
     const album = albums[albumIndex];
     if (!album) return;
     const song = album.songs[songIndex];
-    const url = `/api/music/stream?artist=${encodeURIComponent(album.artist)}&album=${encodeURIComponent(album.name)}&song=${encodeURIComponent(song)}`;
+    const url = streamUrl(album.artist, album.name, song);
 
     setCurrentTrack({ albumIndex, songIndex });
     playRecordedRef.current = false;
@@ -320,7 +357,17 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
     ensureAnalyser();
     const audio = audioRef.current;
     if (audio) {
-      audio.src = url;
+      const prevBlobUrl = activeBlobUrlRef.current;
+      const pf = prefetchRef.current;
+      if (pf && pf.url === url) {
+        audio.src = pf.blobUrl;
+        activeBlobUrlRef.current = pf.blobUrl;
+        prefetchRef.current = null;
+      } else {
+        audio.src = url;
+        activeBlobUrlRef.current = null;
+      }
+      if (prevBlobUrl) URL.revokeObjectURL(prevBlobUrl);
       audio.volume = mutedRef.current ? 0 : volumeRef.current;
       audio.play();
     }
