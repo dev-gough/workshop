@@ -14,7 +14,7 @@ import {
   type FurnitureItem, type SavedLayout, type DisplayUnit, type RoomSpec,
   type Corner, type CatalogueItem, type CatalogueStore, type Rect,
   type DoorItem, type Wall, WALL_NAMES, wallLength, doorGeom, doorOnFloor, rectInSwing,
-  wallFreeSpan, clampDoorPos, snapDoors,
+  wallFreeSpan, clampDoorPos, tidyDoors,
   UNIT_ABBR, toBase, fromBase, formatDim, gridMajorInterval, SNAP_INCREMENT,
   effectiveDims, itemRect, cutoutRect, rectsOverlap, fitsInRoom, floorArea,
   wallPolygon, loadLayouts, persistLayouts, loadCatalogue, persistCatalogue,
@@ -25,6 +25,8 @@ import CataloguePanel, { type PlaceSpec } from './CataloguePanel';
 
 // Sheet margins (px) — room for the dimension strings.
 const MT = 46, ML = 50, MR = 26, MB = 26;
+
+const MAX_DOORS = 4;
 
 const CORNERS: { key: Corner; label: string }[] = [
   { key: 'nw', label: 'Top left' },
@@ -133,7 +135,7 @@ export default function RoomPlanner() {
     const s = loadSession();
     if (s) {
       setItems(s.items);
-      setDoors(snapDoors(s.doors, s.room));
+      setDoors(tidyDoors(s.doors, s.room));
       setNextId(s.nextId);
       setRoom(s.room);
       setUnit(s.unit);
@@ -566,16 +568,31 @@ export default function RoomPlanner() {
   // ── Door actions ──
 
   const addDoor = useCallback(() => {
+    if (doors.length >= MAX_DOORS) return;
     const width = Math.min(32, room.w); // a standard 32" leaf
-    const door: DoorItem = {
-      id: nextId, wall: 'n', width,
-      pos: clampDoorPos(room, 'n', width, (room.w - width) / 2),
-      hinge: 'start',
-    };
-    setNextId(nextId + 1);
-    updateDoors([...doors, door]);
-    setSelectedDoorId(door.id);
-    setSelectedId(null);
+    // Hang it on the first wall with a clear stretch — never stacked on
+    // an existing door.
+    for (const wall of ['n', 'e', 's', 'w'] as Wall[]) {
+      const [a, b] = wallFreeSpan(room, wall);
+      if (b - a < width) continue;
+      const centre = (a + b - width) / 2;
+      const maxOff = (b - a - width) / 2;
+      for (let off = 0; off <= maxOff; off += 6) {
+        for (const sign of off === 0 ? [1] : [1, -1]) {
+          const pos = clampDoorPos(room, wall, width, centre + sign * off);
+          const clash = doors.some(d =>
+            d.wall === wall && pos < d.pos + d.width + 6 && d.pos - 6 < pos + width);
+          if (!clash) {
+            const door: DoorItem = { id: nextId, wall, width, pos, hinge: 'start' };
+            setNextId(nextId + 1);
+            updateDoors([...doors, door]);
+            setSelectedDoorId(door.id);
+            setSelectedId(null);
+            return;
+          }
+        }
+      }
+    }
   }, [doors, nextId, room, updateDoors]);
 
   const deleteDoor = useCallback((id: number) => {
@@ -810,7 +827,7 @@ export default function RoomPlanner() {
   const handleLoad = useCallback((layout: SavedLayout) => {
     const loadedRoom: RoomSpec = { w: layout.roomWidth, h: layout.roomHeight, cutouts: layout.cutouts || [] };
     setItems(layout.items);
-    setDoors(snapDoors(layout.doors || [], loadedRoom));
+    setDoors(tidyDoors(layout.doors || [], loadedRoom));
     setNextId(layout.nextId);
     setRoom(loadedRoom);
     if (layout.unit) setUnit(layout.unit);
@@ -832,7 +849,7 @@ export default function RoomPlanner() {
   // corner under a door snaps the door to the nearest notch vertex.
   const applyRoom = useCallback((next: RoomSpec) => {
     setRoom(next);
-    setDoors(prev => snapDoors(prev, next));
+    setDoors(prev => tidyDoors(prev, next));
   }, []);
 
   const setRoomDim = useCallback((axis: 'w' | 'h', val: string) => {
@@ -981,9 +998,11 @@ export default function RoomPlanner() {
             )}
           </div>
 
-          <button onClick={addDoor} className="bp-chip flex items-center gap-1.5 px-2 py-1 text-[11px] font-medium"
-            title="Add a door — drag it onto any wall">
-            <DoorOpen className="h-3 w-3" /> Door
+          <button onClick={addDoor} disabled={doors.length >= MAX_DOORS}
+            className="bp-chip flex items-center gap-1.5 px-2 py-1 text-[11px] font-medium disabled:cursor-not-allowed disabled:opacity-45"
+            data-on={doors.length > 0 || undefined}
+            title={doors.length >= MAX_DOORS ? `${MAX_DOORS} doors is plenty for one room` : 'Add a door — drag it onto any wall'}>
+            <DoorOpen className="h-3 w-3" /> Door{doors.length > 0 ? ` · ${doors.length}` : ''}
           </button>
 
           <div className="hidden h-5 w-px bg-border sm:block" />

@@ -417,3 +417,16 @@ export function snapDoors(doors: DoorItem[], room: RoomSpec): DoorItem[] {
     return pos === d.pos ? d : { ...d, pos };
   });
 }
+
+/** Snap doors to real wall spans and drop exact duplicates (stacked twins). */
+export function tidyDoors(doors: DoorItem[], room: RoomSpec): DoorItem[] {
+  const seen = new Set<string>();
+  const out: DoorItem[] = [];
+  for (const d of snapDoors(doors, room)) {
+    const key = `${d.wall}:${d.pos}:${d.width}:${d.hinge}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(d);
+  }
+  return out;
+}
