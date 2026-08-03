@@ -49,6 +49,7 @@ export interface SavedLayout {
   roomWidth: number;
   roomHeight: number;
   cutouts?: Cutout[];
+  doors?: DoorItem[];
   unit?: DisplayUnit;
 }
 
@@ -286,6 +287,7 @@ export function persistCatalogue(store: CatalogueStore) {
 /** The working sheet, autosaved so a refresh never loses the plan. */
 export interface SessionState {
   items: FurnitureItem[];
+  doors: DoorItem[];
   nextId: number;
   room: RoomSpec;
   unit: DisplayUnit;
@@ -298,10 +300,94 @@ export function loadSession(): SessionState | null {
     if (!data) return null;
     const s = JSON.parse(data);
     if (!s?.room?.w || !s?.room?.h) return null;
-    return { ...s, room: { cutouts: [], ...s.room } };
+    return { doors: [], ...s, room: { cutouts: [], ...s.room } };
   } catch { return null; }
 }
 
 export function persistSession(s: SessionState) {
   localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+}
+
+// ── Doors ──
+
+export type Wall = 'n' | 'e' | 's' | 'w';
+
+export const WALL_NAMES: Record<Wall, string> = {
+  n: 'north', e: 'east', s: 'south', w: 'west',
+};
+
+/** A door in a wall: position along the wall, leaf width, hinge end. */
+export interface DoorItem {
+  id: number;
+  wall: Wall;
+  pos: number;   // inches from the wall's start corner (NW for n/w walls)
+  width: number; // leaf width, inches
+  hinge: 'start' | 'end';
+}
+
+export function wallLength(room: RoomSpec, wall: Wall): number {
+  return wall === 'n' || wall === 's' ? room.w : room.h;
+}
+
+export interface DoorGeom {
+  hx: number; hy: number;   // hinge (arc centre)
+  sx: number; sy: number;   // strike jamb
+  lx: number; ly: number;   // leaf tip, drawn open 90°
+  quarter: Rect;            // bounding square of the swing quarter-disc
+}
+
+/** Door geometry in room inches. The swing is always into the room. */
+export function doorGeom(door: DoorItem, room: RoomSpec): DoorGeom {
+  const len = wallLength(room, door.wall);
+  const pos = Math.max(0, Math.min(len - door.width, door.pos));
+  let start: [number, number], dir: [number, number], inward: [number, number];
+  switch (door.wall) {
+    case 'n': start = [0, 0]; dir = [1, 0]; inward = [0, 1]; break;
+    case 's': start = [0, room.h]; dir = [1, 0]; inward = [0, -1]; break;
+    case 'w': start = [0, 0]; dir = [0, 1]; inward = [1, 0]; break;
+    case 'e': start = [room.w, 0]; dir = [0, 1]; inward = [-1, 0]; break;
+  }
+  const j1: [number, number] = [start[0] + dir[0] * pos, start[1] + dir[1] * pos];
+  const j2: [number, number] = [start[0] + dir[0] * (pos + door.width), start[1] + dir[1] * (pos + door.width)];
+  const [hx, hy] = door.hinge === 'start' ? j1 : j2;
+  const [sx, sy] = door.hinge === 'start' ? j2 : j1;
+  const lx = hx + inward[0] * door.width;
+  const ly = hy + inward[1] * door.width;
+  const xs = [j1[0], j2[0], j1[0] + inward[0] * door.width, j2[0] + inward[0] * door.width];
+  const ys = [j1[1], j2[1], j1[1] + inward[1] * door.width, j2[1] + inward[1] * door.width];
+  const minX = Math.min(...xs), minY = Math.min(...ys);
+  return {
+    hx, hy, sx, sy, lx, ly,
+    quarter: { x: minX, y: minY, w: Math.max(...xs) - minX, h: Math.max(...ys) - minY },
+  };
+}
+
+/** Is the doorway actually in a wall with floor behind it (not a notch)? */
+export function doorOnFloor(door: DoorItem, room: RoomSpec): boolean {
+  const len = wallLength(room, door.wall);
+  if (door.pos < -0.001 || door.pos + door.width > len + 0.001) return false;
+  const g = doorGeom(door, room);
+  // A thin strip just inside the wall across the doorway span.
+  const q = g.quarter;
+  let strip: Rect;
+  switch (door.wall) {
+    case 'n': strip = { x: q.x, y: 0, w: door.width, h: 0.5 }; break;
+    case 's': strip = { x: q.x, y: room.h - 0.5, w: door.width, h: 0.5 }; break;
+    case 'w': strip = { x: 0, y: q.y, w: 0.5, h: door.width }; break;
+    case 'e': strip = { x: room.w - 0.5, y: q.y, w: 0.5, h: door.width }; break;
+  }
+  return !room.cutouts.some(c => rectsOverlap(strip, cutoutRect(c, room)));
+}
+
+/** Does a rectangle intrude into the door's swing quarter-disc? */
+export function rectInSwing(r: Rect, door: DoorItem, room: RoomSpec): boolean {
+  const g = doorGeom(door, room);
+  const q = g.quarter;
+  const ix = Math.max(r.x, q.x), iy = Math.max(r.y, q.y);
+  const ax = Math.min(r.x + r.w, q.x + q.w), ay = Math.min(r.y + r.h, q.y + q.h);
+  if (ix >= ax || iy >= ay) return false;
+  // Closest point of the clipped rect to the hinge.
+  const cx = Math.max(ix, Math.min(g.hx, ax));
+  const cy = Math.max(iy, Math.min(g.hy, ay));
+  return (cx - g.hx) ** 2 + (cy - g.hy) ** 2 < door.width ** 2;
 }

@@ -8,11 +8,12 @@ import { useTheme } from '@/components/ThemeProvider';
 import { Input } from '@/components/ui/input';
 import {
   RotateCw, Lock, Unlock, Copy, Trash2, Undo2, Redo2, Save,
-  FolderOpen, X, Scissors, AlertTriangle,
+  FolderOpen, X, Scissors, AlertTriangle, DoorOpen, ArrowLeftRight,
 } from 'lucide-react';
 import {
   type FurnitureItem, type SavedLayout, type DisplayUnit, type RoomSpec,
   type Corner, type CatalogueItem, type CatalogueStore, type Rect,
+  type DoorItem, type Wall, WALL_NAMES, wallLength, doorGeom, doorOnFloor, rectInSwing,
   UNIT_ABBR, toBase, fromBase, formatDim, gridMajorInterval, SNAP_INCREMENT,
   effectiveDims, itemRect, cutoutRect, rectsOverlap, fitsInRoom, floorArea,
   wallPolygon, loadLayouts, persistLayouts, loadCatalogue, persistCatalogue,
@@ -56,10 +57,12 @@ export default function RoomPlanner() {
 
   // ── State ──
   const [items, setItems] = useState<FurnitureItem[]>([]);
+  const [doors, setDoors] = useState<DoorItem[]>([]);
   const [nextId, setNextId] = useState(1);
   const [room, setRoom] = useState<RoomSpec>({ w: 168, h: 144, cutouts: [] }); // 14' × 12'
   const [unit, setUnit] = useState<DisplayUnit>('ft');
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedDoorId, setSelectedDoorId] = useState<number | null>(null);
   const [catalogue, setCatalogue] = useState<CatalogueStore>({ items: [], nextId: 1 });
   const [savedLayouts, setSavedLayouts] = useState<SavedLayout[]>([]);
   const [layoutName, setLayoutName] = useState('');
@@ -74,39 +77,53 @@ export default function RoomPlanner() {
   const dragPosRef = useRef<{ x: number; y: number } | null>(null);
   const dragElRef = useRef<HTMLDivElement | null>(null);
   const [draggingId, setDraggingId] = useState<number | null>(null);
+  const draggingDoorRef = useRef<number | null>(null);
+  const doorMovedRef = useRef(false);
 
-  // ── History ──
-  const historyRef = useRef<FurnitureItem[][]>([[]]);
+  // ── History (furniture + doors snapshot together) ──
+  interface Snapshot { items: FurnitureItem[]; doors: DoorItem[] }
+  const historyRef = useRef<Snapshot[]>([{ items: [], doors: [] }]);
   const historyIndexRef = useRef(0);
 
-  const pushHistory = useCallback((newItems: FurnitureItem[]) => {
+  const pushHistory = useCallback((newItems: FurnitureItem[], newDoors: DoorItem[]) => {
     const h = historyRef.current.slice(0, historyIndexRef.current + 1);
-    h.push(JSON.parse(JSON.stringify(newItems)));
+    h.push(JSON.parse(JSON.stringify({ items: newItems, doors: newDoors })));
     if (h.length > 50) h.shift();
     historyRef.current = h;
     historyIndexRef.current = h.length - 1;
+  }, []);
+
+  const applySnapshot = useCallback((s: Snapshot) => {
+    const copy: Snapshot = JSON.parse(JSON.stringify(s));
+    setItems(copy.items);
+    setDoors(copy.doors);
   }, []);
 
   const undo = useCallback(() => {
     const idx = historyIndexRef.current;
     if (idx > 0) {
       historyIndexRef.current = idx - 1;
-      setItems(JSON.parse(JSON.stringify(historyRef.current[idx - 1])));
+      applySnapshot(historyRef.current[idx - 1]);
     }
-  }, []);
+  }, [applySnapshot]);
 
   const redo = useCallback(() => {
     const idx = historyIndexRef.current;
     if (idx < historyRef.current.length - 1) {
       historyIndexRef.current = idx + 1;
-      setItems(JSON.parse(JSON.stringify(historyRef.current[idx + 1])));
+      applySnapshot(historyRef.current[idx + 1]);
     }
-  }, []);
+  }, [applySnapshot]);
 
   const updateItems = useCallback((newItems: FurnitureItem[]) => {
     setItems(newItems);
-    pushHistory(newItems);
-  }, [pushHistory]);
+    pushHistory(newItems, doors);
+  }, [pushHistory, doors]);
+
+  const updateDoors = useCallback((newDoors: DoorItem[]) => {
+    setDoors(newDoors);
+    pushHistory(items, newDoors);
+  }, [pushHistory, items]);
 
   // ── Hydrate from localStorage ──
   useEffect(() => {
@@ -115,10 +132,11 @@ export default function RoomPlanner() {
     const s = loadSession();
     if (s) {
       setItems(s.items);
+      setDoors(s.doors);
       setNextId(s.nextId);
       setRoom(s.room);
       setUnit(s.unit);
-      pushHistory(s.items);
+      pushHistory(s.items, s.doors);
     }
     setHydrated(true);
   }, [pushHistory]);
@@ -126,9 +144,9 @@ export default function RoomPlanner() {
   // Autosave the working sheet.
   useEffect(() => {
     if (!hydrated) return;
-    const t = setTimeout(() => persistSession({ items, nextId, room, unit }), 300);
+    const t = setTimeout(() => persistSession({ items, doors, nextId, room, unit }), 300);
     return () => clearTimeout(t);
-  }, [hydrated, items, nextId, room, unit]);
+  }, [hydrated, items, doors, nextId, room, unit]);
 
   // ── Sheet measurement ──
   useEffect(() => {
@@ -172,6 +190,22 @@ export default function RoomPlanner() {
     }
     return s;
   }, [items]);
+
+  const misfitDoorIds = useMemo(() => {
+    const s = new Set<number>();
+    for (const d of doors) if (!doorOnFloor(d, room)) s.add(d.id);
+    return s;
+  }, [doors, room]);
+
+  // Furniture standing inside a door's swing.
+  const swingHitIds = useMemo(() => {
+    const s = new Set<number>();
+    for (const it of items) {
+      const r = itemRect(it);
+      if (doors.some(d => doorOnFloor(d, room) && rectInSwing(r, d, room))) s.add(it.id);
+    }
+    return s;
+  }, [items, doors, room]);
 
   // ── Canvas: grid, walls, dimension strings, clearances ──
   useEffect(() => {
@@ -263,6 +297,73 @@ export default function RoomPlanner() {
     tracePoly(); ctx.strokeStyle = cWall; ctx.lineWidth = 5; ctx.lineJoin = 'miter'; ctx.stroke();
     tracePoly(); ctx.strokeStyle = cSheet; ctx.lineWidth = 2.5; ctx.stroke();
 
+    // Accent label with a paper-colored halo so it reads over linework.
+    const halo = (text: string, x: number, y: number) => {
+      ctx.save();
+      ctx.setLineDash([]);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = cSheet;
+      ctx.strokeText(text, x, y);
+      ctx.restore();
+      ctx.fillText(text, x, y);
+    };
+
+    // Doors: a break in the wall, the leaf drawn open 90°, dashed swing arc.
+    for (const door of doors) {
+      const ok = doorOnFloor(door, room);
+      const g = doorGeom(door, room);
+      const sel = door.id === selectedDoorId;
+      const ink = !ok || sel ? cAccent : cWall;
+      const hx = ox + g.hx * ppi, hy = oy + g.hy * ppi;
+      const sx = ox + g.sx * ppi, sy = oy + g.sy * ppi;
+      const lx = ox + g.lx * ppi, ly = oy + g.ly * ppi;
+      const r = door.width * ppi;
+
+      // Clear the wall across the doorway.
+      ctx.strokeStyle = cSheet;
+      ctx.lineWidth = 7;
+      ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(sx, sy); ctx.stroke();
+
+      // Swing quarter, tinted "keep clear".
+      const aLeaf = Math.atan2(ly - hy, lx - hx);
+      const aStrike = Math.atan2(sy - hy, sx - hx);
+      let delta = aLeaf - aStrike;
+      while (delta < 0) delta += Math.PI * 2;
+      const ccw = delta > Math.PI;
+      ctx.beginPath();
+      ctx.moveTo(hx, hy);
+      ctx.lineTo(sx, sy);
+      ctx.arc(hx, hy, r, aStrike, aLeaf, ccw);
+      ctx.closePath();
+      ctx.fillStyle = cAccent;
+      ctx.globalAlpha = ok ? 0.07 : 0.15;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // The swing arc.
+      ctx.setLineDash([3, 3]);
+      ctx.strokeStyle = ink;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(hx, hy, r, aStrike, aLeaf, ccw);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // The leaf, standing open.
+      ctx.strokeStyle = ink;
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(lx, ly); ctx.stroke();
+
+      // Jamb ticks on the wall line.
+      ctx.lineWidth = 1.5;
+      for (const [jx, jy] of [[hx, hy], [sx, sy]] as [number, number][]) {
+        ctx.beginPath();
+        if (door.wall === 'n' || door.wall === 's') { ctx.moveTo(jx, jy - 4); ctx.lineTo(jx, jy + 4); }
+        else { ctx.moveTo(jx - 4, jy); ctx.lineTo(jx + 4, jy); }
+        ctx.stroke();
+      }
+    }
+
     // Dimension strings — architectural ticks and extension lines.
     const tick = (x: number, y: number) => {
       ctx.beginPath();
@@ -308,15 +409,6 @@ export default function RoomPlanner() {
       ctx.font = `600 9px ${mono}`;
       const midY = oy + (r.y + r.h / 2) * ppi;
       const midX = ox + (r.x + r.w / 2) * ppi;
-      const halo = (text: string, x: number, y: number) => {
-        ctx.save();
-        ctx.setLineDash([]);
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = cSheet;
-        ctx.strokeText(text, x, y);
-        ctx.restore();
-        ctx.fillText(text, x, y);
-      };
       ctx.textBaseline = 'middle';
       if (cl.left > 0.5) {
         const x0 = ox + (r.x - cl.left) * ppi, x1 = ox + r.x * ppi;
@@ -344,7 +436,49 @@ export default function RoomPlanner() {
       }
       ctx.setLineDash([]);
     }
-  }, [containerSize, view, room, unit, theme, items, selectedId, misfitIds]);
+
+    // Selected door: jamb-to-corner measurements plus the leaf width.
+    const selDoor = doors.find(d => d.id === selectedDoorId);
+    if (selDoor) {
+      const len = wallLength(room, selDoor.wall);
+      const pos = Math.max(0, Math.min(len - selDoor.width, selDoor.pos));
+      const horizontal = selDoor.wall === 'n' || selDoor.wall === 's';
+      ctx.strokeStyle = cAccent;
+      ctx.fillStyle = cAccent;
+      ctx.lineWidth = 1;
+      ctx.font = `600 9px ${mono}`;
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'center';
+      // Dim line sits just outside the wall.
+      const off = 9;
+      const spans: [number, number, string][] = [
+        [0, pos, formatDim(pos, unit)],
+        [pos, pos + selDoor.width, formatDim(selDoor.width, unit)],
+        [pos + selDoor.width, len, formatDim(len - pos - selDoor.width, unit)],
+      ];
+      for (const [a, b, label] of spans) {
+        if (b - a < 0.5) continue;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        if (horizontal) {
+          const y = selDoor.wall === 'n' ? oy - off : oy + H + off;
+          ctx.moveTo(ox + a * ppi, y); ctx.lineTo(ox + b * ppi, y);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          halo(label, ox + ((a + b) / 2) * ppi, y + (selDoor.wall === 'n' ? -7 : 8));
+        } else {
+          const x = selDoor.wall === 'w' ? ox - off : ox + W + off;
+          ctx.moveTo(x, oy + a * ppi); ctx.lineTo(x, oy + b * ppi);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.textAlign = selDoor.wall === 'w' ? 'right' : 'left';
+          halo(label, x + (selDoor.wall === 'w' ? -4 : 4), oy + ((a + b) / 2) * ppi);
+          ctx.textAlign = 'center';
+        }
+      }
+      ctx.setLineDash([]);
+    }
+  }, [containerSize, view, room, unit, theme, items, selectedId, misfitIds, doors, selectedDoorId]);
 
   // ── Item actions ──
 
@@ -426,6 +560,51 @@ export default function RoomPlanner() {
     updateItems(items.map(i => i.id === id ? { ...i, label: label.trim() } : i));
   }, [items, updateItems]);
 
+  // ── Door actions ──
+
+  const addDoor = useCallback(() => {
+    const width = Math.min(32, room.w); // a standard 32" leaf
+    const door: DoorItem = {
+      id: nextId, wall: 'n', width,
+      pos: Math.max(0, Math.round((room.w - width) / 2)),
+      hinge: 'start',
+    };
+    setNextId(nextId + 1);
+    updateDoors([...doors, door]);
+    setSelectedDoorId(door.id);
+    setSelectedId(null);
+  }, [doors, nextId, room, updateDoors]);
+
+  const deleteDoor = useCallback((id: number) => {
+    updateDoors(doors.filter(d => d.id !== id));
+    if (selectedDoorId === id) setSelectedDoorId(null);
+  }, [doors, selectedDoorId, updateDoors]);
+
+  const flipDoorHinge = useCallback((id: number) => {
+    updateDoors(doors.map(d => d.id === id
+      ? { ...d, hinge: d.hinge === 'start' ? 'end' : 'start' }
+      : d));
+  }, [doors, updateDoors]);
+
+  const setDoorWidth = useCallback((id: number, val: string, inUnit: DisplayUnit) => {
+    const n = parseFloat(val);
+    if (isNaN(n) || n <= 0) return;
+    updateDoors(doors.map(d => {
+      if (d.id !== id) return d;
+      const len = wallLength(room, d.wall);
+      const width = Math.max(6, Math.min(len, Math.round(toBase(n, inUnit))));
+      return { ...d, width, pos: Math.max(0, Math.min(len - width, d.pos)) };
+    }));
+  }, [doors, room, updateDoors]);
+
+  const nudgeDoor = useCallback((id: number, delta: number) => {
+    updateDoors(doors.map(d => {
+      if (d.id !== id) return d;
+      const len = wallLength(room, d.wall);
+      return { ...d, pos: Math.max(0, Math.min(len - d.width, d.pos + delta)) };
+    }));
+  }, [doors, room, updateDoors]);
+
   // ── Catalogue actions ──
 
   const addCatalogue = useCallback((spec: PlaceSpec) => {
@@ -458,6 +637,7 @@ export default function RoomPlanner() {
   // ── Drag & drop ──
 
   const handlePointerDown = useCallback((e: React.PointerEvent, item: FurnitureItem) => {
+    setSelectedDoorId(null);
     if (item.locked || !view) { setSelectedId(item.id); return; }
     e.preventDefault();
     e.stopPropagation();
@@ -478,7 +658,45 @@ export default function RoomPlanner() {
     setDraggingId(item.id);
   }, [view]);
 
+  const handleDoorPointerDown = useCallback((e: React.PointerEvent, door: DoorItem) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelectedId(null);
+    setSelectedDoorId(door.id);
+    draggingDoorRef.current = door.id;
+    doorMovedRef.current = false;
+    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+  }, []);
+
+  // Slide a door along its wall — or hand it to whichever wall is nearest.
+  const dragDoorTo = useCallback((mouseX: number, mouseY: number, id: number) => {
+    if (!view) return;
+    const mx = (mouseX - view.ox) / view.ppi;
+    const my = (mouseY - view.oy) / view.ppi;
+    const dists: [number, Wall][] = [
+      [Math.abs(my), 'n'], [Math.abs(room.h - my), 's'],
+      [Math.abs(mx), 'w'], [Math.abs(room.w - mx), 'e'],
+    ];
+    dists.sort((a, b) => a[0] - b[0]);
+    const wall = dists[0][1];
+    setDoors(prev => prev.map(d => {
+      if (d.id !== id) return d;
+      const len = wall === 'n' || wall === 's' ? room.w : room.h;
+      const along = wall === 'n' || wall === 's' ? mx : my;
+      const width = Math.min(d.width, len);
+      const pos = Math.round(Math.max(0, Math.min(len - width, along - width / 2)));
+      return { ...d, wall, width, pos };
+    }));
+    doorMovedRef.current = true;
+  }, [view, room]);
+
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (draggingDoorRef.current != null) {
+      e.preventDefault();
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (rect) dragDoorTo(e.clientX - rect.left, e.clientY - rect.top, draggingDoorRef.current);
+      return;
+    }
     const d = draggingRef.current;
     if (!d || !view) return;
     e.preventDefault();
@@ -503,6 +721,12 @@ export default function RoomPlanner() {
   }, [items, view, room]);
 
   const handlePointerUp = useCallback(() => {
+    if (draggingDoorRef.current != null) {
+      draggingDoorRef.current = null;
+      // Door moves bypass updateDoors during the drag; commit once on drop.
+      if (doorMovedRef.current) pushHistory(items, doors);
+      return;
+    }
     const d = draggingRef.current;
     const pos = dragPosRef.current;
     if (d && pos) {
@@ -512,7 +736,7 @@ export default function RoomPlanner() {
     dragPosRef.current = null;
     dragElRef.current = null;
     setDraggingId(null);
-  }, [items, updateItems]);
+  }, [items, doors, updateItems, pushHistory]);
 
   // ── Keyboard ──
 
@@ -521,12 +745,22 @@ export default function RoomPlanner() {
       const tag = (e.target as HTMLElement).tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
-      if (e.key === 'Escape') { setSelectedId(null); setPopover(null); return; }
+      if (e.key === 'Escape') { setSelectedId(null); setSelectedDoorId(null); setPopover(null); return; }
       if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) {
         e.preventDefault();
         if (e.shiftKey) redo(); else undo();
         return;
       }
+
+      if (selectedDoorId != null) {
+        const dstep = e.shiftKey ? 12 : 1;
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); nudgeDoor(selectedDoorId, -dstep); return; }
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); nudgeDoor(selectedDoorId, dstep); return; }
+        if (e.key === 'r' || e.key === 'R') { flipDoorHinge(selectedDoorId); return; }
+        if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteDoor(selectedDoorId); return; }
+        return;
+      }
+
       if (selectedId == null) return;
 
       const step = e.shiftKey ? 12 : 1;
@@ -543,14 +777,15 @@ export default function RoomPlanner() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [selectedId, rotateItem, toggleLock, deleteItem, duplicateItem, nudgeItem, undo, redo]);
+  }, [selectedId, selectedDoorId, rotateItem, toggleLock, deleteItem, duplicateItem, nudgeItem,
+      nudgeDoor, flipDoorHinge, deleteDoor, undo, redo]);
 
   // ── Save / load ──
 
   const handleSave = useCallback(() => {
     const name = layoutName.trim() || `Plan ${savedLayouts.length + 1}`;
     const layout: SavedLayout = {
-      name, items, nextId,
+      name, items, doors, nextId,
       roomWidth: room.w, roomHeight: room.h, cutouts: room.cutouts, unit,
     };
     const existing = savedLayouts.findIndex(l => l.name === name);
@@ -560,15 +795,17 @@ export default function RoomPlanner() {
     persistLayouts(updated);
     setSavedLayouts(updated);
     setLayoutName('');
-  }, [layoutName, items, nextId, room, unit, savedLayouts]);
+  }, [layoutName, items, doors, nextId, room, unit, savedLayouts]);
 
   const handleLoad = useCallback((layout: SavedLayout) => {
     setItems(layout.items);
+    setDoors(layout.doors || []);
     setNextId(layout.nextId);
     setRoom({ w: layout.roomWidth, h: layout.roomHeight, cutouts: layout.cutouts || [] });
     if (layout.unit) setUnit(layout.unit);
     setSelectedId(null);
-    pushHistory(layout.items);
+    setSelectedDoorId(null);
+    pushHistory(layout.items, layout.doors || []);
     setPopover(null);
   }, [pushHistory]);
 
@@ -613,6 +850,7 @@ export default function RoomPlanner() {
 
   // ── Derived readouts ──
   const selectedItem = items.find(i => i.id === selectedId) ?? null;
+  const selectedDoor = doors.find(d => d.id === selectedDoorId) ?? null;
   const areaIn2 = floorArea(room);
   const usedIn2 = items.reduce((sum, i) => sum + i.width * i.height, 0);
   const metric = unit === 'cm' || unit === 'm';
@@ -725,6 +963,11 @@ export default function RoomPlanner() {
             )}
           </div>
 
+          <button onClick={addDoor} className="bp-chip flex items-center gap-1.5 px-2 py-1 text-[11px] font-medium"
+            title="Add a door — drag it onto any wall">
+            <DoorOpen className="h-3 w-3" /> Door
+          </button>
+
           <div className="hidden h-5 w-px bg-border sm:block" />
 
           <div className="flex items-center gap-0.5">
@@ -784,6 +1027,17 @@ export default function RoomPlanner() {
                 {misfitIds.size} outside the walls
               </span>
             )}
+            {misfitDoorIds.size > 0 && (
+              <span className="flex items-center gap-1 text-[11px] font-medium" style={{ color: 'var(--bp-accent)' }}>
+                <DoorOpen className="h-3 w-3" />
+                door in a notch
+              </span>
+            )}
+            {swingHitIds.size > 0 && (
+              <span className="text-[11px] font-medium" style={{ color: 'var(--bp-accent)' }}>
+                {swingHitIds.size} in a door swing
+              </span>
+            )}
             {misfitIds.size === 0 && overlapIds.size > 0 && (
               <span className="text-[11px] text-muted-foreground">{overlapIds.size} pieces overlap</span>
             )}
@@ -797,7 +1051,7 @@ export default function RoomPlanner() {
           className="bp-paper relative min-h-[420px] flex-1 touch-none overflow-hidden"
           onClick={(e) => {
             const t = e.target as HTMLElement;
-            if (t === e.currentTarget || t.tagName === 'CANVAS') setSelectedId(null);
+            if (t === e.currentTarget || t.tagName === 'CANVAS') { setSelectedId(null); setSelectedDoorId(null); }
           }}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
@@ -810,7 +1064,8 @@ export default function RoomPlanner() {
             const isSelected = item.id === selectedId;
             const isDragging = item.id === draggingId;
             const misfit = misfitIds.has(item.id);
-            const bumped = !misfit && overlapIds.has(item.id);
+            const inSwing = !misfit && swingHitIds.has(item.id);
+            const bumped = !misfit && !inSwing && overlapIds.has(item.id);
             const Icon = getIcon(item.icon);
             const pxW = w * view.ppi;
             const pxH = h * view.ppi;
@@ -828,8 +1083,8 @@ export default function RoomPlanner() {
                   backgroundColor: misfit
                     ? 'color-mix(in srgb, var(--bp-accent) 10%, transparent)'
                     : `color-mix(in srgb, ${item.color} ${isSelected ? 22 : 14}%, transparent)`,
-                  border: `1.5px ${bumped ? 'dashed' : item.locked ? 'dashed' : 'solid'} ${
-                    misfit ? 'var(--bp-accent)' : isSelected ? 'var(--bp-accent)' : item.color}`,
+                  border: `1.5px ${bumped || inSwing || item.locked ? 'dashed' : 'solid'} ${
+                    misfit || inSwing ? 'var(--bp-accent)' : isSelected ? 'var(--bp-accent)' : item.color}`,
                   boxShadow: isDragging
                     ? '0 8px 20px hsl(215 45% 15% / 0.25)'
                     : isSelected ? '0 2px 8px hsl(215 45% 15% / 0.15)' : 'none',
@@ -863,6 +1118,31 @@ export default function RoomPlanner() {
                   <Lock className="absolute right-0.5 top-0.5 h-2.5 w-2.5 text-muted-foreground" />
                 )}
               </div>
+            );
+          })}
+
+          {/* Door drag handles — invisible strips straddling each doorway */}
+          {view && doors.map(door => {
+            const g = doorGeom(door, room);
+            const horizontal = door.wall === 'n' || door.wall === 's';
+            const thick = 16;
+            return (
+              <div
+                key={`door-${door.id}`}
+                className="absolute z-30"
+                style={{
+                  left: `${view.ox + g.quarter.x * view.ppi - (horizontal ? 0 : door.wall === 'w' ? thick / 2 : -0)}px`,
+                  top: `${view.oy + g.quarter.y * view.ppi - (horizontal ? (door.wall === 'n' ? thick / 2 : 0) : 0)}px`,
+                  width: horizontal ? `${door.width * view.ppi}px` : `${thick}px`,
+                  height: horizontal ? `${thick}px` : `${door.width * view.ppi}px`,
+                  ...(door.wall === 's' ? { top: `${view.oy + (g.quarter.y + g.quarter.h) * view.ppi - thick / 2}px` } : {}),
+                  ...(door.wall === 'e' ? { left: `${view.ox + (g.quarter.x + g.quarter.w) * view.ppi - thick / 2}px` } : {}),
+                  cursor: 'grab',
+                  touchAction: 'none',
+                }}
+                onPointerDown={(e) => handleDoorPointerDown(e, door)}
+                title="Drag along the wall — or to another wall"
+              />
             );
           })}
 
@@ -944,6 +1224,56 @@ export default function RoomPlanner() {
                 <Copy className="h-3.5 w-3.5" />
               </button>
               <button className={`${toolBtn} hover:!text-[--bp-accent]`} onClick={() => deleteItem(selectedItem.id)} title="Delete">
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        ) : selectedDoor ? (
+          <div className="flex min-h-7 flex-wrap items-center gap-x-3 gap-y-1.5">
+            <DoorOpen className="h-4 w-4 shrink-0" style={{ color: 'var(--bp-accent)' }} />
+            <span className="text-xs font-medium">Door</span>
+            {(() => {
+              // Leaf widths are called out in inches (or cm), never decimal feet.
+              const doorUnit: DisplayUnit = unit === 'ft' ? 'in' : unit === 'm' ? 'cm' : unit;
+              return (
+                <span className="flex items-center gap-1.5">
+                  <Input
+                    type="number" min="1" step="any"
+                    value={parseFloat(fromBase(selectedDoor.width, doorUnit).toFixed(2))}
+                    onChange={(e) => setDoorWidth(selectedDoor.id, e.target.value, doorUnit)}
+                    className="bp-readout h-7 w-16 rounded-[3px] px-1.5 text-xs"
+                  />
+                  <span className="text-[10px] text-muted-foreground">{UNIT_ABBR[doorUnit]} wide</span>
+                </span>
+              );
+            })()}
+            <span className="bp-readout text-[11px] text-muted-foreground">
+              {WALL_NAMES[selectedDoor.wall]} wall · hinge {formatDim(
+                selectedDoor.hinge === 'start'
+                  ? selectedDoor.pos
+                  : wallLength(room, selectedDoor.wall) - selectedDoor.pos - selectedDoor.width,
+                unit)} from the {selectedDoor.hinge === 'start' ? 'near' : 'far'} corner
+            </span>
+            {misfitDoorIds.has(selectedDoor.id) && (
+              <span className="text-[11px] font-medium" style={{ color: 'var(--bp-accent)' }}>
+                no floor behind this wall
+              </span>
+            )}
+            {!misfitDoorIds.has(selectedDoor.id) && (() => {
+              const hits = items.filter(i => rectInSwing(itemRect(i), selectedDoor, room)).length;
+              return hits > 0 ? (
+                <span className="text-[11px] font-medium" style={{ color: 'var(--bp-accent)' }}>
+                  swing hits {hits} piece{hits !== 1 ? 's' : ''}
+                </span>
+              ) : (
+                <span className="text-[11px]" style={{ color: 'var(--bp-ok)' }}>swing is clear</span>
+              );
+            })()}
+            <div className="ml-auto flex items-center gap-0.5">
+              <button className={toolBtn} onClick={() => flipDoorHinge(selectedDoor.id)} title="Flip hinge side (R)">
+                <ArrowLeftRight className="h-3.5 w-3.5" />
+              </button>
+              <button className={`${toolBtn} hover:!text-[--bp-accent]`} onClick={() => deleteDoor(selectedDoor.id)} title="Delete">
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             </div>
