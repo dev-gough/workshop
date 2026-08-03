@@ -99,12 +99,15 @@ interface InspectorProps {
   params: EcoParams;
   cost: number;
   onClear: () => void;
+  /** In focus mode the slide sits on the glass rather than in the cabinet. */
+  floating?: boolean;
 }
 
-export function Inspector({ agent, stats, params, cost, onClear }: InspectorProps) {
+export function Inspector({ agent, stats, params, cost, onClear, floating }: InspectorProps) {
+  const surface = floating ? 'eco-float' : 'eco-case';
   if (!agent) {
     return (
-      <div className="eco-case px-3 py-2.5">
+      <div className={`${surface} px-3 py-2.5`}>
         <span className="eco-etch">Specimen</span>
         <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
           Click anything in the tank to put it on the slide — its genome, its lineage, and the bill
@@ -138,7 +141,7 @@ export function Inspector({ agent, stats, params, cost, onClear }: InspectorProp
   const ticksPerMeal = income / (cost || 1e-6);
 
   return (
-    <div className="eco-case px-3 py-2.5">
+    <div className={`${surface} px-3 py-2.5`}>
       <div className="flex items-baseline gap-2">
         <span className="eco-etch" style={{ color }}>
           {agent.species === 'prey' ? 'Grazer' : 'Hunter'} #{agent.id}

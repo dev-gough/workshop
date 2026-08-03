@@ -2388,3 +2388,21 @@
 @media (min-width: 1024px) {
   .eco-room { height: calc(100vh - 57px); }
 }
+
+/* Focus mode. The sidebars and the chart stack step back, the tank fills the
+   room, and what's left floats on the glass: a plate of controls, and the two
+   charts worth keeping in view. Translucent so the world reads through. */
+.eco-float {
+  /* Raised, not panel: a plate the colour of the cabinet face would vanish
+     against the peat. This one has to sit visibly on the glass. */
+  background: color-mix(in srgb, var(--eco-raise) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--eco-faint) 45%, transparent);
+  border-radius: 4px;
+  box-shadow:
+    0 12px 32px hsl(120 40% 2% / 0.55),
+    inset 0 1px 0 hsl(90 25% 85% / 0.09);
+  backdrop-filter: blur(10px);
+}
+
+/* Real fullscreen has no 57px header to sit under. */
+.eco-room:fullscreen { height: 100vh; }
