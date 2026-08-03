@@ -391,3 +391,29 @@ export function rectInSwing(r: Rect, door: DoorItem, room: RoomSpec): boolean {
   const cy = Math.max(iy, Math.min(g.hy, ay));
   return (cx - g.hx) ** 2 + (cy - g.hy) ** 2 < door.width ** 2;
 }
+
+/** The stretch of a bounding wall that is real wall — corner notches removed. */
+export function wallFreeSpan(room: RoomSpec, wall: Wall): [number, number] {
+  const get = (c: Corner) => room.cutouts.find(x => x.corner === c);
+  const nw = get('nw'), ne = get('ne'), sw = get('sw'), se = get('se');
+  switch (wall) {
+    case 'n': return [nw?.w ?? 0, room.w - (ne?.w ?? 0)];
+    case 's': return [sw?.w ?? 0, room.w - (se?.w ?? 0)];
+    case 'w': return [nw?.d ?? 0, room.h - (sw?.d ?? 0)];
+    case 'e': return [ne?.d ?? 0, room.h - (se?.d ?? 0)];
+  }
+}
+
+/** Clamp a door onto the real wall — snaps to the nearest notch vertex. */
+export function clampDoorPos(room: RoomSpec, wall: Wall, width: number, pos: number): number {
+  const [a, b] = wallFreeSpan(room, wall);
+  return Math.round(Math.max(a, Math.min(Math.max(a, b - width), pos)));
+}
+
+/** Re-seat every door on its wall's free span (after a shape change). */
+export function snapDoors(doors: DoorItem[], room: RoomSpec): DoorItem[] {
+  return doors.map(d => {
+    const pos = clampDoorPos(room, d.wall, d.width, d.pos);
+    return pos === d.pos ? d : { ...d, pos };
+  });
+}

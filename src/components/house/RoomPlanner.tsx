@@ -14,6 +14,7 @@ import {
   type FurnitureItem, type SavedLayout, type DisplayUnit, type RoomSpec,
   type Corner, type CatalogueItem, type CatalogueStore, type Rect,
   type DoorItem, type Wall, WALL_NAMES, wallLength, doorGeom, doorOnFloor, rectInSwing,
+  wallFreeSpan, clampDoorPos, snapDoors,
   UNIT_ABBR, toBase, fromBase, formatDim, gridMajorInterval, SNAP_INCREMENT,
   effectiveDims, itemRect, cutoutRect, rectsOverlap, fitsInRoom, floorArea,
   wallPolygon, loadLayouts, persistLayouts, loadCatalogue, persistCatalogue,
@@ -132,7 +133,7 @@ export default function RoomPlanner() {
     const s = loadSession();
     if (s) {
       setItems(s.items);
-      setDoors(s.doors);
+      setDoors(snapDoors(s.doors, s.room));
       setNextId(s.nextId);
       setRoom(s.room);
       setUnit(s.unit);
@@ -442,6 +443,8 @@ export default function RoomPlanner() {
     if (selDoor) {
       const len = wallLength(room, selDoor.wall);
       const pos = Math.max(0, Math.min(len - selDoor.width, selDoor.pos));
+      // Measure from the wall's real corners (notch vertices included).
+      const [spanA, spanB] = wallFreeSpan(room, selDoor.wall);
       const horizontal = selDoor.wall === 'n' || selDoor.wall === 's';
       ctx.strokeStyle = cAccent;
       ctx.fillStyle = cAccent;
@@ -452,9 +455,9 @@ export default function RoomPlanner() {
       // Dim line sits just outside the wall.
       const off = 9;
       const spans: [number, number, string][] = [
-        [0, pos, formatDim(pos, unit)],
+        [spanA, pos, formatDim(pos - spanA, unit)],
         [pos, pos + selDoor.width, formatDim(selDoor.width, unit)],
-        [pos + selDoor.width, len, formatDim(len - pos - selDoor.width, unit)],
+        [pos + selDoor.width, spanB, formatDim(spanB - pos - selDoor.width, unit)],
       ];
       for (const [a, b, label] of spans) {
         if (b - a < 0.5) continue;
@@ -566,7 +569,7 @@ export default function RoomPlanner() {
     const width = Math.min(32, room.w); // a standard 32" leaf
     const door: DoorItem = {
       id: nextId, wall: 'n', width,
-      pos: Math.max(0, Math.round((room.w - width) / 2)),
+      pos: clampDoorPos(room, 'n', width, (room.w - width) / 2),
       hinge: 'start',
     };
     setNextId(nextId + 1);
@@ -593,15 +596,14 @@ export default function RoomPlanner() {
       if (d.id !== id) return d;
       const len = wallLength(room, d.wall);
       const width = Math.max(6, Math.min(len, Math.round(toBase(n, inUnit))));
-      return { ...d, width, pos: Math.max(0, Math.min(len - width, d.pos)) };
+      return { ...d, width, pos: clampDoorPos(room, d.wall, width, d.pos) };
     }));
   }, [doors, room, updateDoors]);
 
   const nudgeDoor = useCallback((id: number, delta: number) => {
     updateDoors(doors.map(d => {
       if (d.id !== id) return d;
-      const len = wallLength(room, d.wall);
-      return { ...d, pos: Math.max(0, Math.min(len - d.width, d.pos + delta)) };
+      return { ...d, pos: clampDoorPos(room, d.wall, d.width, d.pos + delta) };
     }));
   }, [doors, room, updateDoors]);
 
@@ -669,26 +671,34 @@ export default function RoomPlanner() {
   }, []);
 
   // Slide a door along its wall — or hand it to whichever wall is nearest.
+  // Distance is measured to each wall's REAL span (notches removed), so a
+  // corner cut never captures the door; it snaps to the nearest vertex.
   const dragDoorTo = useCallback((mouseX: number, mouseY: number, id: number) => {
     if (!view) return;
     const mx = (mouseX - view.ox) / view.ppi;
     const my = (mouseY - view.oy) / view.ppi;
-    const dists: [number, Wall][] = [
-      [Math.abs(my), 'n'], [Math.abs(room.h - my), 's'],
-      [Math.abs(mx), 'w'], [Math.abs(room.w - mx), 'e'],
-    ];
-    dists.sort((a, b) => a[0] - b[0]);
-    const wall = dists[0][1];
+    const door = doors.find(d => d.id === id);
+    if (!door) return;
+    let best: Wall = door.wall;
+    let bestDist = Infinity;
+    for (const wall of ['n', 's', 'w', 'e'] as Wall[]) {
+      const [a, b] = wallFreeSpan(room, wall);
+      if (b - a < Math.min(door.width, 12)) continue; // no wall left to hang a door on
+      const along = wall === 'n' || wall === 's' ? mx : my;
+      const perp = wall === 'n' ? my : wall === 's' ? room.h - my
+        : wall === 'w' ? mx : room.w - mx;
+      const dAlong = along < a ? a - along : along > b ? along - b : 0;
+      const dist = Math.hypot(perp, dAlong);
+      if (dist < bestDist) { bestDist = dist; best = wall; }
+    }
     setDoors(prev => prev.map(d => {
       if (d.id !== id) return d;
-      const len = wall === 'n' || wall === 's' ? room.w : room.h;
-      const along = wall === 'n' || wall === 's' ? mx : my;
-      const width = Math.min(d.width, len);
-      const pos = Math.round(Math.max(0, Math.min(len - width, along - width / 2)));
-      return { ...d, wall, width, pos };
+      const along = best === 'n' || best === 's' ? mx : my;
+      const width = Math.min(d.width, wallLength(room, best));
+      return { ...d, wall: best, width, pos: clampDoorPos(room, best, width, along - width / 2) };
     }));
     doorMovedRef.current = true;
-  }, [view, room]);
+  }, [view, room, doors]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     if (draggingDoorRef.current != null) {
@@ -718,7 +728,7 @@ export default function RoomPlanner() {
       el.style.left = `${view.ox + newX * view.ppi}px`;
       el.style.top = `${view.oy + newY * view.ppi}px`;
     }
-  }, [items, view, room]);
+  }, [items, view, room, dragDoorTo]);
 
   const handlePointerUp = useCallback(() => {
     if (draggingDoorRef.current != null) {
@@ -798,10 +808,11 @@ export default function RoomPlanner() {
   }, [layoutName, items, doors, nextId, room, unit, savedLayouts]);
 
   const handleLoad = useCallback((layout: SavedLayout) => {
+    const loadedRoom: RoomSpec = { w: layout.roomWidth, h: layout.roomHeight, cutouts: layout.cutouts || [] };
     setItems(layout.items);
-    setDoors(layout.doors || []);
+    setDoors(snapDoors(layout.doors || [], loadedRoom));
     setNextId(layout.nextId);
-    setRoom({ w: layout.roomWidth, h: layout.roomHeight, cutouts: layout.cutouts || [] });
+    setRoom(loadedRoom);
     if (layout.unit) setUnit(layout.unit);
     setSelectedId(null);
     setSelectedDoorId(null);
@@ -817,36 +828,43 @@ export default function RoomPlanner() {
 
   // ── Room shape ──
 
+  // Room changes re-seat every door on the walls that remain — cutting a
+  // corner under a door snaps the door to the nearest notch vertex.
+  const applyRoom = useCallback((next: RoomSpec) => {
+    setRoom(next);
+    setDoors(prev => snapDoors(prev, next));
+  }, []);
+
   const setRoomDim = useCallback((axis: 'w' | 'h', val: string) => {
     const n = parseFloat(val);
     if (!isNaN(n) && n > 0) {
-      setRoom(prev => ({ ...prev, [axis]: Math.round(toBase(n, unit)) }));
+      applyRoom({ ...room, [axis]: Math.round(toBase(n, unit)) });
     }
-  }, [unit]);
+  }, [room, unit, applyRoom]);
 
   const setCutout = useCallback((corner: Corner, on: boolean) => {
-    setRoom(prev => ({
-      ...prev,
+    applyRoom({
+      ...room,
       cutouts: on
-        ? [...prev.cutouts.filter(c => c.corner !== corner), {
+        ? [...room.cutouts.filter(c => c.corner !== corner), {
             corner,
-            w: Math.max(6, Math.round(prev.w / 3)),
-            d: Math.max(6, Math.round(prev.h / 3)),
+            w: Math.max(6, Math.round(room.w / 3)),
+            d: Math.max(6, Math.round(room.h / 3)),
           }]
-        : prev.cutouts.filter(c => c.corner !== corner),
-    }));
-  }, []);
+        : room.cutouts.filter(c => c.corner !== corner),
+    });
+  }, [room, applyRoom]);
 
   const setCutoutDim = useCallback((corner: Corner, axis: 'w' | 'd', val: string) => {
     const n = parseFloat(val);
     if (isNaN(n) || n <= 0) return;
-    setRoom(prev => ({
-      ...prev,
-      cutouts: prev.cutouts.map(c => c.corner === corner
+    applyRoom({
+      ...room,
+      cutouts: room.cutouts.map(c => c.corner === corner
         ? { ...c, [axis]: Math.round(toBase(n, unit)) }
         : c),
-    }));
-  }, [unit]);
+    });
+  }, [room, unit, applyRoom]);
 
   // ── Derived readouts ──
   const selectedItem = items.find(i => i.id === selectedId) ?? null;
@@ -1248,11 +1266,14 @@ export default function RoomPlanner() {
               );
             })()}
             <span className="bp-readout text-[11px] text-muted-foreground">
-              {WALL_NAMES[selectedDoor.wall]} wall · hinge {formatDim(
-                selectedDoor.hinge === 'start'
-                  ? selectedDoor.pos
-                  : wallLength(room, selectedDoor.wall) - selectedDoor.pos - selectedDoor.width,
-                unit)} from the {selectedDoor.hinge === 'start' ? 'near' : 'far'} corner
+              {(() => {
+                const [a, b] = wallFreeSpan(room, selectedDoor.wall);
+                const d = selectedDoor.hinge === 'start'
+                  ? selectedDoor.pos - a
+                  : b - selectedDoor.pos - selectedDoor.width;
+                return `${WALL_NAMES[selectedDoor.wall]} wall · hinge ${formatDim(Math.max(0, d), unit)} from the ${
+                  selectedDoor.hinge === 'start' ? 'near' : 'far'} corner`;
+              })()}
             </span>
             {misfitDoorIds.has(selectedDoor.id) && (
               <span className="text-[11px] font-medium" style={{ color: 'var(--bp-accent)' }}>
