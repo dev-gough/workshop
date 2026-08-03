@@ -903,9 +903,9 @@ export default function RoomPlanner() {
           </div>
         </div>
 
-        {/* ── Inspector strip ── */}
-        {selectedItem && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        {/* ── Inspector strip — always present so the sheet never shifts ── */}
+        {selectedItem ? (
+          <div className="flex min-h-7 flex-wrap items-center gap-x-3 gap-y-1.5">
             {(() => {
               const Icon = getIcon(selectedItem.icon);
               return <Icon className="h-4 w-4 shrink-0" style={{ color: selectedItem.color }} />;
@@ -947,6 +947,16 @@ export default function RoomPlanner() {
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             </div>
+          </div>
+        ) : (
+          <div className="flex min-h-7 flex-wrap items-center gap-x-3 gap-y-1.5">
+            <span className="bp-etch">Nothing selected</span>
+            <span className="text-[11px] text-muted-foreground">
+              Click a piece on the sheet to see its clearances.
+            </span>
+            <span className="bp-readout ml-auto hidden text-[10px] text-muted-foreground md:inline">
+              R rotate · L lock · arrows nudge · ⇧ = 1' · ⌫ delete · ⌘Z undo
+            </span>
           </div>
         )}
       </div>
