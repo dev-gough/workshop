@@ -316,17 +316,80 @@ export const WALL_NAMES: Record<Wall, string> = {
   n: 'north', e: 'east', s: 'south', w: 'west',
 };
 
-/** A door in a wall: position along the wall, leaf width, hinge end. */
+/**
+ * A door hangs in a wall frame: one of the four bounding walls, or — when
+ * `face` names a corner notch — one of the two interior faces that notch
+ * creates (a closet wall). `wall` gives the face's orientation; `pos` is
+ * measured along the same axis as the matching bounding wall.
+ */
 export interface DoorItem {
   id: number;
   wall: Wall;
-  pos: number;   // inches from the wall's start corner (NW for n/w walls)
+  face?: Corner; // set → the door is on that notch's face parallel to `wall`
+  pos: number;   // inches along the wall axis (x for n/s, y for w/e)
   width: number; // leaf width, inches
   hinge: 'start' | 'end';
 }
 
 export function wallLength(room: RoomSpec, wall: Wall): number {
   return wall === 'n' || wall === 's' ? room.w : room.h;
+}
+
+/** The stretch of a bounding wall that is real wall — corner notches removed. */
+export function wallFreeSpan(room: RoomSpec, wall: Wall): [number, number] {
+  const get = (c: Corner) => room.cutouts.find(x => x.corner === c);
+  const nw = get('nw'), ne = get('ne'), sw = get('sw'), se = get('se');
+  switch (wall) {
+    case 'n': return [nw?.w ?? 0, room.w - (ne?.w ?? 0)];
+    case 's': return [sw?.w ?? 0, room.w - (se?.w ?? 0)];
+    case 'w': return [nw?.d ?? 0, room.h - (sw?.d ?? 0)];
+    case 'e': return [ne?.d ?? 0, room.h - (se?.d ?? 0)];
+  }
+}
+
+/** A straight run of wall a door can hang in. */
+export interface WallFrame {
+  horizontal: boolean;      // runs along x (n/s style) or y (w/e style)
+  line: number;             // the wall line: y if horizontal, else x
+  inwardSign: 1 | -1;       // which side of the line is floor
+  span: [number, number];   // real wall extent along the wall axis
+}
+
+/** Resolve a door location to its frame; null if the named face is gone. */
+export function wallFrame(room: RoomSpec, wall: Wall, face?: Corner): WallFrame | null {
+  const horizontal = wall === 'n' || wall === 's';
+  if (!face) {
+    const line = wall === 'n' ? 0 : wall === 's' ? room.h : wall === 'w' ? 0 : room.w;
+    const inwardSign = wall === 'n' || wall === 'w' ? 1 : -1;
+    return { horizontal, line, inwardSign, span: wallFreeSpan(room, wall) };
+  }
+  const c = room.cutouts.find(x => x.corner === face);
+  if (!c) return null;
+  const r = cutoutRect(c, room);
+  switch (wall) {
+    case 'n': return face === 'nw' || face === 'ne'
+      ? { horizontal: true, line: r.y + r.h, inwardSign: 1, span: [r.x, r.x + r.w] } : null;
+    case 's': return face === 'sw' || face === 'se'
+      ? { horizontal: true, line: r.y, inwardSign: -1, span: [r.x, r.x + r.w] } : null;
+    case 'w': return face === 'nw' || face === 'sw'
+      ? { horizontal: false, line: r.x + r.w, inwardSign: 1, span: [r.y, r.y + r.h] } : null;
+    case 'e': return face === 'ne' || face === 'se'
+      ? { horizontal: false, line: r.x, inwardSign: -1, span: [r.y, r.y + r.h] } : null;
+  }
+}
+
+/** Every frame a door could hang in for this room shape. */
+export function allWallFrames(room: RoomSpec): { wall: Wall; face?: Corner }[] {
+  const out: { wall: Wall; face?: Corner }[] = [
+    { wall: 'n' }, { wall: 's' }, { wall: 'w' }, { wall: 'e' },
+  ];
+  for (const c of room.cutouts) {
+    const [w1, w2]: [Wall, Wall] =
+      c.corner === 'nw' ? ['n', 'w'] : c.corner === 'ne' ? ['n', 'e']
+      : c.corner === 'sw' ? ['s', 'w'] : ['s', 'e'];
+    out.push({ wall: w1, face: c.corner }, { wall: w2, face: c.corner });
+  }
+  return out;
 }
 
 export interface DoorGeom {
@@ -336,46 +399,46 @@ export interface DoorGeom {
   quarter: Rect;            // bounding square of the swing quarter-disc
 }
 
-/** Door geometry in room inches. The swing is always into the room. */
+/** Door geometry in room inches. The swing is always toward the floor side. */
 export function doorGeom(door: DoorItem, room: RoomSpec): DoorGeom {
-  const len = wallLength(room, door.wall);
-  const pos = Math.max(0, Math.min(len - door.width, door.pos));
-  let start: [number, number], dir: [number, number], inward: [number, number];
-  switch (door.wall) {
-    case 'n': start = [0, 0]; dir = [1, 0]; inward = [0, 1]; break;
-    case 's': start = [0, room.h]; dir = [1, 0]; inward = [0, -1]; break;
-    case 'w': start = [0, 0]; dir = [0, 1]; inward = [1, 0]; break;
-    case 'e': start = [room.w, 0]; dir = [0, 1]; inward = [-1, 0]; break;
-  }
-  const j1: [number, number] = [start[0] + dir[0] * pos, start[1] + dir[1] * pos];
-  const j2: [number, number] = [start[0] + dir[0] * (pos + door.width), start[1] + dir[1] * (pos + door.width)];
+  const frame = wallFrame(room, door.wall, door.face) ?? wallFrame(room, door.wall)!;
+  const [a, b] = frame.span;
+  const pos = Math.max(a, Math.min(Math.max(a, b - door.width), door.pos));
+  const pt = (along: number, out: number): [number, number] => frame.horizontal
+    ? [along, frame.line + out * frame.inwardSign]
+    : [frame.line + out * frame.inwardSign, along];
+  const j1 = pt(pos, 0);
+  const j2 = pt(pos + door.width, 0);
+  const hingeAlong = door.hinge === 'start' ? pos : pos + door.width;
   const [hx, hy] = door.hinge === 'start' ? j1 : j2;
   const [sx, sy] = door.hinge === 'start' ? j2 : j1;
-  const lx = hx + inward[0] * door.width;
-  const ly = hy + inward[1] * door.width;
-  const xs = [j1[0], j2[0], j1[0] + inward[0] * door.width, j2[0] + inward[0] * door.width];
-  const ys = [j1[1], j2[1], j1[1] + inward[1] * door.width, j2[1] + inward[1] * door.width];
-  const minX = Math.min(...xs), minY = Math.min(...ys);
+  const [lx, ly] = pt(hingeAlong, door.width);
+  const corners = [j1, j2, pt(pos, door.width), pt(pos + door.width, door.width)];
+  const minX = Math.min(...corners.map(p => p[0]));
+  const minY = Math.min(...corners.map(p => p[1]));
   return {
     hx, hy, sx, sy, lx, ly,
-    quarter: { x: minX, y: minY, w: Math.max(...xs) - minX, h: Math.max(...ys) - minY },
+    quarter: {
+      x: minX, y: minY,
+      w: Math.max(...corners.map(p => p[0])) - minX,
+      h: Math.max(...corners.map(p => p[1])) - minY,
+    },
   };
 }
 
-/** Is the doorway actually in a wall with floor behind it (not a notch)? */
+/** Is the doorway in real wall, with floor on its swing side? */
 export function doorOnFloor(door: DoorItem, room: RoomSpec): boolean {
-  const len = wallLength(room, door.wall);
-  if (door.pos < -0.001 || door.pos + door.width > len + 0.001) return false;
-  const g = doorGeom(door, room);
+  const frame = wallFrame(room, door.wall, door.face);
+  if (!frame) return false;
+  const [a, b] = frame.span;
+  if (door.pos < a - 0.001 || door.pos + door.width > b + 0.001) return false;
   // A thin strip just inside the wall across the doorway span.
-  const q = g.quarter;
-  let strip: Rect;
-  switch (door.wall) {
-    case 'n': strip = { x: q.x, y: 0, w: door.width, h: 0.5 }; break;
-    case 's': strip = { x: q.x, y: room.h - 0.5, w: door.width, h: 0.5 }; break;
-    case 'w': strip = { x: 0, y: q.y, w: 0.5, h: door.width }; break;
-    case 'e': strip = { x: room.w - 0.5, y: q.y, w: 0.5, h: door.width }; break;
-  }
+  const lo = frame.inwardSign === 1 ? frame.line : frame.line - 0.5;
+  const strip: Rect = frame.horizontal
+    ? { x: door.pos, y: lo, w: door.width, h: 0.5 }
+    : { x: lo, y: door.pos, w: 0.5, h: door.width };
+  if (strip.x < -0.001 || strip.y < -0.001
+    || strip.x + strip.w > room.w + 0.001 || strip.y + strip.h > room.h + 0.001) return false;
   return !room.cutouts.some(c => rectsOverlap(strip, cutoutRect(c, room)));
 }
 
@@ -392,38 +455,27 @@ export function rectInSwing(r: Rect, door: DoorItem, room: RoomSpec): boolean {
   return (cx - g.hx) ** 2 + (cy - g.hy) ** 2 < door.width ** 2;
 }
 
-/** The stretch of a bounding wall that is real wall — corner notches removed. */
-export function wallFreeSpan(room: RoomSpec, wall: Wall): [number, number] {
-  const get = (c: Corner) => room.cutouts.find(x => x.corner === c);
-  const nw = get('nw'), ne = get('ne'), sw = get('sw'), se = get('se');
-  switch (wall) {
-    case 'n': return [nw?.w ?? 0, room.w - (ne?.w ?? 0)];
-    case 's': return [sw?.w ?? 0, room.w - (se?.w ?? 0)];
-    case 'w': return [nw?.d ?? 0, room.h - (sw?.d ?? 0)];
-    case 'e': return [ne?.d ?? 0, room.h - (se?.d ?? 0)];
-  }
-}
-
-/** Clamp a door onto the real wall — snaps to the nearest notch vertex. */
-export function clampDoorPos(room: RoomSpec, wall: Wall, width: number, pos: number): number {
-  const [a, b] = wallFreeSpan(room, wall);
+/** Clamp a door into its frame's span — snaps to the nearest vertex. */
+export function clampDoorPos(room: RoomSpec, wall: Wall, width: number, pos: number, face?: Corner): number {
+  const frame = wallFrame(room, wall, face);
+  if (!frame) return Math.round(pos);
+  const [a, b] = frame.span;
   return Math.round(Math.max(a, Math.min(Math.max(a, b - width), pos)));
 }
 
-/** Re-seat every door on its wall's free span (after a shape change). */
-export function snapDoors(doors: DoorItem[], room: RoomSpec): DoorItem[] {
-  return doors.map(d => {
-    const pos = clampDoorPos(room, d.wall, d.width, d.pos);
-    return pos === d.pos ? d : { ...d, pos };
-  });
-}
-
-/** Snap doors to real wall spans and drop exact duplicates (stacked twins). */
+/**
+ * Re-seat every door after a shape change: doors on a face that no longer
+ * exists fall back to the matching bounding wall; everything clamps into
+ * its span; exact duplicates (stacked twins) collapse to one.
+ */
 export function tidyDoors(doors: DoorItem[], room: RoomSpec): DoorItem[] {
   const seen = new Set<string>();
   const out: DoorItem[] = [];
-  for (const d of snapDoors(doors, room)) {
-    const key = `${d.wall}:${d.pos}:${d.width}:${d.hinge}`;
+  for (let d of doors) {
+    if (d.face && !wallFrame(room, d.wall, d.face)) d = { ...d, face: undefined };
+    const pos = clampDoorPos(room, d.wall, d.width, d.pos, d.face);
+    if (pos !== d.pos) d = { ...d, pos };
+    const key = `${d.wall}:${d.face ?? '-'}:${d.pos}:${d.width}:${d.hinge}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(d);
