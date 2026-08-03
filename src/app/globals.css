@@ -2102,3 +2102,125 @@
 @media (prefers-reduced-motion: reduce) {
   .cine-bulbs { animation: none; }
 }
+
+/* ─── Drafting Room scope (RM 11) — applied to /projects/house ───
+   An architect's drafting table. Light mode is a working drawing:
+   graphite pencil on cool vellum over the board, non-photo-blue grid,
+   red revision pen for accents. Dark mode is the cyanotype blueprint
+   the door tile promises — white ink on Prussian blue, china-marker
+   amber for markups. Sheet lettering is uppercase mono, stencilled. */
+.bp-theme {
+  /* Palette */
+  --bp-desk:       hsl(210 16% 89%);  /* the board around the sheet */
+  --bp-sheet:      hsl(207 30% 97%);  /* vellum */
+  --bp-raise:      hsl(209 24% 93%);  /* raised paper / hover */
+  --bp-ink:        hsl(214 32% 16%);  /* graphite */
+  --bp-dim:        hsl(213 12% 42%);  /* light pencil notes */
+  --bp-faint:      hsl(212 14% 66%);  /* construction lines */
+  --bp-line:       hsl(211 22% 83%);  /* panel seams */
+  --bp-grid:       hsl(211 45% 90%);  /* non-photo blue, minor */
+  --bp-grid-major: hsl(212 40% 80%);  /* non-photo blue, major */
+  --bp-wall:       hsl(214 32% 22%);  /* poché — wall linework */
+  --bp-accent:     hsl(4 66% 44%);    /* revision pen */
+  --bp-ok:         hsl(152 45% 34%);  /* checked-off green */
+
+  /* Remap the shared tokens so utilities + shadcn/lucide follow suit. */
+  --color-background:           var(--bp-desk);
+  --color-foreground:           var(--bp-ink);
+  --color-card:                 var(--bp-sheet);
+  --color-card-foreground:      var(--bp-ink);
+  --color-popover:              var(--bp-sheet);
+  --color-popover-foreground:   var(--bp-ink);
+  --color-muted:                var(--bp-raise);
+  --color-muted-foreground:     var(--bp-dim);
+  --color-secondary:            var(--bp-raise);
+  --color-secondary-foreground: var(--bp-ink);
+  --color-border:               var(--bp-line);
+  --color-input:                var(--bp-line);
+  --color-ring:                 var(--bp-accent);
+  --color-primary:              var(--bp-accent);
+  --color-primary-foreground:   hsl(207 30% 98%);
+  --color-accent:               var(--bp-raise);
+  --color-accent-foreground:    var(--bp-ink);
+  --color-destructive:          var(--bp-accent);
+
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  color: var(--bp-ink);
+  background-color: var(--bp-desk);
+}
+.dark .bp-theme {
+  --bp-desk:       hsl(219 42% 9%);
+  --bp-sheet:      hsl(217 55% 20%);
+  --bp-raise:      hsl(217 50% 25%);
+  --bp-ink:        hsl(208 50% 96%);
+  --bp-dim:        hsl(212 38% 74%);
+  --bp-faint:      hsl(214 32% 52%);
+  --bp-line:       hsl(216 40% 32%);
+  --bp-grid:       hsl(216 42% 26%);
+  --bp-grid-major: hsl(215 40% 33%);
+  --bp-wall:       hsl(206 60% 93%);
+  --bp-accent:     hsl(43 88% 60%);   /* china marker on blueprint */
+  --bp-ok:         hsl(152 45% 62%);
+  --color-primary-foreground: hsl(219 42% 12%);
+}
+
+/* Stencilled sheet lettering — labels, dims, the title block. */
+.bp-etch {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--bp-dim);
+}
+
+/* Drafting numerals. */
+.bp-readout {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The sheet of paper itself — pinned flat on the board. */
+.bp-paper {
+  background: var(--bp-sheet);
+  border: 1px solid var(--bp-line);
+  border-radius: 2px; /* paper has corners, not radii */
+  box-shadow:
+    0 1px 2px hsl(215 40% 20% / 0.08),
+    0 10px 30px hsl(215 45% 15% / 0.14);
+}
+.dark .bp-paper {
+  box-shadow:
+    0 1px 2px hsl(220 60% 4% / 0.4),
+    0 12px 34px hsl(220 60% 4% / 0.5);
+}
+
+/* Poché hatch — area that is NOT floor (corner notches, doesn't-fit). */
+.bp-hatch {
+  background-image: repeating-linear-gradient(
+    45deg,
+    color-mix(in srgb, var(--bp-accent) 55%, transparent) 0 1px,
+    transparent 1px 6px
+  );
+}
+
+/* Sidebar drawer rows + toolbar chips. */
+.bp-chip {
+  border: 1px solid var(--bp-line);
+  background: transparent;
+  color: var(--bp-dim);
+  border-radius: 3px;
+  transition: color 130ms ease, border-color 130ms ease, background-color 130ms ease;
+}
+.bp-chip:hover { color: var(--bp-ink); border-color: var(--bp-faint); background: var(--bp-raise); }
+.bp-chip[data-on='true'] {
+  color: var(--bp-accent);
+  border-color: color-mix(in srgb, var(--bp-accent) 55%, var(--bp-line));
+  background: color-mix(in srgb, var(--bp-accent) 9%, transparent);
+}
+
+/* Full-height drafting board under the 57px header. */
+.bp-board { min-height: calc(100vh - 57px); }
+@media (min-width: 1024px) {
+  .bp-board { height: calc(100vh - 57px); }
+}

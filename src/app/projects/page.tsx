@@ -464,14 +464,14 @@ export default function ProjectsPage() {
 
             {/* ── Room Planner ── */}
             <ProjectCard href="/projects/house" delay={0.15}
-              className="bg-gradient-to-br from-amber-950/60 to-orange-950/40">
+              className="bg-gradient-to-br from-blue-950/70 to-indigo-950/40">
               <div className="flex items-center gap-2 mb-3">
-                <Home className="h-4 w-4 text-amber-400" />
-                <span className="text-[10px] uppercase tracking-[0.2em] text-amber-400/60 font-medium">Tool</span>
+                <Home className="h-4 w-4 text-blue-400" />
+                <span className="text-[10px] uppercase tracking-[0.2em] text-blue-400/60 font-medium">Tool</span>
               </div>
-              <h2 className="text-lg font-bold text-white mb-1.5">Room Planner</h2>
+              <h2 className="text-lg font-bold text-white mb-1.5">The Drafting Room</h2>
               <p className="text-sm text-white/45 leading-relaxed mb-3">
-                Drag-and-drop layout tool for planning rooms with custom furniture dimensions on a precision grid.
+                Measure your furniture once into a catalogue, draw the room — L-shapes included — and see what fits, with clearances dimensioned like a real plan.
               </p>
               <RoomPlannerVisual />
             </ProjectCard>

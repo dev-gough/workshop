@@ -158,7 +158,7 @@ export function GolRoom({ className }: { className?: string }) {
 
 export function HouseRoom({ className }: { className?: string }) {
   return (
-    <Door href="/projects/house" number="RM 11" room="Planner" className={className}>
+    <Door href="/projects/house" number="RM 11" room="Drafting Room" className={className}>
       <div
         className="relative h-full"
         style={{
