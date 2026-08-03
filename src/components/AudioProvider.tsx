@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
-import { sortedTrackIndices } from '@/lib/songUtils';
+import { cleanSongDisplay, sortedTrackIndices } from '@/lib/songUtils';
 
 // ── Types ──
 
@@ -353,6 +353,71 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
       playFromQueue(qi - 1);
     }
   }, [playFromQueue]);
+
+  const playPrevRef = useRef(playPrev);
+  useEffect(() => { playPrevRef.current = playPrev; }, [playPrev]);
+
+  // ── Media Session (browser media overlay + hardware media keys) ──
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    const ms = navigator.mediaSession;
+    ms.setActionHandler('play', () => { audioRef.current?.play(); });
+    ms.setActionHandler('pause', () => { audioRef.current?.pause(); });
+    ms.setActionHandler('nexttrack', () => { playNextRef.current(); });
+    ms.setActionHandler('previoustrack', () => {
+      const audio = audioRef.current;
+      // Standard media-key convention: restart the track if we're past 3s,
+      // only jump to the previous queue entry near the start.
+      if (audio && audio.currentTime > 3) audio.currentTime = 0;
+      else playPrevRef.current();
+    });
+    try {
+      ms.setActionHandler('seekto', (details) => {
+        const audio = audioRef.current;
+        if (audio && details.seekTime != null) audio.currentTime = details.seekTime;
+      });
+    } catch { /* seekto unsupported */ }
+    return () => {
+      (['play', 'pause', 'nexttrack', 'previoustrack', 'seekto'] as MediaSessionAction[])
+        .forEach(action => { try { ms.setActionHandler(action, null); } catch { /* ignore */ } });
+    };
+  }, []);
+
+  // Track metadata → overlay title/artist/album/art
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    const album = currentTrack ? albums[currentTrack.albumIndex] : null;
+    const song = currentTrack ? album?.songs[currentTrack.songIndex] : null;
+    if (!album || !song) {
+      navigator.mediaSession.metadata = null;
+      return;
+    }
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: cleanSongDisplay(song, album.artist, album.name),
+      artist: album.artist,
+      album: album.name,
+      artwork: album.coverUrl ? [{ src: album.coverUrl }] : [],
+    });
+  }, [currentTrack, albums]);
+
+  useEffect(() => {
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+    }
+  }, [isPlaying]);
+
+  // Position state → seek bar in the overlay
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || !navigator.mediaSession.setPositionState) return;
+    if (!duration || !isFinite(duration)) return;
+    try {
+      navigator.mediaSession.setPositionState({
+        duration,
+        playbackRate: 1,
+        position: Math.min(progress, duration),
+      });
+    } catch { /* invalid state, ignore */ }
+  }, [progress, duration]);
 
   const playSong = useCallback((albumIndex: number, songIndex: number) => {
     const album = albums[albumIndex];
