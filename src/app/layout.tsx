@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, JetBrains_Mono, Fraunces, Jost } from "next/font/google";
+import { Geist, Geist_Mono, JetBrains_Mono, Fraunces, Jost, Michroma } from "next/font/google";
 import "./globals.css";
 import Header from "../components/Header";
 import ThemeProvider from "../components/ThemeProvider";
@@ -51,6 +51,14 @@ const wsSerif = Fraunces({
 	axes: ["SOFT", "WONK"],
 });
 
+// Driving School scope: squared Eurostile-style display face — the voice of
+// motorsport timing towers. Single weight, display moments only.
+const michroma = Michroma({
+	variable: "--font-drs-display",
+	subsets: ["latin"],
+	weight: "400",
+});
+
 export const metadata: Metadata = {
 	title: "Devy's Workshop",
 	description: "A personal server dashboard and creative coding workshop.",
@@ -67,7 +75,7 @@ export default function RootLayout({
 				<ThemeScript />
 			</head>
 			<body
-				className={`${geistSans.variable} ${geistMono.variable} ${jetbrainsMono.variable} ${fraunces.variable} ${jost.variable} ${wsSerif.variable} antialiased`}
+				className={`${geistSans.variable} ${geistMono.variable} ${jetbrainsMono.variable} ${fraunces.variable} ${jost.variable} ${wsSerif.variable} ${michroma.variable} antialiased`}
 			>
 				<ThemeProvider>
 					<TooltipProvider>

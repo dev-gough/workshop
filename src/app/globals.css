@@ -2406,3 +2406,195 @@
 
 /* Real fullscreen has no 57px header to sit under. */
 .eco-room:fullscreen { height: 100vh; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RM 13 — Driving School (drs-theme)
+   A race team's pit wall: poured concrete and pit-wall white by day, carbon
+   by night. The circuit itself is floodlit asphalt in BOTH modes — the room's
+   lights change, the night session doesn't. One signal-orange accent (the
+   pit-lane flag); timing-purple is reserved for "fastest yet" moments.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.drs-theme {
+  /* Palette — concrete, carbon, and one orange flag */
+  --drs-wall:   #e9e8e4;             /* paddock concrete */
+  --drs-panel:  #f7f6f2;             /* pit-wall white */
+  --drs-raise:  #dedcd4;             /* raised plate / hover */
+  --drs-line:   #c9c7bf;             /* panel seams */
+  --drs-ink:    #1b1c1e;             /* carbon ink */
+  --drs-dim:    #66686a;             /* stencilled label */
+  --drs-faint:  #98978f;             /* graduation marks */
+  --drs-flag:   #c2410c;             /* signal orange — the accent */
+  --drs-purple: #6d28d9;             /* fastest-sector purple */
+  --drs-crash:  #b3352b;             /* barrier red */
+
+  /* Telemetry series, as they appear on the pit wall. Validated categorical
+     trio (dataviz six checks) — darker on paper, lifted at night. */
+  --drs-speed:    #c2410c;           /* speed trace — the flag's own hue */
+  --drs-steer:    #5b4fc4;           /* steering trace */
+  --drs-throttle: #1f7a3f;           /* throttle trace */
+
+  /* The circuit. Identical in both modes — the session runs at night. */
+  --drs-night:      #101114;         /* infield */
+  --drs-tarmac:     #1b1d21;         /* racing surface */
+  --drs-tarmac-2:   #212329;         /* surface sheen */
+  --drs-lane:       hsl(220 15% 88% / 0.5);  /* lane paint */
+  --drs-lit-champ:  #ff8a3c;         /* the leader, under floodlight */
+  --drs-lit-field:  #7d90ab;         /* the rest of the field — steel */
+  --drs-lit-dead:   #43464e;         /* crashed husks */
+  --drs-lit-ray:    #ffc46b;         /* sensor rays */
+  --drs-lit-purple: #a78bfa;         /* fastest-yet flash on the tarmac */
+
+  --color-background:           var(--drs-wall);
+  --color-foreground:           var(--drs-ink);
+  --color-card:                 var(--drs-panel);
+  --color-card-foreground:      var(--drs-ink);
+  --color-popover:              var(--drs-panel);
+  --color-popover-foreground:   var(--drs-ink);
+  --color-muted:                var(--drs-raise);
+  --color-muted-foreground:     var(--drs-dim);
+  --color-secondary:            var(--drs-raise);
+  --color-secondary-foreground: var(--drs-ink);
+  --color-border:               var(--drs-line);
+  --color-input:                var(--drs-line);
+  --color-ring:                 var(--drs-flag);
+  --color-primary:              var(--drs-flag);
+  --color-primary-foreground:   #fff6ef;
+  --color-accent:               var(--drs-raise);
+  --color-accent-foreground:    var(--drs-ink);
+  --color-destructive:          var(--drs-crash);
+  --color-chart-1:              var(--drs-speed);
+  --color-chart-2:              var(--drs-steer);
+  --color-chart-3:              var(--drs-throttle);
+
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  color: var(--drs-ink);
+  background-color: var(--drs-wall);
+}
+
+.dark .drs-theme {
+  --drs-wall:   #131417;
+  --drs-panel:  #1a1c20;
+  --drs-raise:  #242731;
+  --drs-line:   hsl(225 8% 24%);
+  --drs-ink:    #e7e8eb;
+  --drs-dim:    #979ba4;
+  --drs-faint:  #5c606a;
+  --drs-flag:   #e8641a;
+  --drs-purple: #a78bfa;
+  --drs-crash:  #e5533f;
+
+  --drs-speed:    #e8641a;
+  --drs-steer:    #7168e0;
+  --drs-throttle: #2f9e5e;
+
+  --color-primary-foreground: #170d06;
+}
+
+/* Timing-tower display face. Michroma is wide — track it tight, use it rarely:
+   the room plate, position numerals, the heat counter. */
+.drs-display {
+  font-family: var(--font-drs-display), var(--font-geist-sans), sans-serif;
+  letter-spacing: 0.04em;
+}
+
+/* Pit hardware is angular — 3px corners, never round. */
+.drs-case {
+  background: var(--drs-panel);
+  border: 1px solid var(--drs-line);
+  border-radius: 3px;
+}
+
+/* Stencilled panel label. */
+.drs-etch {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--drs-dim);
+}
+
+/* Timing numerals. */
+.drs-readout {
+  font-family: var(--font-readout), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The circuit window: a monitor bezel over the night feed. */
+.drs-circuit {
+  position: relative;
+  background: var(--drs-night);
+  border: 1px solid var(--drs-line);
+  border-radius: 3px;
+  box-shadow: 0 8px 24px hsl(225 30% 4% / 0.28);
+}
+
+/* Pushbutton / toggle chip. */
+.drs-chip {
+  border: 1px solid var(--drs-line);
+  background: transparent;
+  color: var(--drs-dim);
+  border-radius: 2px;
+  transition: color 130ms ease, border-color 130ms ease, background-color 130ms ease;
+}
+.drs-chip:hover { color: var(--drs-ink); border-color: var(--drs-faint); background: var(--drs-raise); }
+.drs-chip[data-on='true'] {
+  color: var(--drs-flag);
+  border-color: color-mix(in srgb, var(--drs-flag) 55%, var(--drs-line));
+  background: color-mix(in srgb, var(--drs-flag) 12%, transparent);
+}
+
+/* Set-up sheet dials — hairline track, hex-nut thumb. */
+.drs-dial [data-slot='slider-track'] {
+  height: 3px;
+  background: var(--drs-raise);
+  border: 1px solid color-mix(in srgb, var(--drs-line) 70%, transparent);
+  border-radius: 1px;
+}
+.drs-dial [data-slot='slider-thumb'] {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  background: var(--drs-panel);
+  border: 1.5px solid var(--drs-flag);
+  box-shadow: 0 1px 2px hsl(225 30% 5% / 0.35);
+}
+.drs-dial [data-slot='slider-thumb']:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(--drs-flag) 22%, transparent); }
+
+/* A dial whose change only lands on the next regrid. */
+.drs-staged { color: var(--drs-flag); }
+
+/* Rack drawer chevron. */
+.drs-drawer summary::-webkit-details-marker { display: none; }
+.drs-drawer summary { list-style: none; cursor: pointer; }
+.drs-drawer[open] .drs-caret { transform: rotate(90deg); }
+.drs-caret { transition: transform 160ms ease; }
+
+/* Start/finish checker band — the room's livery mark. Two rows of squares. */
+.drs-checker {
+  height: 6px;
+  background:
+    conic-gradient(var(--drs-ink) 25%, transparent 25% 50%, var(--drs-ink) 50% 75%, transparent 75%)
+    0 0 / 6px 6px repeat-x;
+  opacity: 0.55;
+}
+
+/* The room fits the viewport under the 57px header on desktop. */
+.drs-room { min-height: calc(100vh - 57px); }
+@media (min-width: 1024px) {
+  .drs-room { height: calc(100vh - 57px); }
+}
+
+/* Focus mode floats: pit-wall monitors on the glass. */
+.drs-float {
+  background: color-mix(in srgb, var(--drs-panel) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--drs-faint) 45%, transparent);
+  border-radius: 3px;
+  box-shadow:
+    0 12px 32px hsl(225 40% 2% / 0.55),
+    inset 0 1px 0 hsl(220 25% 85% / 0.09);
+  backdrop-filter: blur(10px);
+}
+
+/* Real fullscreen has no 57px header to sit under. */
+.drs-room:fullscreen { height: 100vh; }

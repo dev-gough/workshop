@@ -264,35 +264,67 @@ export function EcosystemRoom({ className }: { className?: string }) {
 export function NeuroRoom({ className }: { className?: string }) {
   return (
     <Door href="/projects/neuroevolution" number="RM 13" room="Driving School" className={className}>
-      <div className="h-full bg-zinc-950">
+      {/* Miniature of the room: the floodlit night circuit, the orange leader
+          on its rangefinders, kerbs on the corner, a checker band at the line. */}
+      <div className="h-full bg-[#101114]">
         <svg viewBox="0 0 100 100" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-          {/* track edges */}
-          <path d="M -5 78 C 25 78 30 38 55 38 S 80 66 108 60" fill="none" stroke="hsl(240 8% 26%)" strokeWidth="1.6" />
-          <path d="M -5 58 C 22 58 30 20 55 20 S 82 48 108 42" fill="none" stroke="hsl(240 8% 26%)" strokeWidth="1.6" />
-          {/* centerline crawls forward */}
+          {/* tarmac ribbon */}
           <path
             d="M -5 68 C 24 68 30 29 55 29 S 81 57 108 51"
-            fill="none" stroke="hsl(265 85% 68%)" strokeWidth="1"
+            fill="none" stroke="#1b1d21" strokeWidth="21"
+          />
+          {/* track edges */}
+          <path d="M -5 78 C 25 78 30 38 55 38 S 80 66 108 60" fill="none" stroke="hsl(215 14% 42% / 0.7)" strokeWidth="1.3" />
+          <path d="M -5 58 C 22 58 30 20 55 20 S 82 48 108 42" fill="none" stroke="hsl(215 14% 42% / 0.7)" strokeWidth="1.3" />
+          {/* kerb teeth on the corner */}
+          <path
+            d="M 22 56 C 30 44 38 38 48 37"
+            fill="none" stroke="#c2453a" strokeWidth="2.4" strokeDasharray="3 3"
+          />
+          <path
+            d="M 22 56 C 30 44 38 38 48 37"
+            fill="none" stroke="#d8d5cc" strokeWidth="2.4" strokeDasharray="3 3" strokeDashoffset="3"
+          />
+          {/* lane paint crawls forward */}
+          <path
+            d="M -5 68 C 24 68 30 29 55 29 S 81 57 108 51"
+            fill="none" stroke="hsl(220 15% 88% / 0.4)" strokeWidth="0.9"
             strokeDasharray="5 7" style={{ animation: 'hall-dash 1.6s linear infinite' }}
           />
-          {/* the car */}
+          {/* start/finish checker band */}
+          <g transform="translate(84 46) rotate(80)">
+            <rect x="-8" y="-2" width="4" height="4" fill="#e6e4dd" />
+            <rect x="-4" y="-2" width="4" height="4" fill="#17181c" />
+            <rect x="0" y="-2" width="4" height="4" fill="#e6e4dd" />
+            <rect x="4" y="-2" width="4" height="4" fill="#17181c" />
+            <rect x="-8" y="2" width="4" height="4" fill="#17181c" />
+            <rect x="-4" y="2" width="4" height="4" fill="#e6e4dd" />
+            <rect x="0" y="2" width="4" height="4" fill="#17181c" />
+            <rect x="4" y="2" width="4" height="4" fill="#e6e4dd" />
+          </g>
+          {/* the leader, under floodlight */}
           <g transform="translate(42 40) rotate(-18)">
-            <rect x="-4" y="-2.5" width="8" height="5" rx="1.2" fill="hsl(265 85% 68%)" />
-            <line x1="4" y1="0" x2="13" y2="-3" stroke="hsl(184 90% 60% / 0.5)" strokeWidth="0.7" />
-            <line x1="4" y1="0" x2="13" y2="3" stroke="hsl(184 90% 60% / 0.5)" strokeWidth="0.7" />
+            <line x1="3" y1="0" x2="14" y2="-4" stroke="#ffc46b" strokeWidth="0.6" opacity="0.6" />
+            <line x1="3" y1="0" x2="15" y2="0" stroke="#ffc46b" strokeWidth="0.6" opacity="0.6" />
+            <line x1="3" y1="0" x2="14" y2="4" stroke="#ffc46b" strokeWidth="0.6" opacity="0.6" />
+            <path d="M 5 0 L -4 -3.4 L -4 3.4 Z" fill="#ff8a3c" style={{ filter: 'drop-shadow(0 0 4px rgba(255,138,60,0.6))' }} />
           </g>
-          {/* a straggler that hasn't learned yet */}
-          <rect x="12" y="70" width="7" height="4.5" rx="1" fill="hsl(240 8% 34%)" transform="rotate(24 15 72)" />
-          {/* tiny brain, top-right */}
-          <g stroke="hsl(184 90% 60% / 0.4)" strokeWidth="0.6">
-            <line x1="76" y1="12" x2="86" y2="9" /><line x1="76" y1="12" x2="86" y2="17" />
-            <line x1="76" y1="22" x2="86" y2="9" /><line x1="76" y1="22" x2="86" y2="17" />
-            <line x1="86" y1="9" x2="94" y2="13" /><line x1="86" y1="17" x2="94" y2="13" />
+          {/* the field: one runner, one husk */}
+          <path d="M 20 71 L 12 68.5 L 13.5 74.5 Z" fill="#7d90ab" opacity="0.8" />
+          <path d="M 65 24 L 57.5 22.5 L 59 27.5 Z" fill="#43464e" transform="rotate(38 61 25)" />
+          {/* the brain monitor, top-right */}
+          <g strokeWidth="0.6">
+            <line x1="76" y1="12" x2="86" y2="9" stroke="#e8641a" opacity="0.55" />
+            <line x1="76" y1="12" x2="86" y2="17" stroke="#7168e0" opacity="0.5" />
+            <line x1="76" y1="22" x2="86" y2="9" stroke="#7168e0" opacity="0.5" />
+            <line x1="76" y1="22" x2="86" y2="17" stroke="#e8641a" opacity="0.55" />
+            <line x1="86" y1="9" x2="94" y2="13" stroke="#e8641a" opacity="0.55" />
+            <line x1="86" y1="17" x2="94" y2="13" stroke="#7168e0" opacity="0.5" />
           </g>
-          <g fill="hsl(184 90% 60%)">
-            <circle cx="76" cy="12" r="1.7" /><circle cx="76" cy="22" r="1.7" />
-            <circle cx="86" cy="9" r="1.7" /><circle cx="86" cy="17" r="1.7" />
-            <circle cx="94" cy="13" r="1.7" fill="hsl(265 85% 68%)" />
+          <g fill="#8d93a0">
+            <circle cx="76" cy="12" r="1.6" /><circle cx="76" cy="22" r="1.6" />
+            <circle cx="86" cy="9" r="1.6" /><circle cx="86" cy="17" r="1.6" />
+            <circle cx="94" cy="13" r="1.8" fill="#ff8a3c" />
           </g>
         </svg>
       </div>
