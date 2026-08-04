@@ -7,7 +7,7 @@
 // session and calls draw() on this handle, so React never re-renders per frame.
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
-import { CAR_RADIUS, type Car, type Session } from '../_lib/engine';
+import { CAR_RADIUS, type Car, type Point, type Session } from '../_lib/engine';
 import { readPalette, alpha, type DrsPalette } from '../_lib/palette';
 
 export type ColorBy = 'field' | 'progress' | 'speed';
@@ -33,7 +33,14 @@ export const DEFAULT_OVERLAYS: Overlays = {
 
 export interface CircuitHandle {
   draw(): void;
+  /** Throw away the painted draft. */
+  scrapDraft(): void;
+  /** Close the loop from wherever the ribbon ends and submit it. */
+  closeDraft(): void;
 }
+
+/** A drawn loop must cover at least this much ground before it can close. */
+const DRAFT_MIN_LEN = 220;
 
 // Kerbs and the start line are painted objects, not room decor — fixed hues,
 // like the floodlit palette itself.
@@ -41,6 +48,11 @@ const KERB_RED = '#c2453a';
 const KERB_WHITE = '#d8d5cc';
 const CHECKER_A = '#e6e4dd';
 const CHECKER_B = '#17181c';
+
+/** How close the pen must come back to the start line to close the loop. */
+function closeRadius(width: number): number {
+  return Math.max(20, width * 1.4);
+}
 
 function hexLerp(a: string, b: string, t: number): string {
   const pa = [parseInt(a.slice(1, 3), 16), parseInt(a.slice(3, 5), 16), parseInt(a.slice(5, 7), 16)];
@@ -55,10 +67,16 @@ interface Props {
   camMode: CamMode;
   selectedId: number | null;
   onSelect: (id: number | null) => void;
+  /** Drafting a circuit by hand: pointer paints instead of selecting. */
+  drawMode: boolean;
+  /** Track half-width the draft is painted (and will be built) at. */
+  draftWidth: number;
+  /** The loop closed. Return true to accept (clears the draft). */
+  onDraftComplete: (pts: Point[]) => boolean;
 }
 
 const Circuit = forwardRef<CircuitHandle, Props>(function Circuit(
-  { session, overlays, camMode, selectedId, onSelect }, ref,
+  { session, overlays, camMode, selectedId, onSelect, drawMode, draftWidth, onDraftComplete }, ref,
 ) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -66,12 +84,23 @@ const Circuit = forwardRef<CircuitHandle, Props>(function Circuit(
   const overlaysRef = useRef(overlays);
   const camModeRef = useRef(camMode);
   const selectedRef = useRef(selectedId);
+  const drawModeRef = useRef(drawMode);
+  const draftWidthRef = useRef(draftWidth);
+  const onDraftCompleteRef = useRef(onDraftComplete);
   overlaysRef.current = overlays;
   camModeRef.current = camMode;
   selectedRef.current = selectedId;
+  drawModeRef.current = drawMode;
+  draftWidthRef.current = draftWidth;
+  onDraftCompleteRef.current = onDraftComplete;
+
+  // The painted centerline, in world units. Imperative like everything else.
+  const draftRef = useRef<{ pts: Point[]; len: number; active: boolean }>({
+    pts: [], len: 0, active: false,
+  });
 
   // Camera state persists across frames and eases toward its target.
-  const camRef = useRef({ x: 0, y: 0, scale: 1, started: false });
+  const camRef = useRef({ x: 0, y: 0, scale: 1, started: false, drawSnap: false });
   // Kept for click hit-testing.
   const viewRef = useRef({ cx: 0, cy: 0, camX: 0, camY: 0, scale: 1 });
 
@@ -110,7 +139,14 @@ const Circuit = forwardRef<CircuitHandle, Props>(function Circuit(
     const cam = camRef.current;
     if (!cam.started) {
       cam.x = targetX; cam.y = targetY; cam.scale = targetScale; cam.started = true;
+    } else if (drawModeRef.current) {
+      // The drafting table doesn't drift under the pen: snap to the whole
+      // circuit once, then hold still until the pen is put down.
+      if (!cam.drawSnap) {
+        cam.x = midX; cam.y = midY; cam.scale = fitScale; cam.drawSnap = true;
+      }
     } else {
+      cam.drawSnap = false;
       cam.x += (targetX - cam.x) * 0.06;
       cam.y += (targetY - cam.y) * 0.06;
       cam.scale += (targetScale - cam.scale) * 0.06;
@@ -364,9 +400,135 @@ const Circuit = forwardRef<CircuitHandle, Props>(function Circuit(
     vg.addColorStop(1, 'rgba(0,0,0,0.32)');
     ctx.fillStyle = vg;
     ctx.fillRect(0, 0, cw, ch);
+
+    // ── The drafting table ──
+    // The session dims behind glass; the painted ribbon reads at build width.
+    if (drawModeRef.current) {
+      ctx.fillStyle = 'rgba(5,6,8,0.55)';
+      ctx.fillRect(0, 0, cw, ch);
+      const draft = draftRef.current;
+      const dw = draftWidthRef.current;
+      const pts = draft.pts;
+      ctx.save();
+      ctx.translate(cw / 2, ch / 2);
+      ctx.scale(cam.scale, cam.scale);
+      ctx.translate(-cam.x, -cam.y);
+      if (pts.length >= 2) {
+        ctx.strokeStyle = pal.tarmac2;
+        ctx.lineWidth = dw * 2;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        pts.forEach((p2, i) => (i === 0 ? ctx.moveTo(p2.x, p2.y) : ctx.lineTo(p2.x, p2.y)));
+        ctx.stroke();
+        ctx.strokeStyle = alpha(pal.lane, 0.5);
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash([5, 8]);
+        ctx.beginPath();
+        pts.forEach((p2, i) => (i === 0 ? ctx.moveTo(p2.x, p2.y) : ctx.lineTo(p2.x, p2.y)));
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      if (pts.length > 0) {
+        const s0 = pts[0];
+        // The start line hangs on the first stroke's direction.
+        if (pts.length > 1) {
+          const h = Math.atan2(pts[1].y - s0.y, pts[1].x - s0.x) + Math.PI / 2;
+          ctx.strokeStyle = CHECKER_A;
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.moveTo(s0.x + Math.cos(h) * dw, s0.y + Math.sin(h) * dw);
+          ctx.lineTo(s0.x - Math.cos(h) * dw, s0.y - Math.sin(h) * dw);
+          ctx.stroke();
+        }
+        // Come-home ring, lit once the loop is long enough to close.
+        if (draft.len > DRAFT_MIN_LEN) {
+          ctx.strokeStyle = alpha(pal.litRay, 0.8);
+          ctx.lineWidth = 1.4;
+          ctx.setLineDash([4, 4]);
+          ctx.beginPath();
+          ctx.arc(s0.x, s0.y, closeRadius(dw), 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        const tip = pts[pts.length - 1];
+        ctx.fillStyle = pal.litChamp;
+        ctx.beginPath();
+        ctx.arc(tip.x, tip.y, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
   }, [session]);
 
-  useImperativeHandle(ref, () => ({ draw }), [draw]);
+  const finishDraft = useCallback(() => {
+    const draft = draftRef.current;
+    draft.active = false;
+    if (onDraftCompleteRef.current(draft.pts.slice())) {
+      draft.pts = [];
+      draft.len = 0;
+    }
+    draw();
+  }, [draw]);
+
+  useImperativeHandle(ref, () => ({
+    draw,
+    scrapDraft() {
+      draftRef.current = { pts: [], len: 0, active: false };
+      draw();
+    },
+    closeDraft() {
+      if (draftRef.current.pts.length >= 8) finishDraft();
+    },
+  }), [draw, finishDraft]);
+
+  const toWorld = useCallback((e: React.PointerEvent<HTMLCanvasElement>): Point => {
+    const canvas = canvasRef.current!;
+    const rect = canvas.getBoundingClientRect();
+    const { cx, cy, camX, camY, scale } = viewRef.current;
+    return {
+      x: (e.clientX - rect.left - cx) / scale + camX,
+      y: (e.clientY - rect.top - cy) / scale + camY,
+    };
+  }, []);
+
+  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drawModeRef.current) return;
+    e.preventDefault();
+    (e.target as Element).setPointerCapture(e.pointerId);
+    const draft = draftRef.current;
+    draft.active = true;
+    // First press drops the start line; later presses continue the ribbon.
+    if (draft.pts.length === 0) draft.pts.push(toWorld(e));
+    draw();
+  }, [toWorld, draw]);
+
+  const handlePointerMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drawModeRef.current) return;
+    const draft = draftRef.current;
+    if (!draft.active) return;
+    const p = toWorld(e);
+    const last = draft.pts[draft.pts.length - 1];
+    const d = Math.hypot(p.x - last.x, p.y - last.y);
+    if (d < 2.5) return;
+    draft.pts.push(p);
+    draft.len += d;
+    // Crossing back over the start line closes the loop by itself.
+    const s0 = draft.pts[0];
+    if (
+      draft.pts.length > 20 &&
+      draft.len > DRAFT_MIN_LEN &&
+      Math.hypot(p.x - s0.x, p.y - s0.y) < closeRadius(draftWidthRef.current)
+    ) {
+      finishDraft();
+      return;
+    }
+    draw();
+  }, [toWorld, draw, finishDraft]);
+
+  const handlePointerUp = useCallback(() => {
+    draftRef.current.active = false;
+  }, []);
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -397,9 +559,10 @@ const Circuit = forwardRef<CircuitHandle, Props>(function Circuit(
     return () => obs.disconnect();
   }, [draw]);
 
-  useEffect(() => { draw(); }, [overlays, camMode, selectedId, draw]);
+  useEffect(() => { draw(); }, [overlays, camMode, selectedId, drawMode, draw]);
 
   const handleClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (drawModeRef.current) return;
     const s = session.current;
     const canvas = canvasRef.current;
     if (!s || !canvas) return;
@@ -416,7 +579,12 @@ const Circuit = forwardRef<CircuitHandle, Props>(function Circuit(
       <canvas
         ref={canvasRef}
         onClick={handleClick}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
         className="block h-full w-full cursor-crosshair"
+        style={{ touchAction: drawMode ? 'none' : 'auto' }}
       />
     </div>
   );

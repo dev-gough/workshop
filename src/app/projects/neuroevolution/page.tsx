@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  FastForward, Maximize2, Minimize2, Pause, Play, RotateCcw, Route, SkipForward, X,
+  Check, Eraser, FastForward, Maximize2, Minimize2, Pause, PenLine, Play, RotateCcw, Route, SkipForward, X,
 } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import { useHeaderConfig } from '@/components/header-config';
@@ -19,6 +19,7 @@ import {
   defaultParams,
   needsRegrid,
   type DriveParams,
+  type Point,
   type Retirement,
 } from './_lib/engine';
 import Circuit, {
@@ -77,6 +78,7 @@ interface Snap {
   bestEverGen: number;
   recordLive: boolean;
   carried: boolean;
+  custom: boolean;
   rows: TowerRow[];
   selected: SelSnap | null;
 }
@@ -94,6 +96,8 @@ export default function DrivingSchoolPage() {
   const [regridPending, setRegridPending] = useState(false);
   const [setup, setSetup] = useState<string | null>('baseline');
   const [focus, setFocus] = useState(false);
+  const [drawMode, setDrawMode] = useState(false);
+  const [draftMsg, setDraftMsg] = useState<string | null>(null);
 
   const sessionRef = useRef<Session | null>(null);
   if (!sessionRef.current) sessionRef.current = new Session(defaultParams());
@@ -146,12 +150,14 @@ export default function DrivingSchoolPage() {
       bestEverGen: s.bestEverGen,
       recordLive: champ ? s.bestEver > 0 && s.metres(champ.progress) > s.bestEver : false,
       carried: s.carriedGrid,
+      custom: s.customTrack,
       rows,
       selected,
     };
   }, [selectedId]);
 
   const [snap, setSnap] = useState<Snap>(() => makeSnap());
+  const draftWidth = params.circuit.width;
 
   const paint = useCallback(() => {
     circuitRef.current?.draw();
@@ -248,6 +254,38 @@ export default function DrivingSchoolPage() {
     refreshReadouts();
   }, [paint, refreshReadouts]);
 
+  // The drafting table: the session pauses under the glass while you paint.
+  const toggleDraw = useCallback(() => {
+    if (drawMode) {
+      setDrawMode(false);
+      setDraftMsg(null);
+      circuitRef.current?.scrapDraft();
+    } else {
+      setDrawMode(true);
+      setDraftMsg(null);
+      setRunning(false);
+      setSelectedId(null);
+      setCamMode('circuit');
+    }
+  }, [drawMode]);
+
+  const handleDraftComplete = useCallback((pts: Point[]): boolean => {
+    const s = sessionRef.current;
+    if (!s) return false;
+    const err = s.customCircuit(pts, draftWidth);
+    if (err) {
+      setDraftMsg(err);
+      return false;
+    }
+    setDrawMode(false);
+    setDraftMsg(null);
+    setSelectedId(null);
+    setRunning(true);
+    refreshReadouts();
+    paint();
+    return true;
+  }, [draftWidth, refreshReadouts, paint]);
+
   const stepOnce = useCallback(() => {
     sessionRef.current?.step();
     paint();
@@ -327,7 +365,11 @@ export default function DrivingSchoolPage() {
           {String(snap.gen).padStart(3, '0')}
         </p>
         <p className="drs-readout mt-1 truncate text-[8px] text-muted-foreground">
-          {snap.carried ? 'grid carried over' : `tick ${snap.tick.toLocaleString()}`}
+          {snap.carried
+            ? 'grid carried over'
+            : snap.custom
+              ? `hand-drawn · t ${snap.tick.toLocaleString()}`
+              : `tick ${snap.tick.toLocaleString()}`}
         </p>
       </div>
       <div className="drs-case px-2 py-1.5">
@@ -467,6 +509,24 @@ export default function DrivingSchoolPage() {
                 <TooltipTrigger asChild>
                   <button
                     type="button"
+                    onClick={toggleDraw}
+                    data-on={drawMode}
+                    className="drs-chip flex h-7 w-7 items-center justify-center"
+                    aria-label={drawMode ? 'Put the pen down' : 'Draw a circuit by hand'}
+                  >
+                    <PenLine className="h-3 w-3" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-64">
+                  {drawMode
+                    ? 'Put the pen down and go back to racing'
+                    : 'Draw a circuit by hand. Click to drop the start line, drag to paint the ribbon, cross the start again to close the loop — then the current grid races your track.'}
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
                     onClick={toggleFocus}
                     data-on={focus}
                     className="drs-chip ml-auto flex h-7 w-7 items-center justify-center"
@@ -484,6 +544,42 @@ export default function DrivingSchoolPage() {
             </div>
 
             <RateControl rate={rate} onChange={setRate} compact={focus} />
+
+            {/* The drafting table's own controls ride with the pen. */}
+            {drawMode && (
+              <div className={cx('flex w-full flex-wrap items-center gap-x-3 gap-y-1.5', 'flex flex-col items-stretch gap-1.5 border-t border-border pt-1.5')}>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => circuitRef.current?.closeDraft()}
+                    className="drs-chip flex h-6 items-center gap-1 px-2 text-[9px] font-semibold uppercase tracking-[0.14em]"
+                  >
+                    <Check className="h-3 w-3" /> Close loop
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { circuitRef.current?.scrapDraft(); setDraftMsg(null); }}
+                    className="drs-chip flex h-6 items-center gap-1 px-2 text-[9px] font-semibold uppercase tracking-[0.14em]"
+                  >
+                    <Eraser className="h-3 w-3" /> Scrap
+                  </button>
+                  <button
+                    type="button"
+                    onClick={toggleDraw}
+                    className="drs-chip flex h-6 items-center gap-1 px-2 text-[9px] font-semibold uppercase tracking-[0.14em]"
+                  >
+                    <X className="h-3 w-3" /> Cancel
+                  </button>
+                </div>
+                <p
+                  className="max-w-[340px] text-[9px] leading-relaxed"
+                  style={{ color: draftMsg ? 'var(--drs-crash)' : 'var(--drs-dim)' }}
+                >
+                  {draftMsg
+                    ?? 'Click to drop the start line, then drag to paint the ribbon. Cross the start again — or press Close loop — and the grid races your circuit.'}
+                </p>
+              </div>
+            )}
 
             {/* In focus the stat board is gone, so its numbers come along. */}
             {focus && (
@@ -599,6 +695,9 @@ export default function DrivingSchoolPage() {
               camMode={camMode}
               selectedId={selectedId}
               onSelect={setSelectedId}
+              drawMode={drawMode}
+              draftWidth={draftWidth}
+              onDraftComplete={handleDraftComplete}
             />
           </div>
 

@@ -170,6 +170,12 @@ export function generateTrack(c: DriveParams['circuit']): Track {
     }
   }
 
+  return finishTrack(centerline, c.width);
+}
+
+/** Everything downstream of a centerline — walls, kerbs, start line, bounds —
+ *  is the same whether the loop was drawn from a seed or by hand. */
+export function finishTrack(centerline: Point[], width: number): Track {
   const N = centerline.length;
   const innerPts: Point[] = [];
   const outerPts: Point[] = [];
@@ -179,8 +185,8 @@ export function generateTrack(c: DriveParams['circuit']): Track {
     const dy = next.y - centerline[i].y;
     const len = Math.hypot(dx, dy) || 1;
     const nx = -dy / len, ny = dx / len;
-    innerPts.push({ x: centerline[i].x + nx * c.width, y: centerline[i].y + ny * c.width });
-    outerPts.push({ x: centerline[i].x - nx * c.width, y: centerline[i].y - ny * c.width });
+    innerPts.push({ x: centerline[i].x + nx * width, y: centerline[i].y + ny * width });
+    outerPts.push({ x: centerline[i].x - nx * width, y: centerline[i].y - ny * width });
   }
 
   const innerWalls: Segment[] = [];
@@ -226,10 +232,81 @@ export function generateTrack(c: DriveParams['circuit']): Track {
     centerline, innerPts, outerPts, innerWalls, outerWalls, kerb,
     startPos: { ...centerline[0] },
     startHeading: Math.atan2(centerline[1].y - centerline[0].y, centerline[1].x - centerline[0].x),
-    width: c.width,
+    width,
     stepLen: per / N,
     bounds: { minX, minY, maxX, maxY },
   };
+}
+
+// ── Hand-drawn circuits ──────────────────────────────────────────────────
+
+/** Even-spaced resample of a closed polyline, then two light smoothing
+ *  passes — a mouse path arrives jittery and unevenly spaced, and the
+ *  physics deserves the same clean geometry a seeded circuit gets. */
+export function fairLoop(raw: Point[], spacing: number): Point[] {
+  const n = raw.length;
+  if (n < 3) return [];
+  // Cumulative length around the loop, closing segment included.
+  const cum: number[] = [0];
+  let total = 0;
+  for (let i = 0; i < n; i++) {
+    const q = raw[(i + 1) % n];
+    total += Math.hypot(q.x - raw[i].x, q.y - raw[i].y);
+    cum.push(total);
+  }
+  if (total < spacing * 3) return [];
+
+  const count = Math.max(8, Math.round(total / spacing));
+  const pts: Point[] = [];
+  let seg = 0;
+  for (let i = 0; i < count; i++) {
+    const target = (i / count) * total;
+    while (seg < n - 1 && cum[seg + 1] < target) seg++;
+    const a = raw[seg];
+    const b = raw[(seg + 1) % n];
+    const segLen = cum[seg + 1] - cum[seg] || 1;
+    const t = (target - cum[seg]) / segLen;
+    pts.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+  }
+
+  // Closed moving-average, twice — enough to kill hand jitter without
+  // rounding away the corners that were actually meant.
+  for (let pass = 0; pass < 2; pass++) {
+    const prev = pts.map(p => ({ ...p }));
+    const m = pts.length;
+    for (let i = 0; i < m; i++) {
+      const a = prev[(i - 1 + m) % m];
+      const b = prev[i];
+      const c = prev[(i + 1) % m];
+      pts[i] = { x: (a.x + 2 * b.x + c.x) / 4, y: (a.y + 2 * b.y + c.y) / 4 };
+    }
+  }
+  return pts;
+}
+
+function segsCross(
+  ax: number, ay: number, bx: number, by: number,
+  cx: number, cy: number, dx: number, dy: number,
+): boolean {
+  const d1 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+  const d2 = (bx - ax) * (dy - ay) - (by - ay) * (dx - ax);
+  const d3 = (dx - cx) * (ay - cy) - (dy - cy) * (ax - cx);
+  const d4 = (dx - cx) * (by - cy) - (dy - cy) * (bx - cx);
+  return d1 * d2 < 0 && d3 * d4 < 0;
+}
+
+/** Does the closed centerline cross itself? O(n²), run once per drawing. */
+export function loopSelfIntersects(pts: Point[]): boolean {
+  const n = pts.length;
+  for (let i = 0; i < n; i++) {
+    const a = pts[i], b = pts[(i + 1) % n];
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue; // adjacent through the wrap
+      const c = pts[j], d = pts[(j + 1) % n];
+      if (segsCross(a.x, a.y, b.x, b.y, c.x, c.y, d.x, d.y)) return true;
+    }
+  }
+  return false;
 }
 
 // ── Raycasting against a wall grid ───────────────────────────────────────
@@ -512,6 +589,8 @@ export class Session {
   bestEver = 0;
   bestEverGen = 0;
   carriedGrid = false;
+  /** True while the running circuit is one the user painted by hand. */
+  customTrack = false;
 
   history: HeatRecord[] = [];
   telemetry: Telemetry = {
@@ -561,8 +640,25 @@ export class Session {
   newCircuit(seed?: number) {
     const p = this.params;
     p.circuit.seed = seed ?? (Math.floor(this.rng() * 100000) + 1);
-    this.track = generateTrack(p.circuit);
-    this.grid = buildWallGrid([...this.track.innerWalls, ...this.track.outerWalls]);
+    this.installTrack(generateTrack(p.circuit));
+    this.customTrack = false;
+  }
+
+  /** Race the same grid on a hand-painted centerline. Returns a rejection
+   *  reason, or null when the circuit was accepted and installed. */
+  customCircuit(raw: Point[], width: number): string | null {
+    const spacing = 4.5;
+    const centerline = fairLoop(raw, spacing);
+    if (centerline.length < 48) return 'too short — a lap needs room to breathe';
+    if (loopSelfIntersects(centerline)) return 'the ribbon crosses itself — scrap it and try again';
+    this.installTrack(finishTrack(centerline, width));
+    this.customTrack = true;
+    return null;
+  }
+
+  private installTrack(track: Track) {
+    this.track = track;
+    this.grid = buildWallGrid([...track.innerWalls, ...track.outerWalls]);
     const genomes = this.cars
       .slice()
       .sort((a, b) => b.progress - a.progress)
@@ -830,6 +926,7 @@ export class Session {
       this.track = generateTrack(p.circuit);
       this.grid = buildWallGrid([...this.track.innerWalls, ...this.track.outerWalls]);
       this.pendingNewCircuit = true;
+      this.customTrack = false;
     }
 
     this.spawnGrid(genomes);
