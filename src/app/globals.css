@@ -2598,3 +2598,109 @@
 
 /* Real fullscreen has no 57px header to sit under. */
 .drs-room:fullscreen { height: 100vh; }
+
+/* ─── The Outfitter (RM 18, /projects/paddle) — the map table at a canoe
+   outfitter's: a waxed trip map spread on the counter, lakes in ink,
+   portages in canoe-red ribbon. Light mode is the day-lit map counter;
+   dark mode is night navigation under a headlamp. The map canvas itself
+   is painted by MapLibre from _lib/palette.ts — keep the two in step. ─── */
+.pd-theme {
+  --pd-paper:  #f0e9d8;              /* chart paper */
+  --pd-card:   #f7f1e2;              /* counter card stock */
+  --pd-raise:  #e6ddc6;              /* lifted sheet / hover */
+  --pd-line:   #d3c8ac;              /* fold lines, hairlines */
+  --pd-ink:    #26332c;              /* pine ink */
+  --pd-dim:    #71705c;              /* pencil annotation */
+  --pd-red:    #b0402c;              /* canoe red — portages, the room accent */
+  --pd-blue:   #276a8c;              /* open-water blue — paddling */
+
+  --color-background:           var(--pd-paper);
+  --color-foreground:           var(--pd-ink);
+  --color-card:                 var(--pd-card);
+  --color-card-foreground:      var(--pd-ink);
+  --color-popover:              var(--pd-card);
+  --color-popover-foreground:   var(--pd-ink);
+  --color-muted:                var(--pd-raise);
+  --color-muted-foreground:     var(--pd-dim);
+  --color-secondary:            var(--pd-raise);
+  --color-secondary-foreground: var(--pd-ink);
+  --color-border:               var(--pd-line);
+  --color-input:                var(--pd-line);
+  --color-ring:                 var(--pd-red);
+  --color-primary:              var(--pd-red);
+  --color-primary-foreground:   #faf5e8;
+  --color-accent:               var(--pd-raise);
+  --color-accent-foreground:    var(--pd-ink);
+  --color-destructive:          var(--pd-red);
+  --color-chart-1:              var(--pd-blue);
+  --color-chart-2:              var(--pd-red);
+
+  font-family: var(--font-ws-sans), var(--font-geist-sans), system-ui, sans-serif;
+  color: var(--pd-ink);
+  background-color: var(--pd-paper);
+}
+
+.dark .pd-theme {
+  --pd-paper:  #131a17;
+  --pd-card:   #1a221e;
+  --pd-raise:  #232d28;
+  --pd-line:   #313d36;
+  --pd-ink:    #e6dfc9;
+  --pd-dim:    #92967f;
+  --pd-red:    #d4573e;
+  --pd-blue:   #5da0c0;
+
+  --color-primary-foreground:   #17110c;
+}
+
+/* The map fills the room under the header. */
+.pd-room { height: calc(100vh - 57px); }
+
+/* A sheet pinned over the map — panel, legend, readout. */
+.pd-sheet {
+  background: color-mix(in srgb, var(--pd-card) 92%, transparent);
+  border: 1px solid var(--pd-line);
+  border-radius: 4px;
+  box-shadow: 0 10px 28px hsl(150 25% 4% / 0.18);
+  backdrop-filter: blur(8px);
+}
+
+/* Pencilled small-caps annotation. */
+.pd-etch {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--pd-dim);
+}
+
+/* Distances and counts — surveyor's figures. */
+.pd-readout {
+  font-family: var(--font-readout), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Legend swatch: a short length of route ribbon. */
+.pd-ribbon {
+  display: inline-block;
+  width: 22px;
+  height: 0;
+  border-top: 3px solid currentColor;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+
+/* MapLibre chrome, muted to match the sheet. */
+.pd-theme .maplibregl-ctrl-group {
+  background: var(--pd-card);
+  border: 1px solid var(--pd-line);
+  box-shadow: none;
+}
+.pd-theme .maplibregl-ctrl-group button { border-color: var(--pd-line); }
+.pd-theme .maplibregl-ctrl button .maplibregl-ctrl-icon { filter: contrast(0.7) sepia(0.2); }
+.pd-theme .maplibregl-ctrl-attrib {
+  background: color-mix(in srgb, var(--pd-card) 80%, transparent);
+  color: var(--pd-dim);
+  font-size: 10px;
+}
+.pd-theme .maplibregl-ctrl-attrib a { color: var(--pd-dim); }

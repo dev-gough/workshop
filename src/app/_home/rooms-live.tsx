@@ -8,6 +8,7 @@ import {
   type ServerStats, type ServiceInfo, type MusicStats, type AlbumRow,
   type ChallengeData, type GameData, type PtAccount, type FetchRow,
   type SwActivity, type BfRun, type SlskStats, type SpaceflightStats,
+  type PaddlePark,
 } from './use-home-data';
 
 // ── 01 · Control Center — a window into the phosphor instrument wall ──
@@ -566,6 +567,51 @@ export function SpaceflightRoom({ spaceflight, className }: {
         ) : (
           <p className="text-xs text-zinc-600">Telemetry dark…</p>
         )}
+      </div>
+    </Door>
+  );
+}
+
+// ── 18 · The Outfitter — a corner of the trip chart, pinned to the door ──
+// Tile carries hex copies of the room's day palette (.pd-theme): chart
+// paper, ink lakes, canoe-red portages.
+
+export function PaddleRoom({ parks, className }: { parks: PaddlePark[]; className?: string }) {
+  const park = parks.find(p => p.slug === 'temagami') ?? parks[0] ?? null;
+  const stats = park?.stats ?? null;
+
+  return (
+    <Door href="/projects/paddle" number="RM 18" room="The Outfitter" className={className}>
+      <div className="relative flex h-full flex-col justify-between overflow-hidden bg-[#f0e9d8] p-4 pb-9">
+        {/* the chart: seeded lake blobs, one blue route, red carries between */}
+        <svg viewBox="0 0 200 90" className="absolute inset-0 h-full w-full" preserveAspectRatio="xMidYMid slice" aria-hidden>
+          <g fill="#a9c9d4">
+            <path d="M8 28c10-9 30-12 38-4s2 22-8 26S6 46 4 40s0-8 4-12z" />
+            <path d="M70 52c6-12 24-16 34-9s10 20 0 27-26 5-32-3-4-9-2-15z" />
+            <path d="M136 18c8-7 24-8 31-1s6 17-1 23-21 7-28 0-6-16-2-22z" />
+            <path d="M158 62c5-5 16-6 21 0s3 13-3 17-15 3-19-3-2-10 1-14z" />
+          </g>
+          <path d="M22 38 C 40 44, 60 52, 84 60" fill="none" stroke="#276a8c" strokeWidth="2" strokeLinecap="round" />
+          <path d="M104 62 C 120 56, 128 40, 148 30" fill="none" stroke="#276a8c" strokeWidth="2" strokeLinecap="round" />
+          <path d="M84 60 L 104 62" fill="none" stroke="#b0402c" strokeWidth="2.4" strokeLinecap="round" />
+          <path d="M148 30 L 160 46" fill="none" stroke="#b0402c" strokeWidth="2.4" strokeLinecap="round" />
+        </svg>
+        <p className="relative text-[10px] font-semibold uppercase tracking-[0.2em] text-[#b0402c]">The map table</p>
+        <div className="relative">
+          {stats ? (
+            <>
+              <p className="font-mono text-lg font-semibold tabular-nums text-[#26332c]">
+                {Math.round(stats.paddleKm).toLocaleString()} km
+                <span className="text-xs font-normal text-[#71705c]"> of open water</span>
+              </p>
+              <p className="truncate text-[11px] text-[#71705c]">
+                {park!.name} · {stats.portages.toLocaleString()} portages · {Math.round(stats.portageKm)} km carried
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-[#71705c]">The chart is still rolled up…</p>
+          )}
+        </div>
       </div>
     </Door>
   );

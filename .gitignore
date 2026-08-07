@@ -47,3 +47,7 @@ config.json
 # `npm run mirror-challenge-icons`; regenerable, never committed).
 /public/lol/challenge-tokens/
 /public/lol/challenge-shared/
+
+# Paddle Planner raw Ontario open-data pulls (regenerable via
+# `npm run sync-paddle -- --refetch`; ~50MB per park).
+/.cache/

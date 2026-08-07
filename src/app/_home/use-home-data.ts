@@ -113,6 +113,18 @@ export interface SpaceflightStats {
   nextLaunch: { name: string; net: string; status: string } | null;
 }
 
+export interface PaddlePark {
+  slug: string;
+  name: string;
+  stats: {
+    paddleKm: number;
+    portageKm: number;
+    portages: number;
+    lakes: number;
+  } | null;
+  campsites: number;
+}
+
 export interface HomeData {
   server: ServerStats | null;
   services: ServiceInfo[];
@@ -126,6 +138,7 @@ export interface HomeData {
   brainfuck: BfRun[];
   soulseek: SlskStats | null;
   spaceflight: SpaceflightStats | null;
+  paddleParks: PaddlePark[];
 }
 
 // ── Small shared helpers ──
@@ -179,6 +192,7 @@ export function useHomeData(): HomeData {
   const [brainfuck, setBrainfuck] = useState<BfRun[]>([]);
   const [soulseek, setSoulseek] = useState<SlskStats | null>(null);
   const [spaceflight, setSpaceflight] = useState<SpaceflightStats | null>(null);
+  const [paddleParks, setPaddleParks] = useState<PaddlePark[]>([]);
 
   const fetchServer = useCallback(async () => {
     const [stats, svcs] = await Promise.all([
@@ -198,7 +212,7 @@ export function useHomeData(): HomeData {
 
   useEffect(() => {
     (async () => {
-      const [m, a, c, g, acct, jf, sw, bf, slsk, sf] = await Promise.all([
+      const [m, a, c, g, acct, jf, sw, bf, slsk, sf, pp] = await Promise.all([
         getJson<MusicStats>('/api/music/stats'),
         getJson<AlbumRow[]>('/api/music'),
         getJson<ChallengeData>('/api/challenges'),
@@ -209,6 +223,7 @@ export function useHomeData(): HomeData {
         getJson<{ activity: BfRun[] }>('/api/brainfuck/activity?limit=5'),
         getJson<SlskStats>('/api/soulseek/stats'),
         getJson<SpaceflightStats>('/api/spaceflight/stats'),
+        getJson<{ parks: PaddlePark[] }>('/api/paddle/parks'),
       ]);
       if (m?.summary) setMusic(m);
       if (Array.isArray(a)) setAlbums(a);
@@ -220,8 +235,9 @@ export function useHomeData(): HomeData {
       if (bf?.activity) setBrainfuck(bf.activity);
       if (slsk?.downloads) setSoulseek(slsk);
       if (sf?.vehicles?.length) setSpaceflight(sf);
+      if (pp?.parks) setPaddleParks(pp.parks);
     })();
   }, []);
 
-  return { server, services, music, albums, challenges, games, accounts, fetches, splitwiser, brainfuck, soulseek, spaceflight };
+  return { server, services, music, albums, challenges, games, accounts, fetches, splitwiser, brainfuck, soulseek, spaceflight, paddleParks };
 }
