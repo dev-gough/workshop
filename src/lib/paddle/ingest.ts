@@ -142,10 +142,11 @@ export async function ingestPark(
 
   // With a purchased chart on disk, its GPS-derived portage lines replace
   // OTN's frequently schematic ones (and correct the lengths with them).
-  const align = await alignPortagesToChart(graph.segments, slug, log);
+  const align = await alignPortagesToChart(graph, slug, log);
   if (align) {
     log(
       `chart alignment: ${align.reclassified} paddle stretches overruled to portage, ` +
+        `${align.splits} mixed segments split, ` +
         `${align.toPaddle} portages overruled to paddle, ${align.tracks} demoted to track; ` +
         `${align.aligned} portages traced from the chart — ` +
         `${align.noSnap} no-snap, ${align.noPath} no-path, ` +

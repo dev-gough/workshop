@@ -13,7 +13,7 @@
  * spliced between them.
  */
 import { haversineM } from './classify';
-import type { GraphSegment } from './graph';
+import type { BuiltGraph, GraphSegment } from './graph';
 import { chartOnDisk } from './jefftiles';
 import {
   chartWaterFraction,
@@ -49,6 +49,7 @@ export interface AlignStats {
   reclassified: number; // paddle stretches the chart's dot chain overruled
   toPaddle: number;     // "portages" the chart shows as open water
   tracks: number;       // "portages" the chart shows as dry land with no carry
+  splits: number;       // mixed segments cut at dot-coverage boundaries
 }
 
 function nearestSkelPx(
@@ -308,6 +309,60 @@ const DISOWN_COVERAGE = 0.15;
 const DISOWN_MIN_M = 400;      // leave short unaligned stubs alone
 const WATER_FRAC_PADDLE = 0.6;
 
+// Mixed-segment splitting: one OTN segment can blend a real carry with a
+// phantom stretch the chart disowns (the Bonnechere hydro corridor: real
+// dashes at both ends, 3 km of bare paper between — 0.68 whole-segment
+// coverage, unarbitratable). Split at the dot-coverage boundaries and let
+// each piece be what the chart says it is.
+const SPLIT_MIN_SEG_M = 1000;  // only long portages can hide a phantom stretch
+const SPLIT_MIN_RUN_M = 400;   // an uncovered piece must be this long to stand
+const SPLIT_GAP_FILL_M = 350;  // shorter uncovered gaps are label occlusion
+const SPLIT_BLIP_FILL_M = 150; // shorter covered blips are chance crossings
+const SPLIT_EDGE_COV_M = 250;  // covered edge runs shorter than this are noise
+
+/** Flip runs of `value` no longer than maxLen that sit between opposite runs. */
+function fillRuns(flags: boolean[], value: boolean, maxLen: number): void {
+  let i = 0;
+  while (i < flags.length) {
+    if (flags[i] !== value) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < flags.length && flags[j] === value) j++;
+    if (i > 0 && j < flags.length && j - i <= maxLen) {
+      for (let k = i; k < j; k++) flags[k] = !value;
+    }
+    i = j;
+  }
+}
+
+/** Cut a polyline at pixel-arc positions (global z15 px space). */
+function cutAtPxArcs(coords: [number, number][], arcs: number[]): [number, number][][] {
+  const pts = coords.map((c) => [mercPxX(c[0]), mercPxY(c[1])] as [number, number]);
+  const pieces: [number, number][][] = [];
+  let piece: [number, number][] = [coords[0]];
+  let walked = 0;
+  let cut = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const len = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    while (cut < arcs.length && arcs[cut] <= walked + len) {
+      const t = len ? (arcs[cut] - walked) / len : 0;
+      const gx = pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * t;
+      const gy = pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * t;
+      const v: [number, number] = [mercLon(gx), mercLat(gy)];
+      piece.push(v);
+      pieces.push(piece);
+      piece = [v];
+      cut++;
+    }
+    piece.push(coords[i]);
+    walked += len;
+  }
+  pieces.push(piece);
+  return pieces;
+}
+
 function segBBox(seg: GraphSegment, marginM: number): [number, number, number, number] {
   const lons = seg.coords.map((c) => c[0]);
   const lats = seg.coords.map((c) => c[1]);
@@ -337,16 +392,18 @@ function samplePx(coords: [number, number][], stepPx: number): [number, number][
 }
 
 /**
- * Mutates portage segments in `segments` toward chart geometry.
- * Returns null (untouched) when the park has no chart on disk.
+ * Mutates the graph's portage segments toward chart geometry (splitting can
+ * add nodes and segments). Returns null (untouched) when the park has no
+ * chart on disk.
  */
 export async function alignPortagesToChart(
-  segments: GraphSegment[],
+  graph: BuiltGraph,
   slug: string,
   log: (msg: string) => void = () => {},
 ): Promise<AlignStats | null> {
   if (!chartOnDisk(slug)) return null;
 
+  const segments = graph.segments;
   const cache: TileCache = new Map();
 
   const dotCoverage = (skel: ChartSkeleton, samples: [number, number][]): number => {
@@ -377,13 +434,113 @@ export async function alignPortagesToChart(
     }
   }
 
-  // ---- pass 2: trace every portage (including the flips) off the chart ----
+  const stats: AlignStats = {
+    aligned: 0, noSnap: 0, noPath: 0, rejected: 0, offChart: 0,
+    reclassified, toPaddle: 0, tracks: 0, splits: 0,
+  };
+
+  // ---- pass 1.5: split mixed segments where chart support ends ----
+  let nextSegId = segments.reduce((m, s) => Math.max(m, s.id), 0) + 1;
+  const longPortages = segments
+    .filter((s) => s.kind === 'portage' && s.lengthM >= SPLIT_MIN_SEG_M)
+    .sort((p, q) => mercPxX(p.coords[0][0]) - mercPxX(q.coords[0][0]));
+  for (const seg of longPortages) {
+    const skel = await extractPortageSkeleton(slug, segBBox(seg, 200), cache);
+    if (!skel) continue;
+    const samples = samplePx(seg.coords, RECLASS_STEP_PX);
+    if (samples.length < 8) continue;
+    const mPer = seg.lengthM / (samples.length - 1);
+    const flags = samples.map(
+      ([gx, gy]) => nearestSkelPx(skel, gx, gy, RECLASS_NEAR_PX) !== null,
+    );
+    // Iterate the smoothing to a fixpoint: interior gaps/blips flip to their
+    // surroundings, and short edge runs get absorbed into their neighbor.
+    // What survives is a stable alternation of substantial runs.
+    const gapFill = Math.max(1, Math.round(SPLIT_GAP_FILL_M / mPer));
+    const blipFill = Math.max(1, Math.round(SPLIT_BLIP_FILL_M / mPer));
+    const edgeCov = Math.max(1, Math.round(SPLIT_EDGE_COV_M / mPer));
+    const edgeUnc = Math.max(1, Math.round(SPLIT_MIN_RUN_M / mPer));
+    const flipEdge = (fromStart: boolean) => {
+      const n = flags.length;
+      let len = 0;
+      const v = flags[fromStart ? 0 : n - 1];
+      for (let i = fromStart ? 0 : n - 1; i >= 0 && i < n && flags[i] === v; i += fromStart ? 1 : -1) len++;
+      if (len < n && len <= (v ? edgeCov : edgeUnc)) {
+        for (let k = 0; k < len; k++) flags[fromStart ? k : n - 1 - k] = !v;
+      }
+    };
+    for (let iter = 0; iter < 6; iter++) {
+      const before = flags.join('');
+      fillRuns(flags, false, gapFill);
+      fillRuns(flags, true, blipFill);
+      flipEdge(true);
+      flipEdge(false);
+      if (flags.join('') === before) break;
+    }
+
+    const runs: { covered: boolean; start: number; end: number }[] = [];
+    for (let i = 0; i < flags.length; i++) {
+      const last = runs[runs.length - 1];
+      if (last && last.covered === flags[i]) last.end = i;
+      else runs.push({ covered: flags[i], start: i, end: i });
+    }
+    if (runs.length < 2) continue;
+
+    // what each uncovered piece really is, per the chart's paint
+    const kinds: ('paddle' | 'portage' | 'track')[] = [];
+    for (const run of runs) {
+      if (run.covered) {
+        kinds.push('portage');
+      } else {
+        const waterFrac = await chartWaterFraction(slug, samples.slice(run.start, run.end + 1), cache);
+        kinds.push(waterFrac !== null && waterFrac >= WATER_FRAC_PADDLE ? 'paddle' : 'track');
+      }
+    }
+
+    const pieces = cutAtPxArcs(seg.coords, runs.slice(0, -1).map((r) => (r.end + 1) * RECLASS_STEP_PX));
+    if (pieces.length !== runs.length) continue; // arc landed off the end — leave it be
+
+    const pieceLen = (coords: [number, number][]) => {
+      let len = 0;
+      for (let i = 1; i < coords.length; i++) len += haversineM(coords[i - 1], coords[i]);
+      return len;
+    };
+    let fromNode = seg.a;
+    for (let i = 0; i < pieces.length; i++) {
+      const isLast = i === pieces.length - 1;
+      let toNode = seg.b;
+      if (!isLast) {
+        const v = pieces[i][pieces[i].length - 1];
+        toNode = graph.nodes.length;
+        graph.nodes.push({ id: toNode, lon: v[0], lat: v[1] });
+      }
+      if (i === 0) {
+        seg.kind = kinds[0];
+        seg.b = toNode;
+        seg.coords = pieces[0];
+        seg.lengthM = pieceLen(pieces[0]);
+      } else {
+        segments.push({
+          id: nextSegId++, kind: kinds[i], a: fromNode, b: toNode,
+          lengthM: pieceLen(pieces[i]), coords: pieces[i],
+        });
+      }
+      if (kinds[i] === 'track') stats.tracks++;
+      else if (kinds[i] === 'paddle') stats.toPaddle++;
+      fromNode = toNode;
+    }
+    stats.splits++;
+    if (process.env.CHART_DEBUG) {
+      console.error(`[align] seg ${seg.id} (${Math.round(seg.lengthM)}m orig): split into ${kinds.join('/')}`);
+    }
+  }
+
+  // ---- pass 2: trace every portage (flips and split pieces included) ----
   const portages = segments
     .filter((s) => s.kind === 'portage')
     // tile-order sweep keeps the decoded-tile cache hot
     .sort((p, q) => mercPxX(p.coords[0][0]) - mercPxX(q.coords[0][0]));
 
-  const stats: AlignStats = { aligned: 0, noSnap: 0, noPath: 0, rejected: 0, offChart: 0, reclassified, toPaddle: 0, tracks: 0 };
   let done = 0;
 
   // A failed portage the dot chain disowns gets arbitrated by what the chart
