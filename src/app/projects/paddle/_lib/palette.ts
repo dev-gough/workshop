@@ -20,6 +20,9 @@ export interface MapPalette {
   /** Raster paint for the purchased paper chart — dimmed under lamplight in dark mode. */
   chartBrightnessMax: number;
   chartSaturation: number;
+  /** Raster paint for the aerial imagery — same lamplight treatment. */
+  imageryBrightnessMax: number;
+  imagerySaturation: number;
   /** Hillshade paint — the relief pressed into the paper when terrain is on. */
   hillshadeShadow: string;
   hillshadeHighlight: string;
@@ -41,6 +44,8 @@ export const MAP_PALETTES: Record<'light' | 'dark', MapPalette> = {
     waypointStroke: '#fffdf2',
     chartBrightnessMax: 1,
     chartSaturation: 0,
+    imageryBrightnessMax: 1,
+    imagerySaturation: 0,
     hillshadeShadow: '#8a7a5c',
     hillshadeHighlight: '#fffdf0',
     hillshadeExaggeration: 0.35,
@@ -59,6 +64,9 @@ export const MAP_PALETTES: Record<'light' | 'dark', MapPalette> = {
     waypointStroke: '#0c1210',
     chartBrightnessMax: 0.72,
     chartSaturation: -0.2,
+    // The boreal mosaic is dark already — dim less than the paper chart.
+    imageryBrightnessMax: 0.85,
+    imagerySaturation: -0.15,
     hillshadeShadow: '#060a08',
     hillshadeHighlight: '#3e5348',
     hillshadeExaggeration: 0.5,

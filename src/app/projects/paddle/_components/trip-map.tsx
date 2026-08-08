@@ -22,6 +22,7 @@ interface TripMapProps {
   lakes: GeoJSON.FeatureCollection;
   network: Network;
   showChart: boolean;
+  showImagery: boolean;
   showRelief: boolean;
   /** Vertical exaggeration of the terrain mesh — ×1 is true scale. */
   reliefScale: number;
@@ -59,7 +60,7 @@ function networkToGeoJSON(network: Network): GeoJSON.FeatureCollection {
   };
 }
 
-export default function TripMap({ park, lakes, network, showChart, showRelief, reliefScale, route, waypoints, focus, onHover, onMapClick }: TripMapProps) {
+export default function TripMap({ park, lakes, network, showChart, showImagery, showRelief, reliefScale, route, waypoints, focus, onHover, onMapClick }: TripMapProps) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const { theme } = useTheme();
@@ -69,6 +70,8 @@ export default function TripMap({ park, lakes, network, showChart, showRelief, r
   onMapClickRef.current = onMapClick;
   const showChartRef = useRef(showChart);
   showChartRef.current = showChart;
+  const showImageryRef = useRef(showImagery);
+  showImageryRef.current = showImagery;
   const showReliefRef = useRef(showRelief);
   showReliefRef.current = showRelief;
   const reliefScaleRef = useRef(reliefScale);
@@ -105,6 +108,15 @@ export default function TripMap({ park, lakes, network, showChart, showRelief, r
         tiles: [`/api/paddle/tiles/${park.slug}/{z}/{x}/{y}`],
         tileSize: 256,
         maxzoom: park.chart.maxZoom, // MapLibre overzooms past the package's top level
+        bounds: bbox,
+      };
+    }
+    if (park.imagery) {
+      sources.imagery = {
+        type: 'raster',
+        tiles: [`/api/paddle/imagery/${park.slug}/{z}/{x}/{y}`],
+        tileSize: 256,
+        maxzoom: park.imagery.maxZoom, // overzooms fine — source orthos are 20–40 cm
         bounds: bbox,
       };
     }
@@ -163,6 +175,21 @@ export default function TripMap({ park, lakes, network, showChart, showRelief, r
         paint: { 'line-color': pal.shore, 'line-width': 0.7, 'line-opacity': 0.8 },
       },
     );
+    if (park.imagery) {
+      // Above the water fills like the chart (real water replaces the ink),
+      // but below the chart so paper wins when both are on the table.
+      layers.push({
+        id: 'imagery',
+        type: 'raster',
+        source: 'imagery',
+        layout: { visibility: showImageryRef.current ? 'visible' : 'none' },
+        paint: {
+          'raster-brightness-max': pal.imageryBrightnessMax,
+          'raster-saturation': pal.imagerySaturation,
+          'raster-fade-duration': 150,
+        },
+      });
+    }
     if (park.chart) {
       layers.push({
         id: 'jeff-chart',
@@ -276,6 +303,7 @@ export default function TripMap({ park, lakes, network, showChart, showRelief, r
         compact: true,
         customAttribution: [
           'Water & routes: Ontario GeoHub (OHN/OTN), OGL–Ontario',
+          ...(park.imagery ? [park.imagery.attribution] : []),
           ...(park.chart ? [park.chart.attribution] : []),
           ...(park.dem ? ['Terrain: Mapzen terrarium via AWS Open Data (NRCan CDEM)'] : []),
         ].join(' · '),
@@ -364,6 +392,19 @@ export default function TripMap({ park, lakes, network, showChart, showRelief, r
     else map.once('load', apply);
   }, [showChart]);
 
+  // pin the aerials up or file them away
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const apply = () => {
+      if (map.getLayer('imagery')) {
+        map.setLayoutProperty('imagery', 'visibility', showImagery ? 'visible' : 'none');
+      }
+    };
+    if (map.isStyleLoaded()) apply();
+    else map.once('load', apply);
+  }, [showImagery]);
+
   // fly to a loaded trip — panel-aware padding per form factor
   useEffect(() => {
     const map = mapRef.current;
@@ -430,6 +471,10 @@ export default function TripMap({ park, lakes, network, showChart, showRelief, r
       if (map.getLayer('jeff-chart')) {
         map.setPaintProperty('jeff-chart', 'raster-brightness-max', pal.chartBrightnessMax);
         map.setPaintProperty('jeff-chart', 'raster-saturation', pal.chartSaturation);
+      }
+      if (map.getLayer('imagery')) {
+        map.setPaintProperty('imagery', 'raster-brightness-max', pal.imageryBrightnessMax);
+        map.setPaintProperty('imagery', 'raster-saturation', pal.imagerySaturation);
       }
       if (map.getLayer('relief-shade')) {
         map.setPaintProperty('relief-shade', 'hillshade-shadow-color', pal.hillshadeShadow);

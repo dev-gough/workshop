@@ -19,6 +19,8 @@ export interface ParkInfo {
   campsites: number;
   /** Purchased paper chart (Maps by Jeff), present when its tiles are on disk. */
   chart: { attribution: string; maxZoom: number } | null;
+  /** OIWMS aerial orthophoto pyramid, present when imported to disk. */
+  imagery: { maxZoom: number; attribution: string } | null;
   /** Cached elevation tiles (terrarium DEM), present when imported to disk.
    *  `bounds` is the padded import window (wider than the park bbox). */
   dem: { maxZoom: number; bounds: [number, number, number, number] } | null;

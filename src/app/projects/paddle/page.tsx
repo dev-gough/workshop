@@ -85,6 +85,7 @@ export default function PaddlePage() {
   // ── map display ──
   const [hover, setHover] = useState<HoverInfo | null>(null);
   const [showChart, setShowChart] = useState(true);
+  const [showImagery, setShowImagery] = useState(false);
   const [showRelief, setShowRelief] = useState(true);
   const [reliefScale, setReliefScale] = useState(1.5);
   const onHover = useCallback((info: HoverInfo | null) => setHover(info), []);
@@ -152,6 +153,7 @@ export default function PaddlePage() {
             lakes={lakes}
             network={network}
             showChart={showChart}
+            showImagery={showImagery}
             showRelief={showRelief}
             reliefScale={reliefScale}
             route={plan.routeFC}
@@ -186,6 +188,8 @@ export default function PaddlePage() {
               current={current}
               showChart={showChart}
               setShowChart={setShowChart}
+              showImagery={showImagery}
+              setShowImagery={setShowImagery}
               showRelief={showRelief}
               setShowRelief={setShowRelief}
               reliefScale={reliefScale}

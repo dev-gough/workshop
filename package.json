@@ -12,6 +12,7 @@
     "sync-paddle": "npx tsx scripts/sync-paddle.ts",
     "import-jeff-tiles": "npx tsx scripts/import-jeff-tiles.ts",
     "import-dem-tiles": "npx tsx scripts/import-dem-tiles.ts",
+    "import-imagery-tiles": "npx tsx scripts/import-imagery-tiles.ts",
     "paddle-verify": "npx tsx scripts/paddle-verify.ts",
     "poll-challenges": "npx tsx scripts/poll-challenges.ts",
     "mirror-challenge-icons": "npx tsx scripts/mirror-challenge-icons.ts",

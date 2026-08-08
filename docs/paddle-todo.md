@@ -25,7 +25,7 @@ GPS-aware, fully offline in-park.
   "distance to next carry / campsite" glance line in the readout; off-route
   nudge when >200 m from the active trip line.
 - **Offline**: service worker + "take this trip offline" button — pre-cache
-  chart/DEM tiles along the route buffer (size the download, show progress),
+  chart/imagery/DEM tiles along the route buffer (size the download, show progress),
   network JSON, trip data. Cache versioning keyed on park built_at.
 - **Timing**: one-tap leg log ("underway"/"landed") stamps actual times per
   leg onto the trip → actual-vs-estimate view; feeds the same calibration as
@@ -38,13 +38,18 @@ GPS-aware, fully offline in-park.
 ## The app (Temagami crew)
 
 - **PWA**: manifest + service worker; installable from the site. Pre-cache a
-  trip's corridor for offline: chart + DEM tiles along the route buffer,
+  trip's corridor for offline: chart + imagery + DEM tiles along the route buffer,
   network JSON, the trip itself. Everything is already self-hosted, so
   offline is a caching problem, not an architecture problem.
 - **GPS**: browser geolocation → position puck on the chart, "distance to
   next carry" glance, off-route nudge. inReach breadcrumbs for the crew who
   have one.
 - Trip share links (`/projects/paddle?trip=<slug>`) — shipped 2026-08-08.
+- Aerial imagery layer — shipped 2026-08-08. Ontario's OIWMS orthos (20–40 cm
+  acquisitions, OGL–Ontario so self-hosting/offline bundling is legal) as a
+  self-hosted XYZ pyramid, z4–15 over the park bbox:
+  `npm run import-imagery-tiles -- --park <slug>` → "Aerials" toggle. Drapes
+  over the terrain mesh; gives chart-less Temagami a photographic base.
 - Chart licensing: Jeff's tiles are a personal-use purchase. Decide how the
   crew handles copies before sharing installs (per-person purchase is the
   clean answer; the tool must also work chart-less on the vector base).

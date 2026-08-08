@@ -12,6 +12,8 @@ interface MapPanelProps {
   current: ParkInfo | null;
   showChart: boolean;
   setShowChart: (fn: (v: boolean) => boolean) => void;
+  showImagery: boolean;
+  setShowImagery: (fn: (v: boolean) => boolean) => void;
   showRelief: boolean;
   setShowRelief: (fn: (v: boolean) => boolean) => void;
   reliefScale: number;
@@ -25,6 +27,8 @@ export default function MapPanel({
   current,
   showChart,
   setShowChart,
+  showImagery,
+  setShowImagery,
   showRelief,
   setShowRelief,
   reliefScale,
@@ -101,6 +105,25 @@ export default function MapPanel({
             }`}
           >
             {showChart ? 'unrolled' : 'rolled up'}
+          </span>
+        </button>
+      )}
+
+      {current?.imagery && (
+        <button
+          onClick={() => setShowImagery((v) => !v)}
+          className={`flex w-full items-center justify-between text-left ${
+            current?.chart ? 'mt-2.5' : 'mt-3 border-t border-border pt-2.5'
+          }`}
+          title={current.imagery.attribution}
+        >
+          <span className="pd-etch">Aerials</span>
+          <span
+            className={`rounded-sm border px-2.5 py-1 text-xs transition-colors ${
+              showImagery ? 'border-primary text-primary' : 'border-border text-muted-foreground'
+            }`}
+          >
+            {showImagery ? 'pinned up' : 'filed away'}
           </span>
         </button>
       )}
