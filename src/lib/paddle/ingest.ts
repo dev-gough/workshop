@@ -145,7 +145,8 @@ export async function ingestPark(
   const align = await alignPortagesToChart(graph.segments, slug, log);
   if (align) {
     log(
-      `chart alignment: ${align.aligned} portages traced from the chart — ` +
+      `chart alignment: ${align.reclassified} paddle slivers overruled to portage; ` +
+        `${align.aligned} portages traced from the chart — ` +
         `${align.noSnap} no-snap, ${align.noPath} no-path, ` +
         `${align.rejected} failed sanity, ${align.offChart} off-chart`,
     );

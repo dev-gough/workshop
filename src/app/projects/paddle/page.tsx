@@ -69,13 +69,15 @@ export default function PaddlePage() {
 
   const onHover = useCallback((info: HoverInfo | null) => setHover(info), []);
 
-  // Click-to-copy flash: the readout confirms which spot just hit the clipboard.
-  const [copied, setCopied] = useState<string | null>(null);
+  // Click-to-copy flash: the readout confirms which spot just hit the
+  // clipboard — or admits the clipboard refused, leaving the coords up
+  // long enough to transcribe.
+  const [copied, setCopied] = useState<{ coords: string; ok: boolean } | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const onCopyCoords = useCallback((coords: string) => {
-    setCopied(coords);
+  const onCopyCoords = useCallback((coords: string, ok: boolean) => {
+    setCopied({ coords, ok });
     if (copyTimer.current) clearTimeout(copyTimer.current);
-    copyTimer.current = setTimeout(() => setCopied(null), 1800);
+    copyTimer.current = setTimeout(() => setCopied(null), ok ? 1800 : 6000);
   }, []);
 
   const current = parks?.find((p) => p.slug === park) ?? null;
@@ -275,8 +277,11 @@ export default function PaddlePage() {
           )}
           {copied ? (
             <p className="mt-0.5 text-[10px]">
-              <span className="pd-etch" style={{ color: 'var(--color-primary)' }}>
-                copied · {copied}
+              <span
+                className="pd-etch"
+                style={{ color: copied.ok ? 'var(--color-primary)' : 'var(--color-destructive, #b0402c)' }}
+              >
+                {copied.ok ? 'copied' : 'clipboard blocked'} · {copied.coords}
               </span>
             </p>
           ) : hover ? (

@@ -26,8 +26,40 @@ interface TripMapProps {
   /** Vertical exaggeration of the terrain mesh — ×1 is true scale. */
   reliefScale: number;
   onHover: (info: HoverInfo | null) => void;
-  /** Fired after a click copies the cursor coordinates to the clipboard. */
-  onCopyCoords: (coords: string) => void;
+  /** Fired after a click tries to copy the cursor coordinates; `ok` reports
+   *  whether the clipboard actually took them. */
+  onCopyCoords: (coords: string, ok: boolean) => void;
+}
+
+/**
+ * navigator.clipboard only exists in secure contexts — over plain LAN HTTP
+ * (or with a browser shield blocking it) it is undefined and the write
+ * silently never happens. Fall back to the deprecated-but-working
+ * execCommand path, and report honestly whether either took.
+ */
+async function copyText(text: string): Promise<boolean> {
+  if (window.isSecureContext && navigator.clipboard) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      /* blocked — try the legacy path */
+    }
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch {
+    return false;
+  }
 }
 
 function networkToGeoJSON(network: Network): GeoJSON.FeatureCollection {
@@ -233,8 +265,7 @@ export default function TripMap({ park, lakes, network, showChart, showRelief, r
     // Click = copy the spot for reporting chart/route mismatches.
     map.on('click', (e: maplibregl.MapMouseEvent) => {
       const coords = `${e.lngLat.lat.toFixed(5)}, ${e.lngLat.lng.toFixed(5)}`;
-      navigator.clipboard?.writeText(coords).catch(() => {});
-      onCopyCoords(coords);
+      void copyText(coords).then((ok) => onCopyCoords(coords, ok));
     });
 
     mapRef.current = map;

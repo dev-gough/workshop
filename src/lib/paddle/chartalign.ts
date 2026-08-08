@@ -40,17 +40,19 @@ export interface AlignStats {
   noPath: number;   // endpoints snapped to disconnected skeleton pieces
   rejected: number; // trace failed the length/deviation sanity checks
   offChart: number;
+  reclassified: number; // paddle slivers the chart's dot chain overruled
 }
 
 function nearestSkelPx(
   skel: ChartSkeleton,
   gx: number,
   gy: number,
+  maxPx: number = SNAP_PX,
 ): number | null {
   const lx = gx - skel.gx0;
   const ly = gy - skel.gy0;
   let best = -1;
-  let bestD2 = SNAP_PX * SNAP_PX;
+  let bestD2 = maxPx * maxPx;
   for (let i = 0; i < skel.px.length; i++) {
     if (!skel.px[i]) continue;
     const dx = (i % skel.w) + 0.5 - lx;
@@ -279,6 +281,43 @@ function maxDeviationM(trace: [number, number][], otn: [number, number][]): numb
   return Math.sqrt(worst);
 }
 
+// Chart-arbitrated reclassification: the land/water classifier splits a
+// carry wherever the trail clips a stream or pond edge, leaving short
+// "paddle" slivers mid-portage. The chart knows better — dots only ride the
+// ribbon where you carry, and never cross real paddling water.
+const RECLASS_MAX_M = 400;     // only slivers; long paddles are never suspect
+const RECLASS_NEAR_PX = 15;    // sample counts as covered within ~50 ground m
+const RECLASS_COVERAGE = 0.7;  // fraction of samples the dot chain must cover
+const RECLASS_STEP_PX = 6;     // sampling interval along the sliver
+
+function segBBox(seg: GraphSegment, marginM: number): [number, number, number, number] {
+  const lons = seg.coords.map((c) => c[0]);
+  const lats = seg.coords.map((c) => c[1]);
+  const dLat = marginM / 110_540;
+  const dLon = marginM / (111_320 * Math.cos((lats[0] * Math.PI) / 180));
+  return [Math.min(...lons) - dLon, Math.min(...lats) - dLat, Math.max(...lons) + dLon, Math.max(...lats) + dLat];
+}
+
+/** Evenly-spaced global-pixel samples along a polyline. */
+function samplePx(coords: [number, number][], stepPx: number): [number, number][] {
+  const pts = coords.map((c) => [mercPxX(c[0]), mercPxY(c[1])] as [number, number]);
+  const out: [number, number][] = [pts[0]];
+  let carry = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const [ax, ay] = pts[i - 1];
+    const [bx, by] = pts[i];
+    const len = Math.hypot(bx - ax, by - ay);
+    let d = stepPx - carry;
+    while (d <= len) {
+      out.push([ax + ((bx - ax) * d) / len, ay + ((by - ay) * d) / len]);
+      d += stepPx;
+    }
+    carry = (carry + len) % stepPx;
+  }
+  out.push(pts[pts.length - 1]);
+  return out;
+}
+
 /**
  * Mutates portage segments in `segments` toward chart geometry.
  * Returns null (untouched) when the park has no chart on disk.
@@ -290,26 +329,55 @@ export async function alignPortagesToChart(
 ): Promise<AlignStats | null> {
   if (!chartOnDisk(slug)) return null;
 
+  const cache: TileCache = new Map();
+
+  // ---- pass 1: flip mid-carry paddle slivers back to portage ----
+  const portageNodes = new Set<number>();
+  for (const s of segments) {
+    if (s.kind === 'portage') {
+      portageNodes.add(s.a);
+      portageNodes.add(s.b);
+    }
+  }
+  let reclassified = 0;
+  const slivers = segments
+    .filter(
+      (s) =>
+        s.kind === 'paddle' &&
+        s.lengthM <= RECLASS_MAX_M &&
+        portageNodes.has(s.a) &&
+        portageNodes.has(s.b),
+    )
+    .sort((p, q) => mercPxX(p.coords[0][0]) - mercPxX(q.coords[0][0]));
+  for (const seg of slivers) {
+    const skel = await extractPortageSkeleton(slug, segBBox(seg, 200), cache);
+    if (!skel) continue;
+    const samples = samplePx(seg.coords, RECLASS_STEP_PX);
+    let covered = 0;
+    for (const [gx, gy] of samples) {
+      if (nearestSkelPx(skel, gx, gy, RECLASS_NEAR_PX) !== null) covered++;
+    }
+    if (covered / samples.length >= RECLASS_COVERAGE) {
+      seg.kind = 'portage';
+      reclassified++;
+      if (process.env.CHART_DEBUG) {
+        console.error(`[align] seg ${seg.id} (${Math.round(seg.lengthM)}m): paddle->portage (${covered}/${samples.length} covered)`);
+      }
+    }
+  }
+
+  // ---- pass 2: trace every portage (including the flips) off the chart ----
   const portages = segments
     .filter((s) => s.kind === 'portage')
     // tile-order sweep keeps the decoded-tile cache hot
     .sort((p, q) => mercPxX(p.coords[0][0]) - mercPxX(q.coords[0][0]));
 
-  const stats: AlignStats = { aligned: 0, noSnap: 0, noPath: 0, rejected: 0, offChart: 0 };
-  const cache: TileCache = new Map();
+  const stats: AlignStats = { aligned: 0, noSnap: 0, noPath: 0, rejected: 0, offChart: 0, reclassified };
   let done = 0;
 
   for (const seg of portages) {
     if (++done % 200 === 0) log(`  chart alignment: ${done}/${portages.length} portages examined...`);
-    const lons = seg.coords.map((c) => c[0]);
-    const lats = seg.coords.map((c) => c[1]);
-    const dLat = MARGIN_M / 110_540;
-    const dLon = MARGIN_M / (111_320 * Math.cos((lats[0] * Math.PI) / 180));
-    const skel = await extractPortageSkeleton(
-      slug,
-      [Math.min(...lons) - dLon, Math.min(...lats) - dLat, Math.max(...lons) + dLon, Math.max(...lats) + dLat],
-      cache,
-    );
+    const skel = await extractPortageSkeleton(slug, segBBox(seg, MARGIN_M), cache);
     if (!skel) {
       stats.offChart++;
       continue;
