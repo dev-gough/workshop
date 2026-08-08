@@ -22,16 +22,29 @@ import Readout, { type Flash } from './_components/readout';
 const TripMap = dynamic(() => import('./_components/trip-map'), { ssr: false });
 
 const LAKE_MIN_AREA = 10_000; // m² — fades sub-hectare off-route ponds out of the chart
+const LAST_PARK_KEY = 'pd-last-park';
 
 export default function PaddlePage() {
   useHeaderConfig({ scopeClass: 'pd-theme' });
 
   // ── park data ──
   const [parks, setParks] = useState<ParkInfo[] | null>(null);
-  const [park, setPark] = useState<string>('temagami');
+  // Resume on the map you last had on the table (validated against the park
+  // list once it arrives; ?trip= links still override by switching parks).
+  const [park, setPark] = useState<string>(
+    () => (typeof window !== 'undefined' && localStorage.getItem(LAST_PARK_KEY)) || 'temagami',
+  );
   const [lakes, setLakes] = useState<GeoJSON.FeatureCollection | null>(null);
   const [network, setNetwork] = useState<Network | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LAST_PARK_KEY, park);
+    } catch {
+      /* storage unavailable — resume is best-effort */
+    }
+  }, [park]);
 
   useEffect(() => {
     fetch('/api/paddle/parks')
@@ -39,9 +52,9 @@ export default function PaddlePage() {
       .then((d) => {
         if (d.error) throw new Error(d.error);
         setParks(d.parks);
-        if (d.parks.length && !d.parks.some((p: ParkInfo) => p.slug === 'temagami')) {
-          setPark(d.parks[0].slug);
-        }
+        setPark((cur) =>
+          d.parks.length && !d.parks.some((p: ParkInfo) => p.slug === cur) ? d.parks[0].slug : cur,
+        );
       })
       .catch((e) => setError(String(e)));
   }, []);
@@ -181,7 +194,7 @@ export default function PaddlePage() {
           )}
           {view === 'trips' && (
             <TripsPanel
-              parkName={current?.name}
+              parks={parks}
               trips={plan.trips}
               activeSlug={plan.tripSlug}
               onNew={plan.newTrip}

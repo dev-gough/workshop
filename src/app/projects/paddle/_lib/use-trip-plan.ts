@@ -86,15 +86,16 @@ export function useTripPlan(opts: {
     setTripName('');
   }, [park]);
 
+  // The logbook spans every park — one list, filtered in the UI.
   const refreshTrips = useCallback(async () => {
-    const d = await fetch(`/api/paddle/trips?park=${parkRef.current}`)
+    const d = await fetch('/api/paddle/trips')
       .then((r) => r.json())
       .catch(() => null);
     if (d?.trips) setTrips(d.trips);
   }, []);
   useEffect(() => {
     void refreshTrips();
-  }, [park, refreshTrips]);
+  }, [refreshTrips]);
 
   // ── waypoint ops ──
   const addWaypointAt = useCallback((lngLat: [number, number]): boolean => {

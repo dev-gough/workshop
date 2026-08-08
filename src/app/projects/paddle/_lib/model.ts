@@ -68,6 +68,7 @@ export interface TripStats {
 }
 
 export interface TripSummary {
+  park: string;
   slug: string;
   name: string;
   waypoints: number;

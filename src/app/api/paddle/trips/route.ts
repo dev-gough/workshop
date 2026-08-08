@@ -25,12 +25,16 @@ function validWaypoints(w: unknown): w is [number, number, number][] {
 }
 
 export async function GET(request: Request) {
-  const park = new URL(request.url).searchParams.get('park') ?? '';
+  // The logbook is park-agnostic — pass ?park= only to scope it down.
+  const park = new URL(request.url).searchParams.get('park');
   try {
     const { rows } = await pool.query(
-      `SELECT slug, name, jsonb_array_length(waypoints) AS waypoints, stats, updated_at
-         FROM paddle_trips WHERE park = $1 ORDER BY updated_at DESC LIMIT 50`,
-      [park],
+      park
+        ? `SELECT park, slug, name, jsonb_array_length(waypoints) AS waypoints, stats, updated_at
+             FROM paddle_trips WHERE park = $1 ORDER BY updated_at DESC LIMIT 200`
+        : `SELECT park, slug, name, jsonb_array_length(waypoints) AS waypoints, stats, updated_at
+             FROM paddle_trips ORDER BY updated_at DESC LIMIT 200`,
+      park ? [park] : [],
     );
     return NextResponse.json({ trips: rows });
   } catch (error) {
