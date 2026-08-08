@@ -22,8 +22,13 @@ interface TripMapProps {
   lakes: GeoJSON.FeatureCollection;
   network: Network;
   showChart: boolean;
+  showRelief: boolean;
   onHover: (info: HoverInfo | null) => void;
 }
+
+// Real relief here is gentle (Algonquin's local drops are ~100 m over a km),
+// so the table presses it up a touch to make ridgelines readable at a pitch.
+const RELIEF_EXAGGERATION = 1.5;
 
 function networkToGeoJSON(network: Network): GeoJSON.FeatureCollection {
   return {
@@ -36,7 +41,7 @@ function networkToGeoJSON(network: Network): GeoJSON.FeatureCollection {
   };
 }
 
-export default function TripMap({ park, lakes, network, showChart, onHover }: TripMapProps) {
+export default function TripMap({ park, lakes, network, showChart, showRelief, onHover }: TripMapProps) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const { theme } = useTheme();
@@ -44,6 +49,8 @@ export default function TripMap({ park, lakes, network, showChart, onHover }: Tr
   themeRef.current = theme;
   const showChartRef = useRef(showChart);
   showChartRef.current = showChart;
+  const showReliefRef = useRef(showRelief);
+  showReliefRef.current = showRelief;
 
   // init once per park (the page remounts this component on park change)
   useEffect(() => {
@@ -64,9 +71,39 @@ export default function TripMap({ park, lakes, network, showChart, onHover }: Tr
         bounds: bbox,
       };
     }
+    if (park.dem) {
+      // Two sources over the same tiles: MapLibre wants the terrain mesh and
+      // the hillshade layer fed separately.
+      const dem: maplibregl.RasterDEMSourceSpecification = {
+        type: 'raster-dem',
+        tiles: [`/api/paddle/dem/${park.slug}/{z}/{x}/{y}`],
+        tileSize: 256,
+        encoding: 'terrarium',
+        maxzoom: park.dem.maxZoom,
+        bounds: park.dem.bounds,
+      };
+      sources.dem = dem;
+      sources.demShade = { ...dem };
+    }
 
     const layers: maplibregl.LayerSpecification[] = [
       { id: 'paper', type: 'background', paint: { 'background-color': pal.land } },
+    ];
+    if (park.dem) {
+      // Under the water fills: the land carries the relief, lakes stay flat ink.
+      layers.push({
+        id: 'relief-shade',
+        type: 'hillshade',
+        source: 'demShade',
+        layout: { visibility: showReliefRef.current ? 'visible' : 'none' },
+        paint: {
+          'hillshade-shadow-color': pal.hillshadeShadow,
+          'hillshade-highlight-color': pal.hillshadeHighlight,
+          'hillshade-exaggeration': pal.hillshadeExaggeration,
+        },
+      });
+    }
+    layers.push(
       {
         id: 'lakes-off',
         type: 'fill',
@@ -88,7 +125,7 @@ export default function TripMap({ park, lakes, network, showChart, onHover }: Tr
         filter: ['get', 'onNetwork'],
         paint: { 'line-color': pal.shore, 'line-width': 0.7, 'line-opacity': 0.8 },
       },
-    ];
+    );
     if (park.chart) {
       layers.push({
         id: 'jeff-chart',
@@ -142,12 +179,21 @@ export default function TripMap({ park, lakes, network, showChart, onHover }: Tr
         customAttribution: [
           'Water & routes: Ontario GeoHub (OHN/OTN), OGL–Ontario',
           ...(park.chart ? [park.chart.attribution] : []),
+          ...(park.dem ? ['Terrain: Mapzen terrarium via AWS Open Data (NRCan CDEM)'] : []),
         ].join(' · '),
       }),
     );
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
 
     map.on('mousemove', (e: maplibregl.MapMouseEvent) => {
+      // Ground elevation under the cursor — only meaningful once the terrain
+      // mesh is set (queryTerrainElevation returns null without it). MapLibre
+      // reports the EXAGGERATED height (verified 1.5× against the raw DEM),
+      // so divide the display value back to true meters.
+      // An exact 0 is the not-yet-loaded / fallback-tile value, never real
+      // ground in these parks — show nothing rather than a fake sea level.
+      const rawElev = showReliefRef.current ? map.queryTerrainElevation(e.lngLat) : null;
+      const elevM = rawElev ? rawElev / RELIEF_EXAGGERATION : null;
       const pad = 5;
       const box: [maplibregl.PointLike, maplibregl.PointLike] = [
         [e.point.x - pad, e.point.y - pad],
@@ -160,6 +206,7 @@ export default function TripMap({ park, lakes, network, showChart, onHover }: Tr
           type: 'segment',
           kind: seg.properties.kind as 'paddle' | 'portage',
           lengthM: Number(seg.properties.length_m),
+          elevM,
         });
         return;
       }
@@ -170,11 +217,12 @@ export default function TripMap({ park, lakes, network, showChart, onHover }: Tr
           type: 'lake',
           name: (lake.properties.name as string | null) ?? null,
           areaM2: Number(lake.properties.area),
+          elevM,
         });
         return;
       }
       map.getCanvas().style.cursor = '';
-      onHover(null);
+      onHover(elevM !== null ? { type: 'ground', elevM } : null);
     });
     map.on('mouseout', () => onHover(null));
 
@@ -201,6 +249,19 @@ export default function TripMap({ park, lakes, network, showChart, onHover }: Tr
     else map.once('load', apply);
   }, [showChart]);
 
+  // press the relief up out of the paper, or flatten it back down
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const apply = () => {
+      if (!map.getSource('dem')) return;
+      map.setTerrain(showRelief ? { source: 'dem', exaggeration: RELIEF_EXAGGERATION } : null);
+      map.setLayoutProperty('relief-shade', 'visibility', showRelief ? 'visible' : 'none');
+    };
+    if (map.isStyleLoaded()) apply();
+    else map.once('load', apply);
+  }, [showRelief]);
+
   // repaint on theme change
   useEffect(() => {
     const map = mapRef.current;
@@ -216,6 +277,11 @@ export default function TripMap({ park, lakes, network, showChart, onHover }: Tr
       if (map.getLayer('jeff-chart')) {
         map.setPaintProperty('jeff-chart', 'raster-brightness-max', pal.chartBrightnessMax);
         map.setPaintProperty('jeff-chart', 'raster-saturation', pal.chartSaturation);
+      }
+      if (map.getLayer('relief-shade')) {
+        map.setPaintProperty('relief-shade', 'hillshade-shadow-color', pal.hillshadeShadow);
+        map.setPaintProperty('relief-shade', 'hillshade-highlight-color', pal.hillshadeHighlight);
+        map.setPaintProperty('relief-shade', 'hillshade-exaggeration', pal.hillshadeExaggeration);
       }
     };
     if (map.isStyleLoaded()) apply();

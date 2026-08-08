@@ -14,6 +14,10 @@ export interface MapPalette {
   /** Raster paint for the purchased paper chart — dimmed under lamplight in dark mode. */
   chartBrightnessMax: number;
   chartSaturation: number;
+  /** Hillshade paint — the relief pressed into the paper when terrain is on. */
+  hillshadeShadow: string;
+  hillshadeHighlight: string;
+  hillshadeExaggeration: number;
 }
 
 export const MAP_PALETTES: Record<'light' | 'dark', MapPalette> = {
@@ -27,6 +31,9 @@ export const MAP_PALETTES: Record<'light' | 'dark', MapPalette> = {
     campsite: '#8c334d',
     chartBrightnessMax: 1,
     chartSaturation: 0,
+    hillshadeShadow: '#8a7a5c',
+    hillshadeHighlight: '#fffdf0',
+    hillshadeExaggeration: 0.35,
   },
   dark: {
     land: '#18211d',
@@ -38,5 +45,8 @@ export const MAP_PALETTES: Record<'light' | 'dark', MapPalette> = {
     campsite: '#c86a86',
     chartBrightnessMax: 0.72,
     chartSaturation: -0.2,
+    hillshadeShadow: '#060a08',
+    hillshadeHighlight: '#3e5348',
+    hillshadeExaggeration: 0.5,
   },
 };

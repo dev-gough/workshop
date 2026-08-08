@@ -19,6 +19,9 @@ export interface ParkInfo {
   campsites: number;
   /** Purchased paper chart (Maps by Jeff), present when its tiles are on disk. */
   chart: { attribution: string; maxZoom: number } | null;
+  /** Cached elevation tiles (terrarium DEM), present when imported to disk.
+   *  `bounds` is the padded import window (wider than the park bbox). */
+  dem: { maxZoom: number; bounds: [number, number, number, number] } | null;
 }
 
 export interface NetworkSegment {
@@ -37,10 +40,12 @@ export interface Network {
   accessPoints: { ogf_id: number; name: string | null; lon: number; lat: number }[];
 }
 
-/** What the cursor is over on the map — feeds the surveyor's readout. */
+/** What the cursor is over on the map — feeds the surveyor's readout.
+ *  `elevM` is ground elevation under the cursor, present when relief is on. */
 export type HoverInfo =
-  | { type: 'segment'; kind: 'paddle' | 'portage'; lengthM: number }
-  | { type: 'lake'; name: string | null; areaM2: number };
+  | { type: 'segment'; kind: 'paddle' | 'portage'; lengthM: number; elevM?: number | null }
+  | { type: 'lake'; name: string | null; areaM2: number; elevM?: number | null }
+  | { type: 'ground'; elevM: number };
 
 export function fmtKm(m: number): string {
   return m >= 9950 ? `${Math.round(m / 1000)} km` : m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;

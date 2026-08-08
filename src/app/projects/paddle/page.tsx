@@ -27,6 +27,8 @@ export default function PaddlePage() {
   const [hover, setHover] = useState<HoverInfo | null>(null);
   // The purchased paper chart starts unrolled on the table when a park has one.
   const [showChart, setShowChart] = useState(true);
+  // Terrain starts pressed up in relief when the park's DEM is cached.
+  const [showRelief, setShowRelief] = useState(true);
 
   useEffect(() => {
     fetch('/api/paddle/parks')
@@ -77,6 +79,7 @@ export default function PaddlePage() {
             lakes={lakes}
             network={network}
             showChart={showChart}
+            showRelief={showRelief}
             onHover={onHover}
           />
         ) : (
@@ -170,6 +173,27 @@ export default function PaddlePage() {
             </div>
           )}
 
+          {current?.dem && (
+            <div className="mt-3 border-t border-border pt-3">
+              <button
+                onClick={() => setShowRelief((v) => !v)}
+                className="flex w-full items-center justify-between text-left"
+                title="Right-click and drag to tilt the table"
+              >
+                <span className="pd-etch">Terrain</span>
+                <span
+                  className={`rounded-sm border px-2 py-0.5 text-[11px] transition-colors ${
+                    showRelief
+                      ? 'border-primary text-primary'
+                      : 'border-border text-muted-foreground'
+                  }`}
+                >
+                  {showRelief ? 'in relief' : 'pressed flat'}
+                </span>
+              </button>
+            </div>
+          )}
+
           <p className="mt-4 text-[10px] leading-relaxed text-muted-foreground">
             Surveyed from Ontario&rsquo;s open hydro &amp; trail data. Route planning
             arrives on this table next.
@@ -187,6 +211,9 @@ export default function PaddlePage() {
                 {hover.kind === 'portage' ? 'Portage' : 'Paddle'}
               </span>
               <span className="pd-readout ml-2">{fmtKm(hover.lengthM)}</span>
+              {hover.elevM != null && (
+                <span className="pd-readout ml-2 text-muted-foreground">{Math.round(hover.elevM)} m ASL</span>
+              )}
             </p>
           ) : hover?.type === 'lake' ? (
             <p className="truncate text-[11px]">
@@ -197,6 +224,14 @@ export default function PaddlePage() {
                   ? `${(hover.areaM2 / 1_000_000).toFixed(1)} km²`
                   : `${Math.round(hover.areaM2 / 10_000)} ha`}
               </span>
+              {hover.elevM != null && (
+                <span className="pd-readout ml-2 text-muted-foreground">{Math.round(hover.elevM)} m ASL</span>
+              )}
+            </p>
+          ) : hover?.type === 'ground' ? (
+            <p className="text-[11px]">
+              <span className="pd-etch">Ground</span>
+              <span className="pd-readout ml-2">{Math.round(hover.elevM)} m ASL</span>
             </p>
           ) : (
             <p className="text-[11px] text-muted-foreground">tracing the chart…</p>
