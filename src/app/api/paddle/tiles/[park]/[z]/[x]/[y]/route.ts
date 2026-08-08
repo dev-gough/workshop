@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import sharp from 'sharp';
 import { PARKS } from '@/lib/paddle/parks';
 import { readChartTile } from '@/lib/paddle/jefftiles';
 
@@ -7,6 +8,20 @@ import { readChartTile } from '@/lib/paddle/jefftiles';
 // no external tile server. Personal-use copy; tiles never leave this box.
 
 export const dynamic = 'force-dynamic';
+
+// The park's footprint is irregular and far smaller than its bounding box,
+// so the map legitimately asks for thousands of tiles the package doesn't
+// carry. Those get a shared transparent pixel with a 200 — a 404 per empty
+// tile floods the devtools console for what is a completely normal miss.
+let emptyTile: Promise<Buffer> | null = null;
+function transparentPng(): Promise<Buffer> {
+  emptyTile ??= sharp({
+    create: { width: 1, height: 1, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+  })
+    .png()
+    .toBuffer();
+  return emptyTile;
+}
 
 export async function GET(
   _request: Request,
@@ -32,8 +47,7 @@ export async function GET(
     return new NextResponse(null, { status: 404 });
   }
 
-  const tile = await readChartTile(park, zi, xi, yi);
-  if (!tile) return new NextResponse(null, { status: 404 });
+  const tile = (await readChartTile(park, zi, xi, yi)) ?? (await transparentPng());
 
   return new NextResponse(new Uint8Array(tile), {
     headers: {
