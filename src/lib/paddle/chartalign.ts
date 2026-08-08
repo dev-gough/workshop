@@ -31,7 +31,12 @@ const SNAP_PX = 70;        // endpoint-to-skeleton snap radius (~230 ground m at
 const BRIDGE_PX = 90;      // max hop between skeleton components — label boxes, body
                            // text, and rapids arrows sit on the line and can occlude
                            // long stretches of it
-const MAX_DEV_M = 450;     // reject traces that stray this far from the OTN line
+// Reject traces that stray too far from the OTN line — but scale the
+// allowance with length: OTN digitizes long carries as near-straight lines,
+// and a real 3 km portage can legitimately swing ~1 km wide of that chord
+// (seen at the McKaskill 3760 m carry).
+const MAX_DEV_BASE_M = 450;
+const MAX_DEV_FRAC = 0.3; // of the segment's OTN length
 const SIMPLIFY_PX = 1.5;   // Douglas–Peucker tolerance on the traced path
 
 export interface AlignStats {
@@ -415,7 +420,7 @@ export async function alignPortagesToChart(
     if (
       lengthM < 0.35 * seg.lengthM ||
       lengthM > 3.5 * seg.lengthM + 200 ||
-      maxDeviationM(trace, seg.coords) > MAX_DEV_M
+      maxDeviationM(trace, seg.coords) > Math.max(MAX_DEV_BASE_M, MAX_DEV_FRAC * seg.lengthM)
     ) {
       stats.rejected++;
       if (process.env.CHART_DEBUG) {
