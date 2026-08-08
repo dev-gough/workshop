@@ -29,6 +29,9 @@ export default function PaddlePage() {
   const [showChart, setShowChart] = useState(true);
   // Terrain starts pressed up in relief when the park's DEM is cached.
   const [showRelief, setShowRelief] = useState(true);
+  // Vertical exaggeration — ×1 is true scale; the Shield's relief is real
+  // but modest, so the default presses it up a little.
+  const [reliefScale, setReliefScale] = useState(1.5);
 
   useEffect(() => {
     fetch('/api/paddle/parks')
@@ -80,6 +83,7 @@ export default function PaddlePage() {
             network={network}
             showChart={showChart}
             showRelief={showRelief}
+            reliefScale={reliefScale}
             onHover={onHover}
           />
         ) : (
@@ -191,6 +195,27 @@ export default function PaddlePage() {
                   {showRelief ? 'in relief' : 'pressed flat'}
                 </span>
               </button>
+              {showRelief && (
+                <div
+                  className="mt-2 flex items-center gap-2"
+                  title="Vertical exaggeration — ×1 is true scale"
+                >
+                  <input
+                    type="range"
+                    min={1}
+                    max={4}
+                    step={0.25}
+                    value={reliefScale}
+                    onChange={(e) => setReliefScale(Number(e.target.value))}
+                    className="h-1 flex-1 cursor-pointer"
+                    style={{ accentColor: 'var(--color-primary)' }}
+                    aria-label="Relief exaggeration"
+                  />
+                  <span className="pd-readout w-10 shrink-0 text-right text-[11px]">
+                    ×{reliefScale}
+                  </span>
+                </div>
+              )}
             </div>
           )}
 

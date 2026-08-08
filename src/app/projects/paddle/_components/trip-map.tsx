@@ -23,12 +23,10 @@ interface TripMapProps {
   network: Network;
   showChart: boolean;
   showRelief: boolean;
+  /** Vertical exaggeration of the terrain mesh — ×1 is true scale. */
+  reliefScale: number;
   onHover: (info: HoverInfo | null) => void;
 }
-
-// Real relief here is gentle (Algonquin's local drops are ~100 m over a km),
-// so the table presses it up a touch to make ridgelines readable at a pitch.
-const RELIEF_EXAGGERATION = 1.5;
 
 function networkToGeoJSON(network: Network): GeoJSON.FeatureCollection {
   return {
@@ -41,7 +39,7 @@ function networkToGeoJSON(network: Network): GeoJSON.FeatureCollection {
   };
 }
 
-export default function TripMap({ park, lakes, network, showChart, showRelief, onHover }: TripMapProps) {
+export default function TripMap({ park, lakes, network, showChart, showRelief, reliefScale, onHover }: TripMapProps) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const { theme } = useTheme();
@@ -51,6 +49,8 @@ export default function TripMap({ park, lakes, network, showChart, showRelief, o
   showChartRef.current = showChart;
   const showReliefRef = useRef(showRelief);
   showReliefRef.current = showRelief;
+  const reliefScaleRef = useRef(reliefScale);
+  reliefScaleRef.current = reliefScale;
 
   // init once per park (the page remounts this component on park change)
   useEffect(() => {
@@ -193,7 +193,7 @@ export default function TripMap({ park, lakes, network, showChart, showRelief, o
       // An exact 0 is the not-yet-loaded / fallback-tile value, never real
       // ground in these parks — show nothing rather than a fake sea level.
       const rawElev = showReliefRef.current ? map.queryTerrainElevation(e.lngLat) : null;
-      const elevM = rawElev ? rawElev / RELIEF_EXAGGERATION : null;
+      const elevM = rawElev ? rawElev / reliefScaleRef.current : null;
       const pad = 5;
       const box: [maplibregl.PointLike, maplibregl.PointLike] = [
         [e.point.x - pad, e.point.y - pad],
@@ -249,18 +249,18 @@ export default function TripMap({ park, lakes, network, showChart, showRelief, o
     else map.once('load', apply);
   }, [showChart]);
 
-  // press the relief up out of the paper, or flatten it back down
+  // press the relief up out of the paper, flatten it back down, or rescale it
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     const apply = () => {
       if (!map.getSource('dem')) return;
-      map.setTerrain(showRelief ? { source: 'dem', exaggeration: RELIEF_EXAGGERATION } : null);
+      map.setTerrain(showRelief ? { source: 'dem', exaggeration: reliefScale } : null);
       map.setLayoutProperty('relief-shade', 'visibility', showRelief ? 'visible' : 'none');
     };
     if (map.isStyleLoaded()) apply();
     else map.once('load', apply);
-  }, [showRelief]);
+  }, [showRelief, reliefScale]);
 
   // repaint on theme change
   useEffect(() => {
