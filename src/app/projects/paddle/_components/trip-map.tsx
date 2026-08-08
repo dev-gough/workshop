@@ -26,6 +26,8 @@ interface TripMapProps {
   /** Vertical exaggeration of the terrain mesh — ×1 is true scale. */
   reliefScale: number;
   onHover: (info: HoverInfo | null) => void;
+  /** Fired after a click copies the cursor coordinates to the clipboard. */
+  onCopyCoords: (coords: string) => void;
 }
 
 function networkToGeoJSON(network: Network): GeoJSON.FeatureCollection {
@@ -39,7 +41,7 @@ function networkToGeoJSON(network: Network): GeoJSON.FeatureCollection {
   };
 }
 
-export default function TripMap({ park, lakes, network, showChart, showRelief, reliefScale, onHover }: TripMapProps) {
+export default function TripMap({ park, lakes, network, showChart, showRelief, reliefScale, onHover, onCopyCoords }: TripMapProps) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const { theme } = useTheme();
@@ -194,6 +196,7 @@ export default function TripMap({ park, lakes, network, showChart, showRelief, r
       // ground in these parks — show nothing rather than a fake sea level.
       const rawElev = showReliefRef.current ? map.queryTerrainElevation(e.lngLat) : null;
       const elevM = rawElev ? rawElev / reliefScaleRef.current : null;
+      const lngLat: [number, number] = [e.lngLat.lng, e.lngLat.lat];
       const pad = 5;
       const box: [maplibregl.PointLike, maplibregl.PointLike] = [
         [e.point.x - pad, e.point.y - pad],
@@ -207,6 +210,7 @@ export default function TripMap({ park, lakes, network, showChart, showRelief, r
           kind: seg.properties.kind as 'paddle' | 'portage',
           lengthM: Number(seg.properties.length_m),
           elevM,
+          lngLat,
         });
         return;
       }
@@ -218,13 +222,20 @@ export default function TripMap({ park, lakes, network, showChart, showRelief, r
           name: (lake.properties.name as string | null) ?? null,
           areaM2: Number(lake.properties.area),
           elevM,
+          lngLat,
         });
         return;
       }
       map.getCanvas().style.cursor = '';
-      onHover(elevM !== null ? { type: 'ground', elevM } : null);
+      onHover({ type: 'ground', elevM, lngLat });
     });
     map.on('mouseout', () => onHover(null));
+    // Click = copy the spot for reporting chart/route mismatches.
+    map.on('click', (e: maplibregl.MapMouseEvent) => {
+      const coords = `${e.lngLat.lat.toFixed(5)}, ${e.lngLat.lng.toFixed(5)}`;
+      navigator.clipboard?.writeText(coords).catch(() => {});
+      onCopyCoords(coords);
+    });
 
     mapRef.current = map;
     // debug handle for headless inspection (harmless in prod)

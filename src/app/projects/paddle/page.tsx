@@ -7,10 +7,10 @@
 // same table next — the sheet is deliberately built to grow a waypoint list.
 
 import dynamic from 'next/dynamic';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import PageTransition from '@/components/motion/PageTransition';
 import { useHeaderConfig } from '@/components/header-config';
-import { fmtKm, type HoverInfo, type Network, type ParkInfo } from './_lib/model';
+import { fmtKm, fmtLatLon, type HoverInfo, type Network, type ParkInfo } from './_lib/model';
 
 const TripMap = dynamic(() => import('./_components/trip-map'), { ssr: false });
 
@@ -69,6 +69,15 @@ export default function PaddlePage() {
 
   const onHover = useCallback((info: HoverInfo | null) => setHover(info), []);
 
+  // Click-to-copy flash: the readout confirms which spot just hit the clipboard.
+  const [copied, setCopied] = useState<string | null>(null);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onCopyCoords = useCallback((coords: string) => {
+    setCopied(coords);
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => setCopied(null), 1800);
+  }, []);
+
   const current = parks?.find((p) => p.slug === park) ?? null;
   const stats = current?.stats ?? null;
 
@@ -85,6 +94,7 @@ export default function PaddlePage() {
             showRelief={showRelief}
             reliefScale={reliefScale}
             onHover={onHover}
+            onCopyCoords={onCopyCoords}
           />
         ) : (
           <div className="flex h-full items-center justify-center">
@@ -256,11 +266,24 @@ export default function PaddlePage() {
           ) : hover?.type === 'ground' ? (
             <p className="text-[11px]">
               <span className="pd-etch">Ground</span>
-              <span className="pd-readout ml-2">{Math.round(hover.elevM)} m ASL</span>
+              {hover.elevM != null && (
+                <span className="pd-readout ml-2">{Math.round(hover.elevM)} m ASL</span>
+              )}
             </p>
           ) : (
             <p className="text-[11px] text-muted-foreground">tracing the chart…</p>
           )}
+          {copied ? (
+            <p className="mt-0.5 text-[10px]">
+              <span className="pd-etch" style={{ color: 'var(--color-primary)' }}>
+                copied · {copied}
+              </span>
+            </p>
+          ) : hover ? (
+            <p className="pd-readout mt-0.5 text-[10px] text-muted-foreground">
+              {fmtLatLon(hover.lngLat)} · click to copy
+            </p>
+          ) : null}
         </div>
       </div>
     </PageTransition>

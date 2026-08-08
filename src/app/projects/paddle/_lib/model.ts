@@ -41,11 +41,17 @@ export interface Network {
 }
 
 /** What the cursor is over on the map — feeds the surveyor's readout.
- *  `elevM` is ground elevation under the cursor, present when relief is on. */
+ *  `elevM` is ground elevation under the cursor, present when relief is on;
+ *  `lngLat` is always the cursor position (the readout prints it lat-first). */
 export type HoverInfo =
-  | { type: 'segment'; kind: 'paddle' | 'portage'; lengthM: number; elevM?: number | null }
-  | { type: 'lake'; name: string | null; areaM2: number; elevM?: number | null }
-  | { type: 'ground'; elevM: number };
+  | { type: 'segment'; kind: 'paddle' | 'portage'; lengthM: number; elevM?: number | null; lngLat: [number, number] }
+  | { type: 'lake'; name: string | null; areaM2: number; elevM?: number | null; lngLat: [number, number] }
+  | { type: 'ground'; elevM: number | null; lngLat: [number, number] };
+
+/** "lat, lon" at ~1 m precision — the paste-friendly report format. */
+export function fmtLatLon(lngLat: [number, number]): string {
+  return `${lngLat[1].toFixed(5)}, ${lngLat[0].toFixed(5)}`;
+}
 
 export function fmtKm(m: number): string {
   return m >= 9950 ? `${Math.round(m / 1000)} km` : m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
