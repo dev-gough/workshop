@@ -10,6 +10,8 @@ export interface MapPalette {
   shore: string;
   paddle: string;
   portage: string;
+  /** Walkable-but-not-a-carry lines (hydro corridors, walk-ins) — pencilled in. */
+  track: string;
   campsite: string;
   /** Raster paint for the purchased paper chart — dimmed under lamplight in dark mode. */
   chartBrightnessMax: number;
@@ -28,6 +30,7 @@ export const MAP_PALETTES: Record<'light' | 'dark', MapPalette> = {
     shore: '#8fa9b0',
     paddle: '#276a8c',
     portage: '#b0402c',
+    track: '#8f8871',
     campsite: '#8c334d',
     chartBrightnessMax: 1,
     chartSaturation: 0,
@@ -42,6 +45,7 @@ export const MAP_PALETTES: Record<'light' | 'dark', MapPalette> = {
     shore: '#3a565f',
     paddle: '#5da0c0',
     portage: '#e0664a',
+    track: '#6e7566',
     campsite: '#c86a86',
     chartBrightnessMax: 0.72,
     chartSaturation: -0.2,

@@ -145,6 +145,37 @@ function thin(mask: Uint8Array, w: number, h: number): void {
   }
 }
 
+// Open-water fill ≈ #A0D0F0 (streams render in the same family). Lake-name
+// text (#20A0E0-ish) and rapids arrows fail the G floor; label boxes fail B.
+const isWaterPx = (r: number, g: number, b: number) =>
+  b > 200 && b - r > 40 && g > 160 && g < 235;
+
+/**
+ * Fraction of the given global-z15-pixel samples that sit on chart water.
+ * Arbitration input for segments the dot chain disowns: water underneath
+ * means "paddle", dry paper means "track". Null if no tiles cover the line.
+ */
+export async function chartWaterFraction(
+  slug: string,
+  samples: [number, number][],
+  cache: TileCache,
+): Promise<number | null> {
+  let n = 0;
+  let water = 0;
+  for (const [gx, gy] of samples) {
+    const tx = Math.floor(gx / TILE);
+    const ty = Math.floor(gy / TILE);
+    const rgb = await tileRGB(slug, tx, ty, cache);
+    if (!rgb) continue;
+    const px = Math.min(TILE - 1, Math.floor(gx - tx * TILE));
+    const py = Math.min(TILE - 1, Math.floor(gy - ty * TILE));
+    const i = (py * TILE + px) * 3;
+    n++;
+    if (isWaterPx(rgb[i], rgb[i + 1], rgb[i + 2])) water++;
+  }
+  return n ? water / n : null;
+}
+
 export interface ChartSkeleton {
   w: number;
   h: number;

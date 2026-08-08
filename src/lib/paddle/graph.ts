@@ -23,7 +23,9 @@ export interface GraphNode {
 
 export interface GraphSegment {
   id: number;
-  kind: 'paddle' | 'portage';
+  /** 'track' = on the route network but, per the chart, not a carry and not
+   *  paddling — hydro corridors, walk-in trails. Assigned by chartalign. */
+  kind: 'paddle' | 'portage' | 'track';
   a: number;
   b: number;
   lengthM: number;

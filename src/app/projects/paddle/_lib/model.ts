@@ -26,7 +26,7 @@ export interface ParkInfo {
 
 export interface NetworkSegment {
   id: number;
-  kind: 'paddle' | 'portage';
+  kind: 'paddle' | 'portage' | 'track';
   a: number;
   b: number;
   length_m: number;
@@ -44,7 +44,7 @@ export interface Network {
  *  `elevM` is ground elevation under the cursor, present when relief is on;
  *  `lngLat` is always the cursor position (the readout prints it lat-first). */
 export type HoverInfo =
-  | { type: 'segment'; kind: 'paddle' | 'portage'; lengthM: number; elevM?: number | null; lngLat: [number, number] }
+  | { type: 'segment'; kind: 'paddle' | 'portage' | 'track'; lengthM: number; elevM?: number | null; lngLat: [number, number] }
   | { type: 'lake'; name: string | null; areaM2: number; elevM?: number | null; lngLat: [number, number] }
   | { type: 'ground'; elevM: number | null; lngLat: [number, number] };
 

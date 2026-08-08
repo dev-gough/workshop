@@ -165,6 +165,10 @@ export default function PaddlePage() {
               <p>
                 <span className="pd-ribbon mr-2" style={{ color: 'var(--pd-red)' }} /> portage trail
               </p>
+              <p>
+                <span className="pd-ribbon mr-2" style={{ color: 'var(--pd-track)' }} /> track — walkable,
+                not a carry
+              </p>
             </div>
           </div>
 
@@ -243,9 +247,16 @@ export default function PaddlePage() {
             <p className="text-[11px]">
               <span
                 className="pd-etch"
-                style={{ color: hover.kind === 'portage' ? 'var(--pd-red)' : 'var(--pd-blue)' }}
+                style={{
+                  color:
+                    hover.kind === 'portage'
+                      ? 'var(--pd-red)'
+                      : hover.kind === 'track'
+                        ? 'var(--pd-track)'
+                        : 'var(--pd-blue)',
+                }}
               >
-                {hover.kind === 'portage' ? 'Portage' : 'Paddle'}
+                {hover.kind === 'portage' ? 'Portage' : hover.kind === 'track' ? 'Track' : 'Paddle'}
               </span>
               <span className="pd-readout ml-2">{fmtKm(hover.lengthM)}</span>
               {hover.elevM != null && (

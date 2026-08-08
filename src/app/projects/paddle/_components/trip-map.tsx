@@ -175,6 +175,19 @@ export default function TripMap({ park, lakes, network, showChart, showRelief, r
     }
     layers.push(
       {
+        // pencilled in under the real routes: walkable, but not a carry
+        id: 'net-track',
+        type: 'line',
+        source: 'network',
+        filter: ['==', ['get', 'kind'], 'track'],
+        paint: {
+          'line-color': pal.track,
+          'line-width': ['interpolate', ['linear'], ['zoom'], 7, 0.8, 11, 1.6, 14, 2.5],
+          'line-opacity': 0.75,
+          'line-dasharray': [2, 2],
+        },
+      },
+      {
         id: 'net-paddle',
         type: 'line',
         source: 'network',
@@ -234,12 +247,12 @@ export default function TripMap({ park, lakes, network, showChart, showRelief, r
         [e.point.x - pad, e.point.y - pad],
         [e.point.x + pad, e.point.y + pad],
       ];
-      const seg = map.queryRenderedFeatures(box, { layers: ['net-portage', 'net-paddle'] })[0];
+      const seg = map.queryRenderedFeatures(box, { layers: ['net-portage', 'net-paddle', 'net-track'] })[0];
       if (seg) {
         map.getCanvas().style.cursor = 'crosshair';
         onHover({
           type: 'segment',
-          kind: seg.properties.kind as 'paddle' | 'portage',
+          kind: seg.properties.kind as 'paddle' | 'portage' | 'track',
           lengthM: Number(seg.properties.length_m),
           elevM,
           lngLat,
@@ -316,6 +329,7 @@ export default function TripMap({ park, lakes, network, showChart, showRelief, r
       map.setPaintProperty('shore', 'line-color', pal.shore);
       map.setPaintProperty('net-paddle', 'line-color', pal.paddle);
       map.setPaintProperty('net-portage', 'line-color', pal.portage);
+      map.setPaintProperty('net-track', 'line-color', pal.track);
       if (map.getLayer('jeff-chart')) {
         map.setPaintProperty('jeff-chart', 'raster-brightness-max', pal.chartBrightnessMax);
         map.setPaintProperty('jeff-chart', 'raster-saturation', pal.chartSaturation);

@@ -16,6 +16,7 @@ import { haversineM } from './classify';
 import type { GraphSegment } from './graph';
 import { chartOnDisk } from './jefftiles';
 import {
+  chartWaterFraction,
   extractPortageSkeleton,
   mercLat,
   mercLon,
@@ -45,7 +46,9 @@ export interface AlignStats {
   noPath: number;   // endpoints snapped to disconnected skeleton pieces
   rejected: number; // trace failed the length/deviation sanity checks
   offChart: number;
-  reclassified: number; // paddle slivers the chart's dot chain overruled
+  reclassified: number; // paddle stretches the chart's dot chain overruled
+  toPaddle: number;     // "portages" the chart shows as open water
+  tracks: number;       // "portages" the chart shows as dry land with no carry
 }
 
 function nearestSkelPx(
@@ -286,14 +289,24 @@ function maxDeviationM(trace: [number, number][], otn: [number, number][]): numb
   return Math.sqrt(worst);
 }
 
-// Chart-arbitrated reclassification: the land/water classifier splits a
-// carry wherever the trail clips a stream or pond edge, leaving short
-// "paddle" slivers mid-portage. The chart knows better — dots only ride the
-// ribbon where you carry, and never cross real paddling water.
-const RECLASS_MAX_M = 400;     // only slivers; long paddles are never suspect
+// Chart-arbitrated reclassification — the chart is ground truth for what a
+// stretch of route IS. Dots only ride the ribbon where you carry (never
+// across real paddling water), so dot coverage over a "paddle" stretch means
+// the classifier clipped a stream/marsh the trail crosses and the stretch is
+// really part of the carry. OTN is a single polyline network (paddle and
+// portage are the same line, classified), so there is no parallel-line
+// false-positive to fear.
+const RECLASS_MAX_M = 1500;    // wetland carries run long (McDonald Ck: 632 m)
 const RECLASS_NEAR_PX = 15;    // sample counts as covered within ~50 ground m
 const RECLASS_COVERAGE = 0.7;  // fraction of samples the dot chain must cover
-const RECLASS_STEP_PX = 6;     // sampling interval along the sliver
+const RECLASS_STEP_PX = 6;     // sampling interval along the line
+
+// The inverse arbitration, for "portages" the dot chain disowns (<= this
+// coverage): water under the line means it is really paddling; dry paper
+// means a walkable-but-not-a-carry track (hydro corridors, walk-ins).
+const DISOWN_COVERAGE = 0.15;
+const DISOWN_MIN_M = 400;      // leave short unaligned stubs alone
+const WATER_FRAC_PADDLE = 0.6;
 
 function segBBox(seg: GraphSegment, marginM: number): [number, number, number, number] {
   const lons = seg.coords.map((c) => c[0]);
@@ -336,37 +349,30 @@ export async function alignPortagesToChart(
 
   const cache: TileCache = new Map();
 
-  // ---- pass 1: flip mid-carry paddle slivers back to portage ----
-  const portageNodes = new Set<number>();
-  for (const s of segments) {
-    if (s.kind === 'portage') {
-      portageNodes.add(s.a);
-      portageNodes.add(s.b);
-    }
-  }
-  let reclassified = 0;
-  const slivers = segments
-    .filter(
-      (s) =>
-        s.kind === 'paddle' &&
-        s.lengthM <= RECLASS_MAX_M &&
-        portageNodes.has(s.a) &&
-        portageNodes.has(s.b),
-    )
-    .sort((p, q) => mercPxX(p.coords[0][0]) - mercPxX(q.coords[0][0]));
-  for (const seg of slivers) {
-    const skel = await extractPortageSkeleton(slug, segBBox(seg, 200), cache);
-    if (!skel) continue;
-    const samples = samplePx(seg.coords, RECLASS_STEP_PX);
+  const dotCoverage = (skel: ChartSkeleton, samples: [number, number][]): number => {
     let covered = 0;
     for (const [gx, gy] of samples) {
       if (nearestSkelPx(skel, gx, gy, RECLASS_NEAR_PX) !== null) covered++;
     }
-    if (covered / samples.length >= RECLASS_COVERAGE) {
+    return samples.length ? covered / samples.length : 0;
+  };
+
+  // ---- pass 1: paddle stretches the dot chain covers become portage ----
+  let reclassified = 0;
+  const candidates = segments
+    .filter((s) => s.kind === 'paddle' && s.lengthM <= RECLASS_MAX_M)
+    .sort((p, q) => mercPxX(p.coords[0][0]) - mercPxX(q.coords[0][0]));
+  let scanned = 0;
+  for (const seg of candidates) {
+    if (++scanned % 400 === 0) log(`  chart arbitration: ${scanned}/${candidates.length} paddle stretches checked...`);
+    const skel = await extractPortageSkeleton(slug, segBBox(seg, 200), cache);
+    if (!skel) continue;
+    const samples = samplePx(seg.coords, RECLASS_STEP_PX);
+    if (dotCoverage(skel, samples) >= RECLASS_COVERAGE) {
       seg.kind = 'portage';
       reclassified++;
       if (process.env.CHART_DEBUG) {
-        console.error(`[align] seg ${seg.id} (${Math.round(seg.lengthM)}m): paddle->portage (${covered}/${samples.length} covered)`);
+        console.error(`[align] seg ${seg.id} (${Math.round(seg.lengthM)}m): paddle->portage`);
       }
     }
   }
@@ -377,8 +383,24 @@ export async function alignPortagesToChart(
     // tile-order sweep keeps the decoded-tile cache hot
     .sort((p, q) => mercPxX(p.coords[0][0]) - mercPxX(q.coords[0][0]));
 
-  const stats: AlignStats = { aligned: 0, noSnap: 0, noPath: 0, rejected: 0, offChart: 0, reclassified };
+  const stats: AlignStats = { aligned: 0, noSnap: 0, noPath: 0, rejected: 0, offChart: 0, reclassified, toPaddle: 0, tracks: 0 };
   let done = 0;
+
+  // A failed portage the dot chain disowns gets arbitrated by what the chart
+  // paints under it: water → it's really paddling; dry paper → a walkable
+  // track, not a carry. Returns the new kind, or null to leave it alone.
+  const disown = async (seg: GraphSegment, skel: ChartSkeleton): Promise<string | null> => {
+    if (seg.lengthM < DISOWN_MIN_M) return null;
+    const samples = samplePx(seg.coords, RECLASS_STEP_PX);
+    if (dotCoverage(skel, samples) > DISOWN_COVERAGE) return null;
+    const waterFrac = await chartWaterFraction(slug, samples, cache);
+    if (waterFrac === null) return null;
+    seg.kind = waterFrac >= WATER_FRAC_PADDLE ? 'paddle' : 'track';
+    if (process.env.CHART_DEBUG) {
+      console.error(`[align] seg ${seg.id} (${Math.round(seg.lengthM)}m): portage->${seg.kind} (water ${waterFrac.toFixed(2)})`);
+    }
+    return seg.kind;
+  };
 
   for (const seg of portages) {
     if (++done % 200 === 0) log(`  chart alignment: ${done}/${portages.length} portages examined...`);
@@ -393,14 +415,24 @@ export async function alignPortagesToChart(
     const a = nearestSkelPx(skel, mercPxX(first[0]), mercPxY(first[1]));
     const b = nearestSkelPx(skel, mercPxX(last[0]), mercPxY(last[1]));
     if (a === null || b === null || a === b) {
-      stats.noSnap++;
-      if (process.env.CHART_DEBUG) console.error(`[align] seg ${seg.id} (${Math.round(seg.lengthM)}m): no-snap`);
+      const flipped = await disown(seg, skel);
+      if (flipped === 'paddle') stats.toPaddle++;
+      else if (flipped === 'track') stats.tracks++;
+      else {
+        stats.noSnap++;
+        if (process.env.CHART_DEBUG) console.error(`[align] seg ${seg.id} (${Math.round(seg.lengthM)}m): no-snap`);
+      }
       continue;
     }
     const path = skelPath(skel, a, b);
     if (!path) {
-      stats.noPath++;
-      if (process.env.CHART_DEBUG) console.error(`[align] seg ${seg.id} (${Math.round(seg.lengthM)}m): no-path`);
+      const flipped = await disown(seg, skel);
+      if (flipped === 'paddle') stats.toPaddle++;
+      else if (flipped === 'track') stats.tracks++;
+      else {
+        stats.noPath++;
+        if (process.env.CHART_DEBUG) console.error(`[align] seg ${seg.id} (${Math.round(seg.lengthM)}m): no-path`);
+      }
       continue;
     }
 

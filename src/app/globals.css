@@ -2613,6 +2613,7 @@
   --pd-dim:    #71705c;              /* pencil annotation */
   --pd-red:    #b0402c;              /* canoe red — portages, the room accent */
   --pd-blue:   #276a8c;              /* open-water blue — paddling */
+  --pd-track:  #8f8871;              /* pencilled track — walkable, not a carry */
 
   --color-background:           var(--pd-paper);
   --color-foreground:           var(--pd-ink);
@@ -2649,6 +2650,7 @@
   --pd-dim:    #92967f;
   --pd-red:    #d4573e;
   --pd-blue:   #5da0c0;
+  --pd-track:  #6e7566;
 
   --color-primary-foreground:   #17110c;
 }
