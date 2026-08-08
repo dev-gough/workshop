@@ -17,7 +17,6 @@ import { PARKS } from '../src/lib/paddle/parks';
 import { IMAGERY_MAX_ZOOM, imageryTileDir } from '../src/lib/paddle/imagerytiles';
 
 const MIN_ZOOM = 4;
-const CONCURRENCY = 8;
 const SOURCE =
   'https://ws.lioservices.lrc.gov.on.ca/arcgis2/rest/services/LIO_Imagery/Ontario_Imagery_Web_Map_Service/MapServer/WMTS/tile/1.0.0/LIO_Imagery_Ontario_Imagery_Web_Map_Service/default/GoogleMapsCompatible';
 
@@ -34,6 +33,8 @@ if (!slug || !park) {
   process.exit(1);
 }
 const maxZoom = Number(arg('--max-zoom') ?? IMAGERY_MAX_ZOOM);
+// 8 workers drew occasional 429s from the province — default gentler.
+const concurrency = Number(arg('--concurrency') ?? 4);
 
 const tileX = (lon: number, z: number) => Math.floor(((lon + 180) / 360) * 2 ** z);
 const tileY = (lat: number, z: number) => {
@@ -113,7 +114,7 @@ async function main() {
       if (done % 500 === 0) console.log(`  ${done}/${total} (${fetched} fetched)`);
     }
   };
-  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+  await Promise.all(Array.from({ length: concurrency }, worker));
   console.log(
     `done — ${fetched} fetched, ${voids} void (outside Ontario), ${failed} failed, rest already cached.`,
   );
