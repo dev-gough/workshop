@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db';
+import { PARKS } from '@/lib/paddle/parks';
+import { chartOnDisk } from '@/lib/paddle/jefftiles';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,7 +14,15 @@ export async function GET() {
          FROM paddle_parks p
         ORDER BY p.name`,
     );
-    return NextResponse.json({ parks: rows });
+    const parks = rows.map((row) => {
+      const chart = PARKS[row.slug]?.chart;
+      return {
+        ...row,
+        // Advertise the purchased chart only when its tiles are on disk.
+        chart: chart && chartOnDisk(row.slug) ? chart : null,
+      };
+    });
+    return NextResponse.json({ parks });
   } catch (error) {
     console.error('paddle parks error:', error);
     return NextResponse.json({ error: 'Failed to load parks', detail: String(error) }, { status: 500 });

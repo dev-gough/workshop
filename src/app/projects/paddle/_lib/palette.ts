@@ -11,6 +11,9 @@ export interface MapPalette {
   paddle: string;
   portage: string;
   campsite: string;
+  /** Raster paint for the purchased paper chart — dimmed under lamplight in dark mode. */
+  chartBrightnessMax: number;
+  chartSaturation: number;
 }
 
 export const MAP_PALETTES: Record<'light' | 'dark', MapPalette> = {
@@ -22,6 +25,8 @@ export const MAP_PALETTES: Record<'light' | 'dark', MapPalette> = {
     paddle: '#276a8c',
     portage: '#b0402c',
     campsite: '#8c334d',
+    chartBrightnessMax: 1,
+    chartSaturation: 0,
   },
   dark: {
     land: '#18211d',
@@ -31,5 +36,7 @@ export const MAP_PALETTES: Record<'light' | 'dark', MapPalette> = {
     paddle: '#5da0c0',
     portage: '#e0664a',
     campsite: '#c86a86',
+    chartBrightnessMax: 0.72,
+    chartSaturation: -0.2,
   },
 };

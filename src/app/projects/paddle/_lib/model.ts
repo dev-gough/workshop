@@ -17,6 +17,8 @@ export interface ParkInfo {
   built_at: string | null;
   stats: ParkStats | null;
   campsites: number;
+  /** Purchased paper chart (Maps by Jeff), present when its tiles are on disk. */
+  chart: { attribution: string; maxZoom: number } | null;
 }
 
 export interface NetworkSegment {

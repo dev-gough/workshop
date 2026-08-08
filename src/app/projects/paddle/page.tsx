@@ -25,6 +25,8 @@ export default function PaddlePage() {
   const [network, setNetwork] = useState<Network | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hover, setHover] = useState<HoverInfo | null>(null);
+  // The purchased paper chart starts unrolled on the table when a park has one.
+  const [showChart, setShowChart] = useState(true);
 
   useEffect(() => {
     fetch('/api/paddle/parks')
@@ -69,7 +71,14 @@ export default function PaddlePage() {
     <PageTransition>
       <div className="pd-theme pd-room relative overflow-hidden">
         {lakes && network && current ? (
-          <TripMap bbox={current.bbox} lakes={lakes} network={network} onHover={onHover} />
+          <TripMap
+            key={current.slug}
+            park={current}
+            lakes={lakes}
+            network={network}
+            showChart={showChart}
+            onHover={onHover}
+          />
         ) : (
           <div className="flex h-full items-center justify-center">
             <p className="pd-etch">{error ? `chart unavailable — ${error}` : 'unrolling the chart…'}</p>
@@ -139,6 +148,27 @@ export default function PaddlePage() {
               </p>
             </div>
           </div>
+
+          {current?.chart && (
+            <div className="mt-3 border-t border-border pt-3">
+              <button
+                onClick={() => setShowChart((v) => !v)}
+                className="flex w-full items-center justify-between text-left"
+                title={current.chart.attribution}
+              >
+                <span className="pd-etch">Jeff&rsquo;s chart</span>
+                <span
+                  className={`rounded-sm border px-2 py-0.5 text-[11px] transition-colors ${
+                    showChart
+                      ? 'border-primary text-primary'
+                      : 'border-border text-muted-foreground'
+                  }`}
+                >
+                  {showChart ? 'unrolled' : 'rolled up'}
+                </span>
+              </button>
+            </div>
+          )}
 
           <p className="mt-4 text-[10px] leading-relaxed text-muted-foreground">
             Surveyed from Ontario&rsquo;s open hydro &amp; trail data. Route planning

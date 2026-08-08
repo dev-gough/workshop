@@ -577,8 +577,19 @@ export function SpaceflightRoom({ spaceflight, className }: {
 // paper, ink lakes, canoe-red portages.
 
 export function PaddleRoom({ parks, className }: { parks: PaddlePark[]; className?: string }) {
-  const park = parks.find(p => p.slug === 'temagami') ?? parks[0] ?? null;
-  const stats = park?.stats ?? null;
+  // Sum the charts on the table — every ingested park counts.
+  const built = parks.filter(p => p.stats);
+  const stats = built.length
+    ? built.reduce(
+        (acc, p) => ({
+          paddleKm: acc.paddleKm + p.stats!.paddleKm,
+          portageKm: acc.portageKm + p.stats!.portageKm,
+          portages: acc.portages + p.stats!.portages,
+        }),
+        { paddleKm: 0, portageKm: 0, portages: 0 },
+      )
+    : null;
+  const parkNames = built.map(p => p.name).join(' · ');
 
   return (
     <Door href="/projects/paddle" number="RM 18" room="The Outfitter" className={className}>
@@ -605,7 +616,7 @@ export function PaddleRoom({ parks, className }: { parks: PaddlePark[]; classNam
                 <span className="text-xs font-normal text-[#71705c]"> of open water</span>
               </p>
               <p className="truncate text-[11px] text-[#71705c]">
-                {park!.name} · {stats.portages.toLocaleString()} portages · {Math.round(stats.portageKm)} km carried
+                {parkNames} · {stats.portages.toLocaleString()} portages · {Math.round(stats.portageKm)} km carried
               </p>
             </>
           ) : (
