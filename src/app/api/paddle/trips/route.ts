@@ -28,7 +28,7 @@ export async function GET(request: Request) {
   const park = new URL(request.url).searchParams.get('park') ?? '';
   try {
     const { rows } = await pool.query(
-      `SELECT slug, name, jsonb_array_length(waypoints) AS waypoints, updated_at
+      `SELECT slug, name, jsonb_array_length(waypoints) AS waypoints, stats, updated_at
          FROM paddle_trips WHERE park = $1 ORDER BY updated_at DESC LIMIT 50`,
       [park],
     );
@@ -42,7 +42,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { park, name, waypoints, cost, slug } = body ?? {};
+    const { park, name, waypoints, cost, slug, stats } = body ?? {};
     if (
       typeof park !== 'string' ||
       typeof name !== 'string' ||
@@ -53,13 +53,14 @@ export async function POST(request: Request) {
     ) {
       return NextResponse.json({ error: 'Bad trip payload' }, { status: 400 });
     }
+    const statsJson = stats && typeof stats === 'object' ? JSON.stringify(stats) : null;
 
     if (typeof slug === 'string' && slug) {
       const { rowCount } = await pool.query(
         `UPDATE paddle_trips
-            SET name = $2, waypoints = $3, cost = $4, updated_at = now()
+            SET name = $2, waypoints = $3, cost = $4, stats = $5, updated_at = now()
           WHERE slug = $1`,
-        [slug, name.trim(), JSON.stringify(waypoints), JSON.stringify(cost)],
+        [slug, name.trim(), JSON.stringify(waypoints), JSON.stringify(cost), statsJson],
       );
       if (rowCount) return NextResponse.json({ slug });
       // fall through to create when the slug vanished (deleted elsewhere)
@@ -72,9 +73,9 @@ export async function POST(request: Request) {
       .replace(/^-+|-+$/g, '')
       .slice(0, 32) || 'trip'}-${randomBytes(3).toString('hex')}`;
     await pool.query(
-      `INSERT INTO paddle_trips (park, slug, name, waypoints, cost)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [park, newSlug, name.trim(), JSON.stringify(waypoints), JSON.stringify(cost)],
+      `INSERT INTO paddle_trips (park, slug, name, waypoints, cost, stats)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [park, newSlug, name.trim(), JSON.stringify(waypoints), JSON.stringify(cost), statsJson],
     );
     return NextResponse.json({ slug: newSlug });
   } catch (error) {

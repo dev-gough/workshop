@@ -19,6 +19,22 @@ GPS-aware, fully offline in-park.
 - Waypoint drag-to-adjust; insert-between; day ends that snap to campsites.
 - Campsite curation UI (paddle_campsites table already survives re-ingest).
 
+## Field kit (in-park use — short ideas, expand as built)
+
+- **GPS**: geolocation watch → position puck + heading cone on the chart;
+  "distance to next carry / campsite" glance line in the readout; off-route
+  nudge when >200 m from the active trip line.
+- **Offline**: service worker + "take this trip offline" button — pre-cache
+  chart/DEM tiles along the route buffer (size the download, show progress),
+  network JSON, trip data. Cache versioning keyed on park built_at.
+- **Timing**: one-tap leg log ("underway"/"landed") stamps actual times per
+  leg onto the trip → actual-vs-estimate view; feeds the same calibration as
+  inReach tracks. Big thumb-sized button when a trip is active in the field.
+- **Photos**: camera capture geotagged to the trip (photo pins on the chart
+  at capture spot, thumbnail strip per day); server keeps originals per trip.
+- **Battery discipline**: field mode should drop terrain, hillshade, and the
+  RAF-heavy bits; dark chart at night.
+
 ## The app (Temagami crew)
 
 - **PWA**: manifest + service worker; installable from the site. Pre-cache a

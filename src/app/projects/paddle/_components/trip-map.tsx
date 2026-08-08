@@ -28,6 +28,8 @@ interface TripMapProps {
   /** The planned route (kind-tagged LineStrings) and its waypoints. */
   route: GeoJSON.FeatureCollection | null;
   waypoints: [number, number][];
+  /** Fly the table to these bounds when set ([w,s,e,n]) — e.g. a loaded trip. */
+  focus: [number, number, number, number] | null;
   onHover: (info: HoverInfo | null) => void;
   /** Every plain click on the map — the page decides waypoint vs copy. */
   onMapClick: (lngLat: [number, number], shiftKey: boolean) => void;
@@ -57,7 +59,7 @@ function networkToGeoJSON(network: Network): GeoJSON.FeatureCollection {
   };
 }
 
-export default function TripMap({ park, lakes, network, showChart, showRelief, reliefScale, route, waypoints, onHover, onMapClick }: TripMapProps) {
+export default function TripMap({ park, lakes, network, showChart, showRelief, reliefScale, route, waypoints, focus, onHover, onMapClick }: TripMapProps) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const { theme } = useTheme();
@@ -361,6 +363,19 @@ export default function TripMap({ park, lakes, network, showChart, showRelief, r
     if (map.isStyleLoaded()) apply();
     else map.once('load', apply);
   }, [showChart]);
+
+  // fly to a loaded trip — panel-aware padding per form factor
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !focus) return;
+    const mobile = window.matchMedia('(max-width: 767px)').matches;
+    map.fitBounds([[focus[0], focus[1]], [focus[2], focus[3]]], {
+      padding: mobile
+        ? { top: 60, bottom: 220, left: 36, right: 36 }
+        : { top: 80, bottom: 80, left: 340, right: 80 },
+      duration: 700,
+    });
+  }, [focus]);
 
   // keep the planned route + waypoint pins on the table
   useEffect(() => {
