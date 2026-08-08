@@ -54,6 +54,37 @@ export function fmtLatLon(lngLat: [number, number]): string {
   return `${lngLat[1].toFixed(5)}, ${lngLat[0].toFixed(5)}`;
 }
 
+/** Panel views. Future field features (GPS, leg timing, photos) join as new
+ *  entries here + a component — the shell doesn't care how many there are. */
+export type View = 'map' | 'trips' | 'trip';
+
+export interface TripStats {
+  paddleM: number;
+  portageM: number;
+  trackM: number;
+  carries: number;
+  timeH: number;
+  days: number;
+}
+
+export interface TripSummary {
+  slug: string;
+  name: string;
+  waypoints: number;
+  stats: TripStats | null;
+  updated_at: string;
+}
+
+/** Persisted trip: geometry only — waypoints re-snap to the current network
+ *  on load, so saved trips survive re-ingests. */
+export interface TripData {
+  park: string;
+  slug: string;
+  name: string;
+  waypoints: [number, number, number][];
+  cost: Record<string, unknown>;
+}
+
 export function fmtKm(m: number): string {
   return m >= 9950 ? `${Math.round(m / 1000)} km` : m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
 }
