@@ -35,6 +35,16 @@ const isDark = (r: number, g: number, b: number) => r < 100 && g < 100 && b < 10
 const THICK_R = 3;         // a dark px whose full (2r+1)² block is dark marks a thick shape
 const RIBBON_NEAR_R = 3;   // px — anti-aliasing separates dots from ribbon by a mid-tone ring
 const RIBBON_NEAR_FRAC = 0.5; // component pixels that must sit within RIBBON_NEAR_R of ribbon
+
+// Distance-label boxes are pale-tinted plates whose interiors carry
+// elevation-profile graphs — a dark skyline stroke on a profile fill that
+// color-matches the salmon ribbon, which reads as a bogus dot chain. Pale
+// fills this size get their whole bounding box struck from the masks (the
+// paper margin outside the park is pale too, hence the area cap).
+const LABEL_PALE_MIN = 800;    // px²
+const LABEL_PALE_MAX = 60000;  // px²
+const LABEL_PAD = 3;           // px around the box bbox
+const isPale = (r: number, g: number, b: number) => r > 230 && g > 190 && b > 90;
 const CLOSE_R = 6;         // px — bridges dot gaps plus stretches occluded by label wedges
 const MIN_SKEL_PX = 8;     // drop skeleton crumbs smaller than this
 
@@ -160,18 +170,29 @@ export async function chartWaterFraction(
   samples: [number, number][],
   cache: TileCache,
 ): Promise<number | null> {
+  // A 2 px window: creeks draw as 2–3 px blue lines the route wiggles along.
+  const WIN = 2;
   let n = 0;
   let water = 0;
   for (const [gx, gy] of samples) {
-    const tx = Math.floor(gx / TILE);
-    const ty = Math.floor(gy / TILE);
-    const rgb = await tileRGB(slug, tx, ty, cache);
-    if (!rgb) continue;
-    const px = Math.min(TILE - 1, Math.floor(gx - tx * TILE));
-    const py = Math.min(TILE - 1, Math.floor(gy - ty * TILE));
-    const i = (py * TILE + px) * 3;
     n++;
-    if (isWaterPx(rgb[i], rgb[i + 1], rgb[i + 2])) water++;
+    hit: for (let dy = -WIN; dy <= WIN; dy++) {
+      for (let dx = -WIN; dx <= WIN; dx++) {
+        const sx = gx + dx;
+        const sy = gy + dy;
+        const tx = Math.floor(sx / TILE);
+        const ty = Math.floor(sy / TILE);
+        const rgb = await tileRGB(slug, tx, ty, cache);
+        if (!rgb) continue;
+        const px = Math.min(TILE - 1, Math.floor(sx - tx * TILE));
+        const py = Math.min(TILE - 1, Math.floor(sy - ty * TILE));
+        const i = (py * TILE + px) * 3;
+        if (isWaterPx(rgb[i], rgb[i + 1], rgb[i + 2])) {
+          water++;
+          break hit;
+        }
+      }
+    }
   }
   return n ? water / n : null;
 }
@@ -181,7 +202,9 @@ export interface ChartSkeleton {
   h: number;
   gx0: number; // global z15 pixel coords of this raster's (0,0)
   gy0: number;
-  px: Uint8Array; // 1 = portage centerline pixel
+  px: Uint8Array;     // 1 = portage centerline pixel
+  ribbon: Uint8Array; // 1 = route-ribbon pixel (any maintenance class) — a
+                      // ribbon with no dots under a line means paddling
 }
 
 export async function extractPortageSkeleton(
@@ -198,6 +221,7 @@ export async function extractPortageSkeleton(
 
   const ribbon = new Uint8Array(w * h);
   const dark = new Uint8Array(w * h);
+  const pale = new Uint8Array(w * h);
   let covered = false;
   for (let tx = tx0; tx <= tx1; tx++) {
     for (let ty = ty0; ty <= ty1; ty++) {
@@ -213,11 +237,51 @@ export async function extractPortageSkeleton(
           const r = rgb[s], g = rgb[s + 1], b = rgb[s + 2];
           if (isRibbon(r, g, b)) ribbon[d] = 1;
           else if (isDark(r, g, b)) dark[d] = 1;
+          if (isPale(r, g, b)) pale[d] = 1;
         }
       }
     }
   }
   if (!covered) return null;
+
+  // Strike label-box bounding boxes from the masks.
+  {
+    const seenPale = new Uint8Array(w * h);
+    const stack: number[] = [];
+    for (let i = 0; i < pale.length; i++) {
+      if (!pale[i] || seenPale[i]) continue;
+      stack.length = 0;
+      stack.push(i);
+      seenPale[i] = 1;
+      let area = 0;
+      let minX = w, maxX = 0, minY = h, maxY = 0;
+      while (stack.length) {
+        const p = stack.pop()!;
+        area++;
+        const x = p % w;
+        const y = (p / w) | 0;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        if (x > 0 && pale[p - 1] && !seenPale[p - 1]) { seenPale[p - 1] = 1; stack.push(p - 1); }
+        if (x < w - 1 && pale[p + 1] && !seenPale[p + 1]) { seenPale[p + 1] = 1; stack.push(p + 1); }
+        if (y > 0 && pale[p - w] && !seenPale[p - w]) { seenPale[p - w] = 1; stack.push(p - w); }
+        if (y < h - 1 && pale[p + w] && !seenPale[p + w]) { seenPale[p + w] = 1; stack.push(p + w); }
+      }
+      if (area < LABEL_PALE_MIN || area > LABEL_PALE_MAX) continue;
+      const x0 = Math.max(0, minX - LABEL_PAD);
+      const x1 = Math.min(w - 1, maxX + LABEL_PAD);
+      const y0 = Math.max(0, minY - LABEL_PAD);
+      const y1 = Math.min(h - 1, maxY + LABEL_PAD);
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) {
+          ribbon[y * w + x] = 0;
+          dark[y * w + x] = 0;
+        }
+      }
+    }
+  }
 
   // Dot chains anti-alias into the thick marks they touch (label wedges,
   // end triangles), so thick shapes are erased pixel-wise first: any dark
@@ -319,5 +383,5 @@ export async function extractPortageSkeleton(
     if (comp.length < MIN_SKEL_PX) for (const p of comp) closed[p] = 0;
   }
 
-  return { w, h, gx0: tx0 * TILE, gy0: ty0 * TILE, px: closed };
+  return { w, h, gx0: tx0 * TILE, gy0: ty0 * TILE, px: closed, ribbon };
 }

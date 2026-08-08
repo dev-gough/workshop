@@ -32,12 +32,20 @@ const SNAP_PX = 70;        // endpoint-to-skeleton snap radius (~230 ground m at
 const BRIDGE_PX = 90;      // max hop between skeleton components — label boxes, body
                            // text, and rapids arrows sit on the line and can occlude
                            // long stretches of it
-// Reject traces that stray too far from the OTN line — but scale the
-// allowance with length: OTN digitizes long carries as near-straight lines,
-// and a real 3 km portage can legitimately swing ~1 km wide of that chord
-// (seen at the McKaskill 3760 m carry).
+// Reject traces that stray too far from the OTN line — scaled with length
+// in both directions: OTN digitizes long carries as near-straight lines
+// (a real 3 km portage can swing ~1 km wide of that chord — McKaskill), but
+// a SHORT segment has no business leaping sideways: a 150 m creek sliver
+// jumping 200 m onto a parallel road's dot chain is a mis-trace.
 const MAX_DEV_BASE_M = 450;
-const MAX_DEV_FRAC = 0.3; // of the segment's OTN length
+const MAX_DEV_FRAC = 0.3;      // of the segment's OTN length, when long
+const MAX_DEV_SHORT_M = 120;   // floor for segments under MAX_DEV_SHORT_LEN
+const MAX_DEV_SHORT_LEN = 400;
+
+function maxDevAllowedM(lengthM: number): number {
+  if (lengthM < MAX_DEV_SHORT_LEN) return Math.max(MAX_DEV_SHORT_M, 0.45 * lengthM);
+  return Math.max(MAX_DEV_BASE_M, MAX_DEV_FRAC * lengthM);
+}
 const SIMPLIFY_PX = 1.5;   // Douglas–Peucker tolerance on the traced path
 
 export interface AlignStats {
@@ -303,11 +311,20 @@ const RECLASS_COVERAGE = 0.7;  // fraction of samples the dot chain must cover
 const RECLASS_STEP_PX = 6;     // sampling interval along the line
 
 // The inverse arbitration, for "portages" the dot chain disowns (<= this
-// coverage): water under the line means it is really paddling; dry paper
-// means a walkable-but-not-a-carry track (hydro corridors, walk-ins).
+// coverage). Jeff's route grammar settles what they really are: a ribbon
+// with no dots is a paddling route (creeks the OHN doesn't carry still get
+// drawn as salmon ribbon), plain chart water is paddling, and dry paper is
+// a walkable-but-not-a-carry track (hydro corridors, walk-ins). Checked
+// BEFORE tracing too — a dotless creek segment must not zigzag onto a
+// neighboring road's dot chain just because its endpoints can reach it.
 const DISOWN_COVERAGE = 0.15;
-const DISOWN_MIN_M = 400;      // leave short unaligned stubs alone
+const PADDLE_MIN_M = 60;       // ribbon/water arbitration floor — landing stubs
+                               // at real carries have dot coverage and never
+                               // reach arbitration, so this can sit low
+const DISOWN_MIN_M = 400;      // track demotion floor — spare short real stubs
 const WATER_FRAC_PADDLE = 0.6;
+const RIBBON_FRAC_PADDLE = 0.6;
+const RIBBON_WIN_PX = 3;       // ribbon test window around a sample
 
 // Mixed-segment splitting: one OTN segment can blend a real carry with a
 // phantom stretch the chart disowns (the Bonnechere hydro corridor: real
@@ -414,6 +431,39 @@ export async function alignPortagesToChart(
     return samples.length ? covered / samples.length : 0;
   };
 
+  const ribbonCoverage = (skel: ChartSkeleton, samples: [number, number][]): number => {
+    let covered = 0;
+    for (const [gx, gy] of samples) {
+      const lx = Math.round(gx - skel.gx0);
+      const ly = Math.round(gy - skel.gy0);
+      win: for (let dy = -RIBBON_WIN_PX; dy <= RIBBON_WIN_PX; dy++) {
+        for (let dx = -RIBBON_WIN_PX; dx <= RIBBON_WIN_PX; dx++) {
+          const x = lx + dx;
+          const y = ly + dy;
+          if (x < 0 || y < 0 || x >= skel.w || y >= skel.h) continue;
+          if (skel.ribbon[y * skel.w + x]) {
+            covered++;
+            break win;
+          }
+        }
+      }
+    }
+    return samples.length ? covered / samples.length : 0;
+  };
+
+  // What a dot-disowned line really is, per the chart. null = leave alone.
+  const arbitrate = async (
+    lengthM: number,
+    skel: ChartSkeleton,
+    samples: [number, number][],
+  ): Promise<'paddle' | 'track' | null> => {
+    if (lengthM < PADDLE_MIN_M) return null;
+    if (ribbonCoverage(skel, samples) >= RIBBON_FRAC_PADDLE) return 'paddle';
+    const waterFrac = await chartWaterFraction(slug, samples, cache);
+    if (waterFrac !== null && waterFrac >= WATER_FRAC_PADDLE) return 'paddle';
+    return lengthM >= DISOWN_MIN_M ? 'track' : null;
+  };
+
   // ---- pass 1: paddle stretches the dot chain covers become portage ----
   let reclassified = 0;
   const candidates = segments
@@ -486,14 +536,14 @@ export async function alignPortagesToChart(
     }
     if (runs.length < 2) continue;
 
-    // what each uncovered piece really is, per the chart's paint
+    // what each uncovered piece really is, per the chart's route grammar
     const kinds: ('paddle' | 'portage' | 'track')[] = [];
     for (const run of runs) {
       if (run.covered) {
         kinds.push('portage');
       } else {
-        const waterFrac = await chartWaterFraction(slug, samples.slice(run.start, run.end + 1), cache);
-        kinds.push(waterFrac !== null && waterFrac >= WATER_FRAC_PADDLE ? 'paddle' : 'track');
+        const runSamples = samples.slice(run.start, run.end + 1);
+        kinds.push((await arbitrate(Infinity, skel, runSamples)) ?? 'track');
       }
     }
 
@@ -543,20 +593,23 @@ export async function alignPortagesToChart(
 
   let done = 0;
 
-  // A failed portage the dot chain disowns gets arbitrated by what the chart
-  // paints under it: water → it's really paddling; dry paper → a walkable
-  // track, not a carry. Returns the new kind, or null to leave it alone.
-  const disown = async (seg: GraphSegment, skel: ChartSkeleton): Promise<string | null> => {
-    if (seg.lengthM < DISOWN_MIN_M) return null;
-    const samples = samplePx(seg.coords, RECLASS_STEP_PX);
-    if (dotCoverage(skel, samples) > DISOWN_COVERAGE) return null;
-    const waterFrac = await chartWaterFraction(slug, samples, cache);
-    if (waterFrac === null) return null;
-    seg.kind = waterFrac >= WATER_FRAC_PADDLE ? 'paddle' : 'track';
+  // Arbitrate a portage the dot chain disowns; mutates kind and updates
+  // stats. Returns true when the segment was settled.
+  const disown = async (
+    seg: GraphSegment,
+    skel: ChartSkeleton,
+    samples: [number, number][],
+  ): Promise<boolean> => {
+    if (dotCoverage(skel, samples) > DISOWN_COVERAGE) return false;
+    const kind = await arbitrate(seg.lengthM, skel, samples);
+    if (!kind) return false;
+    seg.kind = kind;
+    if (kind === 'paddle') stats.toPaddle++;
+    else stats.tracks++;
     if (process.env.CHART_DEBUG) {
-      console.error(`[align] seg ${seg.id} (${Math.round(seg.lengthM)}m): portage->${seg.kind} (water ${waterFrac.toFixed(2)})`);
+      console.error(`[align] seg ${seg.id} (${Math.round(seg.lengthM)}m): portage->${kind}`);
     }
-    return seg.kind;
+    return true;
   };
 
   for (const seg of portages) {
@@ -567,29 +620,24 @@ export async function alignPortagesToChart(
       continue;
     }
 
+    // The chart may disown this line outright — settle that before tracing,
+    // or a dotless creek segment happily snaps onto a nearby road's chain.
+    const samples = samplePx(seg.coords, RECLASS_STEP_PX);
+    if (await disown(seg, skel, samples)) continue;
+
     const first = seg.coords[0];
     const last = seg.coords[seg.coords.length - 1];
     const a = nearestSkelPx(skel, mercPxX(first[0]), mercPxY(first[1]));
     const b = nearestSkelPx(skel, mercPxX(last[0]), mercPxY(last[1]));
     if (a === null || b === null || a === b) {
-      const flipped = await disown(seg, skel);
-      if (flipped === 'paddle') stats.toPaddle++;
-      else if (flipped === 'track') stats.tracks++;
-      else {
-        stats.noSnap++;
-        if (process.env.CHART_DEBUG) console.error(`[align] seg ${seg.id} (${Math.round(seg.lengthM)}m): no-snap`);
-      }
+      stats.noSnap++;
+      if (process.env.CHART_DEBUG) console.error(`[align] seg ${seg.id} (${Math.round(seg.lengthM)}m): no-snap`);
       continue;
     }
     const path = skelPath(skel, a, b);
     if (!path) {
-      const flipped = await disown(seg, skel);
-      if (flipped === 'paddle') stats.toPaddle++;
-      else if (flipped === 'track') stats.tracks++;
-      else {
-        stats.noPath++;
-        if (process.env.CHART_DEBUG) console.error(`[align] seg ${seg.id} (${Math.round(seg.lengthM)}m): no-path`);
-      }
+      stats.noPath++;
+      if (process.env.CHART_DEBUG) console.error(`[align] seg ${seg.id} (${Math.round(seg.lengthM)}m): no-path`);
       continue;
     }
 
@@ -609,7 +657,7 @@ export async function alignPortagesToChart(
     if (
       lengthM < 0.35 * seg.lengthM ||
       lengthM > 3.5 * seg.lengthM + 200 ||
-      maxDeviationM(trace, seg.coords) > Math.max(MAX_DEV_BASE_M, MAX_DEV_FRAC * seg.lengthM)
+      maxDeviationM(trace, seg.coords) > maxDevAllowedM(seg.lengthM)
     ) {
       stats.rejected++;
       if (process.env.CHART_DEBUG) {
