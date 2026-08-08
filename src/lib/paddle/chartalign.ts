@@ -555,10 +555,14 @@ export async function alignPortagesToChart(
       for (let i = 1; i < coords.length; i++) len += haversineM(coords[i - 1], coords[i]);
       return len;
     };
+    // seg.b is mutated when piece 0 is written back, so the far node MUST be
+    // captured first — the last piece ends at the original b, not the new
+    // boundary node (getting this wrong severed every split chain).
+    const origB = seg.b;
     let fromNode = seg.a;
     for (let i = 0; i < pieces.length; i++) {
       const isLast = i === pieces.length - 1;
-      let toNode = seg.b;
+      let toNode = origB;
       if (!isLast) {
         const v = pieces[i][pieces[i].length - 1];
         toNode = graph.nodes.length;
