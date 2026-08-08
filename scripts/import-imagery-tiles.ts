@@ -3,6 +3,13 @@
  * imagery layer is self-hosted like everything else on the table.
  *
  *   npm run import-imagery-tiles -- --park temagami [--max-zoom 15]
+ *   npm run import-imagery-tiles -- --park temagami --corridor 500
+ *
+ * `--corridor <metres>` is the deep pass: z16–17 only within that buffer of
+ * the park's network segments (read from Postgres) — full native sharpness
+ * where the crew actually paddles and carries, without the ~400k-tile cost
+ * of taking the whole bbox that deep. Off-corridor requests are synthesized
+ * from the z15 pyramid at serve time, so run the bbox import first.
  *
  * Source: Ontario Imagery Web Map Service (GEOspatial Ontario), an open
  * WMTS whose GoogleMapsCompatible matrix is the standard web-mercator XYZ
@@ -14,7 +21,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { PARKS } from '../src/lib/paddle/parks';
-import { IMAGERY_MAX_ZOOM, imageryTileDir } from '../src/lib/paddle/imagerytiles';
+import { CORRIDOR_MAX_ZOOM, IMAGERY_MAX_ZOOM, imageryTileDir } from '../src/lib/paddle/imagerytiles';
 
 const MIN_ZOOM = 4;
 const SOURCE =
@@ -35,6 +42,7 @@ if (!slug || !park) {
 const maxZoom = Number(arg('--max-zoom') ?? IMAGERY_MAX_ZOOM);
 // 8 workers drew occasional 429s from the province — default gentler.
 const concurrency = Number(arg('--concurrency') ?? 4);
+const corridorM = arg('--corridor') ? Number(arg('--corridor')) : null;
 
 const tileX = (lon: number, z: number) => Math.floor(((lon + 180) / 360) * 2 ** z);
 const tileY = (lat: number, z: number) => {
@@ -42,9 +50,11 @@ const tileY = (lat: number, z: number) => {
   return Math.floor(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * 2 ** z);
 };
 
-async function main() {
+type Job = { z: number; x: number; y: number };
+
+function bboxJobs(): Job[] {
   const [w, s, e, n] = park!.bbox;
-  const jobs: { z: number; x: number; y: number }[] = [];
+  const jobs: Job[] = [];
   for (let z = MIN_ZOOM; z <= maxZoom; z++) {
     const x0 = tileX(w, z);
     const x1 = tileX(e, z);
@@ -52,10 +62,65 @@ async function main() {
     const y1 = tileY(s, z);
     for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) jobs.push({ z, x, y });
   }
+  return jobs;
+}
+
+/** z16–17 tiles within `corridorM` metres of any network segment. */
+async function corridorJobs(): Promise<Job[]> {
+  const { default: pool } = await import('../src/lib/db');
+  const { rows } = await pool.query('SELECT coords FROM paddle_segments WHERE park = $1', [slug]);
+  await pool.end();
+  if (!rows.length) throw new Error(`no segments in Postgres for ${slug} — ingest first`);
+
+  const keys = new Set<string>();
+  const stamp = (lon: number, lat: number) => {
+    const dLat = corridorM! / 111_320;
+    const dLon = corridorM! / (111_320 * Math.cos((lat * Math.PI) / 180));
+    for (let z = IMAGERY_MAX_ZOOM + 1; z <= CORRIDOR_MAX_ZOOM; z++) {
+      const x0 = tileX(lon - dLon, z);
+      const x1 = tileX(lon + dLon, z);
+      const y0 = tileY(lat + dLat, z);
+      const y1 = tileY(lat - dLat, z);
+      for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) keys.add(`${z}/${x}/${y}`);
+    }
+  };
+  for (const row of rows) {
+    const coords: [number, number][] =
+      typeof row.coords === 'string' ? JSON.parse(row.coords) : row.coords;
+    for (let i = 0; i < coords.length; i++) {
+      const [lon, lat] = coords[i];
+      stamp(lon, lat);
+      if (i === 0) continue;
+      // Long straight reaches (big-lake crossings) have sparse vertices —
+      // sample between them so the stamps overlap.
+      const [plon, plat] = coords[i - 1];
+      const stepM = Math.max(50, corridorM! / 2);
+      const distM = Math.hypot(
+        (lon - plon) * 111_320 * Math.cos((lat * Math.PI) / 180),
+        (lat - plat) * 110_540,
+      );
+      for (let k = 1; k * stepM < distM; k++) {
+        const t = (k * stepM) / distM;
+        stamp(plon + (lon - plon) * t, plat + (lat - plat) * t);
+      }
+    }
+  }
+  return [...keys].map((k) => {
+    const [z, x, y] = k.split('/').map(Number);
+    return { z, x, y };
+  });
+}
+
+async function main() {
+  const jobs = corridorM ? await corridorJobs() : bboxJobs();
   // Work top-down so wide zooms are usable while the deep levels stream in.
   jobs.sort((a, b) => b.z - a.z);
   const total = jobs.length;
-  console.log(`${slug}: ${total} tiles (z${MIN_ZOOM}–${maxZoom})`);
+  console.log(
+    corridorM
+      ? `${slug}: ${total} corridor tiles (z${IMAGERY_MAX_ZOOM + 1}–${CORRIDOR_MAX_ZOOM}, ±${corridorM} m of the network)`
+      : `${slug}: ${total} tiles (z${MIN_ZOOM}–${maxZoom})`,
+  );
 
   const dir = imageryTileDir(slug!);
   let done = 0;

@@ -3,7 +3,7 @@ import pool from '@/lib/db';
 import { PARKS } from '@/lib/paddle/parks';
 import { chartOnDisk } from '@/lib/paddle/jefftiles';
 import { DEM_MAX_ZOOM, DEM_PAD_DEG, demOnDisk } from '@/lib/paddle/demtiles';
-import { IMAGERY_ATTRIBUTION, IMAGERY_MAX_ZOOM, imageryOnDisk } from '@/lib/paddle/imagerytiles';
+import { IMAGERY_ATTRIBUTION, imageryMaxZoom, imageryOnDisk } from '@/lib/paddle/imagerytiles';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,7 +25,7 @@ export async function GET() {
         chart: chart && chartOnDisk(row.slug) ? chart : null,
         // Same rule for the OIWMS aerial imagery pyramid.
         imagery: imageryOnDisk(row.slug)
-          ? { maxZoom: IMAGERY_MAX_ZOOM, attribution: IMAGERY_ATTRIBUTION }
+          ? { maxZoom: imageryMaxZoom(row.slug), attribution: IMAGERY_ATTRIBUTION }
           : null,
         // Same rule for terrain: only when the DEM cache has been imported.
         // Bounds are the padded import window — past them the mesh would

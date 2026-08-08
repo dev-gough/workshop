@@ -50,6 +50,9 @@ GPS-aware, fully offline in-park.
   self-hosted XYZ pyramid, z4–15 over the park bbox:
   `npm run import-imagery-tiles -- --park <slug>` → "Aerials" toggle. Drapes
   over the terrain mesh; gives chart-less Temagami a photographic base.
+  Deep pass (same day): `--corridor 500` adds native z16–17 within 500 m of
+  the network; off-corridor z16–17 is synthesized from z15 at serve time
+  (readImageryTileDeep), so the map stays seamless at full zoom.
 - Chart licensing: Jeff's tiles are a personal-use purchase. Decide how the
   crew handles copies before sharing installs (per-person purchase is the
   clean answer; the tool must also work chart-less on the vector base).

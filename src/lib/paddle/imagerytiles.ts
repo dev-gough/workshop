@@ -9,11 +9,16 @@
 import { promises as fs } from 'node:fs';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import sharp from 'sharp';
 
-/** Top zoom the importer fetches — ~3 m/px at Temagami's latitude. The
- *  source orthos are far sharper, so MapLibre overzooms cleanly past it;
- *  going deeper on disk quadruples tile count per level. */
+/** Top zoom the importer fetches bbox-wide — ~3 m/px at Temagami's
+ *  latitude. Going deeper everywhere quadruples tile count per level. */
 export const IMAGERY_MAX_ZOOM = 15;
+
+/** Top zoom of the route-corridor import (`--corridor`): z16–17 only
+ *  within a buffer of the network, where the crew actually paddles. Off
+ *  corridor these levels are synthesized from the z15 pyramid on demand. */
+export const CORRIDOR_MAX_ZOOM = 17;
 
 export const IMAGERY_ATTRIBUTION = 'Aerial imagery: Ontario GeoHub (OIWMS), OGL–Ontario';
 
@@ -24,6 +29,15 @@ export function imageryTileDir(slug: string): string {
 /** Whether a park's imagery tiles have been imported. */
 export function imageryOnDisk(slug: string): boolean {
   return existsSync(imageryTileDir(slug));
+}
+
+/** Deepest zoom present on disk — CORRIDOR_MAX_ZOOM once a corridor import
+ *  has run, else the bbox-wide pyramid top. What the parks API advertises. */
+export function imageryMaxZoom(slug: string): number {
+  for (let z = CORRIDOR_MAX_ZOOM; z > IMAGERY_MAX_ZOOM; z--) {
+    if (existsSync(path.join(imageryTileDir(slug), String(z)))) return z;
+  }
+  return IMAGERY_MAX_ZOOM;
 }
 
 /** The service emits JPEG for full tiles and PNG where nodata needs alpha
@@ -45,4 +59,38 @@ export async function readImageryTile(
   } catch {
     return null;
   }
+}
+
+/**
+ * Exact tile, or — above the bbox-wide pyramid — the nearest on-disk
+ * ancestor's quadrant cropped and upscaled to 256 px. Keeps the map
+ * seamless at z16–17: corridor tiles come back native, everywhere else
+ * matches what MapLibre's own overzoom of z15 would have shown.
+ */
+export async function readImageryTileDeep(
+  slug: string,
+  z: number,
+  x: number,
+  y: number,
+): Promise<{ data: Buffer; type: string } | null> {
+  const exact = await readImageryTile(slug, z, x, y);
+  if (exact || z <= IMAGERY_MAX_ZOOM) return exact;
+  for (let az = z - 1; az >= IMAGERY_MAX_ZOOM; az--) {
+    const dz = z - az;
+    const ancestor = await readImageryTile(slug, az, x >> dz, y >> dz);
+    if (!ancestor) continue;
+    const size = 256 >> dz; // dz ≤ 2, so ≥ 64 px — plenty to scale up
+    const png = ancestor.type === 'image/png'; // keep alpha at Ontario-boundary voids
+    const img = sharp(ancestor.data)
+      .extract({
+        left: (x % (1 << dz)) * size,
+        top: (y % (1 << dz)) * size,
+        width: size,
+        height: size,
+      })
+      .resize(256, 256);
+    const data = await (png ? img.png() : img.jpeg({ quality: 80 })).toBuffer();
+    return { data, type: ancestor.type };
+  }
+  return null;
 }

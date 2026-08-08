@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import sharp from 'sharp';
 import { PARKS } from '@/lib/paddle/parks';
-import { IMAGERY_MAX_ZOOM, imageryOnDisk, readImageryTile } from '@/lib/paddle/imagerytiles';
+import { CORRIDOR_MAX_ZOOM, imageryOnDisk, readImageryTileDeep } from '@/lib/paddle/imagerytiles';
 
 // Serves the cached OIWMS aerial orthophotos as ordinary XYZ raster tiles,
 // straight from the .cache pyramid `npm run import-imagery-tiles` built —
@@ -37,7 +37,7 @@ export async function GET(
     !Number.isInteger(xi) ||
     !Number.isInteger(yi) ||
     zi < 0 ||
-    zi > IMAGERY_MAX_ZOOM ||
+    zi > CORRIDOR_MAX_ZOOM ||
     xi < 0 ||
     yi < 0 ||
     xi >= 2 ** zi ||
@@ -46,7 +46,9 @@ export async function GET(
     return new NextResponse(null, { status: 404 });
   }
 
-  const tile = await readImageryTile(park, zi, xi, yi);
+  // Above z15 this falls back to upscaling the z15 pyramid where the
+  // corridor import didn't reach — sharp only along the routes, seamless off.
+  const tile = await readImageryTileDeep(park, zi, xi, yi);
   const body = tile?.data ?? (await transparentPng());
 
   return new NextResponse(new Uint8Array(body), {
