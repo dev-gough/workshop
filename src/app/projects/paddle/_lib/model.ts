@@ -46,6 +46,7 @@ export interface Network {
 export type HoverInfo =
   | { type: 'segment'; kind: 'paddle' | 'portage' | 'track'; lengthM: number; elevM?: number | null; lngLat: [number, number] }
   | { type: 'lake'; name: string | null; areaM2: number; elevM?: number | null; lngLat: [number, number] }
+  | { type: 'campsite'; name: string | null; lngLat: [number, number] }
   | { type: 'ground'; elevM: number | null; lngLat: [number, number] };
 
 /** "lat, lon" at ~1 m precision — the paste-friendly report format. */

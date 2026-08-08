@@ -25,41 +25,25 @@ interface TripMapProps {
   showRelief: boolean;
   /** Vertical exaggeration of the terrain mesh — ×1 is true scale. */
   reliefScale: number;
+  /** The planned route (kind-tagged LineStrings) and its waypoints. */
+  route: GeoJSON.FeatureCollection | null;
+  waypoints: [number, number][];
   onHover: (info: HoverInfo | null) => void;
-  /** Fired after a click tries to copy the cursor coordinates; `ok` reports
-   *  whether the clipboard actually took them. */
-  onCopyCoords: (coords: string, ok: boolean) => void;
+  /** Every plain click on the map — the page decides waypoint vs copy. */
+  onMapClick: (lngLat: [number, number], shiftKey: boolean) => void;
 }
 
-/**
- * navigator.clipboard only exists in secure contexts — over plain LAN HTTP
- * (or with a browser shield blocking it) it is undefined and the write
- * silently never happens. Fall back to the deprecated-but-working
- * execCommand path, and report honestly whether either took.
- */
-async function copyText(text: string): Promise<boolean> {
-  if (window.isSecureContext && navigator.clipboard) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch {
-      /* blocked — try the legacy path */
-    }
-  }
-  try {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.focus();
-    ta.select();
-    const ok = document.execCommand('copy');
-    ta.remove();
-    return ok;
-  } catch {
-    return false;
-  }
+const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+
+function waypointFC(waypoints: [number, number][]): GeoJSON.FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: waypoints.map((w, i) => ({
+      type: 'Feature',
+      properties: { n: i + 1 },
+      geometry: { type: 'Point', coordinates: w },
+    })),
+  };
 }
 
 function networkToGeoJSON(network: Network): GeoJSON.FeatureCollection {
@@ -73,12 +57,14 @@ function networkToGeoJSON(network: Network): GeoJSON.FeatureCollection {
   };
 }
 
-export default function TripMap({ park, lakes, network, showChart, showRelief, reliefScale, onHover, onCopyCoords }: TripMapProps) {
+export default function TripMap({ park, lakes, network, showChart, showRelief, reliefScale, route, waypoints, onHover, onMapClick }: TripMapProps) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const { theme } = useTheme();
   const themeRef = useRef(theme);
   themeRef.current = theme;
+  const onMapClickRef = useRef(onMapClick);
+  onMapClickRef.current = onMapClick;
   const showChartRef = useRef(showChart);
   showChartRef.current = showChart;
   const showReliefRef = useRef(showRelief);
@@ -95,6 +81,21 @@ export default function TripMap({ park, lakes, network, showChart, showRelief, r
     const sources: Record<string, maplibregl.SourceSpecification> = {
       lakes: { type: 'geojson', data: lakes },
       network: { type: 'geojson', data: networkToGeoJSON(network) },
+      camps: {
+        type: 'geojson',
+        data: {
+          type: 'FeatureCollection',
+          features: network.campsites
+            .filter((c) => c.status !== 'closed')
+            .map((c) => ({
+              type: 'Feature',
+              properties: { name: c.name },
+              geometry: { type: 'Point', coordinates: [c.lon, c.lat] },
+            })),
+        },
+      },
+      route: { type: 'geojson', data: EMPTY_FC },
+      wps: { type: 'geojson', data: EMPTY_FC },
     };
     if (park.chart) {
       sources.jeff = {
@@ -210,6 +211,54 @@ export default function TripMap({ park, lakes, network, showChart, showRelief, r
           'line-width': ['interpolate', ['linear'], ['zoom'], 7, 1.6, 11, 3, 14, 4.5],
         },
       },
+      {
+        id: 'camps',
+        type: 'circle',
+        source: 'camps',
+        paint: {
+          'circle-color': pal.campsite,
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 7, 1.2, 11, 2.6, 14, 4.5],
+          'circle-opacity': 0.9,
+        },
+      },
+      // the planned route rides above everything, on a paper halo
+      {
+        id: 'route-casing',
+        type: 'line',
+        source: 'route',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': pal.routeCasing,
+          'line-width': ['interpolate', ['linear'], ['zoom'], 7, 4, 11, 7, 14, 10],
+          'line-opacity': 0.55,
+        },
+      },
+      {
+        id: 'route-line',
+        type: 'line',
+        source: 'route',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': [
+            'match', ['get', 'kind'],
+            'portage', pal.portage,
+            'track', pal.track,
+            pal.paddle,
+          ] as unknown as maplibregl.ExpressionSpecification,
+          'line-width': ['interpolate', ['linear'], ['zoom'], 7, 2.2, 11, 4, 14, 6],
+        },
+      },
+      {
+        id: 'wps',
+        type: 'circle',
+        source: 'wps',
+        paint: {
+          'circle-color': pal.waypoint,
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 7, 3.5, 12, 5.5],
+          'circle-stroke-color': pal.waypointStroke,
+          'circle-stroke-width': 1.6,
+        },
+      },
     );
 
     const map = new maplibregl.Map({
@@ -247,6 +296,16 @@ export default function TripMap({ park, lakes, network, showChart, showRelief, r
         [e.point.x - pad, e.point.y - pad],
         [e.point.x + pad, e.point.y + pad],
       ];
+      const camp = map.queryRenderedFeatures(box, { layers: ['camps'] })[0];
+      if (camp) {
+        map.getCanvas().style.cursor = 'crosshair';
+        onHover({
+          type: 'campsite',
+          name: (camp.properties.name as string | null) ?? null,
+          lngLat,
+        });
+        return;
+      }
       const seg = map.queryRenderedFeatures(box, { layers: ['net-portage', 'net-paddle', 'net-track'] })[0];
       if (seg) {
         map.getCanvas().style.cursor = 'crosshair';
@@ -275,10 +334,9 @@ export default function TripMap({ park, lakes, network, showChart, showRelief, r
       onHover({ type: 'ground', elevM, lngLat });
     });
     map.on('mouseout', () => onHover(null));
-    // Click = copy the spot for reporting chart/route mismatches.
+    // Click routing/copying is the page's call — planning mode decides.
     map.on('click', (e: maplibregl.MapMouseEvent) => {
-      const coords = `${e.lngLat.lat.toFixed(5)}, ${e.lngLat.lng.toFixed(5)}`;
-      void copyText(coords).then((ok) => onCopyCoords(coords, ok));
+      onMapClickRef.current([e.lngLat.lng, e.lngLat.lat], e.originalEvent.shiftKey);
     });
 
     mapRef.current = map;
@@ -303,6 +361,20 @@ export default function TripMap({ park, lakes, network, showChart, showRelief, r
     if (map.isStyleLoaded()) apply();
     else map.once('load', apply);
   }, [showChart]);
+
+  // keep the planned route + waypoint pins on the table
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const apply = () => {
+      (map.getSource('route') as maplibregl.GeoJSONSource | undefined)?.setData(route ?? EMPTY_FC);
+      (map.getSource('wps') as maplibregl.GeoJSONSource | undefined)?.setData(waypointFC(waypoints));
+    };
+    // isStyleLoaded() flickers false during tile churn while 'load' has long
+    // fired (and never will again) — the sources existing is the real gate.
+    if (map.getSource('route')) apply();
+    else map.once('load', apply);
+  }, [route, waypoints]);
 
   // press the relief up out of the paper, flatten it back down, or rescale it
   useEffect(() => {
@@ -330,6 +402,16 @@ export default function TripMap({ park, lakes, network, showChart, showRelief, r
       map.setPaintProperty('net-paddle', 'line-color', pal.paddle);
       map.setPaintProperty('net-portage', 'line-color', pal.portage);
       map.setPaintProperty('net-track', 'line-color', pal.track);
+      map.setPaintProperty('camps', 'circle-color', pal.campsite);
+      map.setPaintProperty('route-casing', 'line-color', pal.routeCasing);
+      map.setPaintProperty('route-line', 'line-color', [
+        'match', ['get', 'kind'],
+        'portage', pal.portage,
+        'track', pal.track,
+        pal.paddle,
+      ] as unknown as maplibregl.ExpressionSpecification);
+      map.setPaintProperty('wps', 'circle-color', pal.waypoint);
+      map.setPaintProperty('wps', 'circle-stroke-color', pal.waypointStroke);
       if (map.getLayer('jeff-chart')) {
         map.setPaintProperty('jeff-chart', 'raster-brightness-max', pal.chartBrightnessMax);
         map.setPaintProperty('jeff-chart', 'raster-saturation', pal.chartSaturation);

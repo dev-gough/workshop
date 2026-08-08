@@ -13,6 +13,10 @@ export interface MapPalette {
   /** Walkable-but-not-a-carry lines (hydro corridors, walk-ins) — pencilled in. */
   track: string;
   campsite: string;
+  /** Halo under the planned route so it reads over the busy chart. */
+  routeCasing: string;
+  waypoint: string;
+  waypointStroke: string;
   /** Raster paint for the purchased paper chart — dimmed under lamplight in dark mode. */
   chartBrightnessMax: number;
   chartSaturation: number;
@@ -32,6 +36,9 @@ export const MAP_PALETTES: Record<'light' | 'dark', MapPalette> = {
     portage: '#b0402c',
     track: '#8f8871',
     campsite: '#8c334d',
+    routeCasing: '#fffdf2',
+    waypoint: '#26332c',
+    waypointStroke: '#fffdf2',
     chartBrightnessMax: 1,
     chartSaturation: 0,
     hillshadeShadow: '#8a7a5c',
@@ -47,6 +54,9 @@ export const MAP_PALETTES: Record<'light' | 'dark', MapPalette> = {
     portage: '#e0664a',
     track: '#6e7566',
     campsite: '#c86a86',
+    routeCasing: '#0c1210',
+    waypoint: '#e8e2cf',
+    waypointStroke: '#0c1210',
     chartBrightnessMax: 0.72,
     chartSaturation: -0.2,
     hillshadeShadow: '#060a08',

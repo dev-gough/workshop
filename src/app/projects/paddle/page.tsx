@@ -3,18 +3,57 @@
 // RM 18, The Outfitter — the map table at a canoe outfitter's. The whole
 // room is one chart under the header: the ingested Ontario network painted
 // on paper, with a pinned trip sheet (stats, legend, parks) and a
-// surveyor's readout that follows the cursor. Route planning lands on this
-// same table next — the sheet is deliberately built to grow a waypoint list.
+// surveyor's readout that follows the cursor. Route planning happens on
+// this same table: drop waypoints, and the sheet keeps the ledger — legs,
+// carries, day splits, and a GPX to take with you.
 
 import dynamic from 'next/dynamic';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PageTransition from '@/components/motion/PageTransition';
 import { useHeaderConfig } from '@/components/header-config';
 import { fmtKm, fmtLatLon, type HoverInfo, type Network, type ParkInfo } from './_lib/model';
+import { DEFAULT_COST, fmtHours, toGpx, TripRouter, type CostParams, type Leg, type Snap } from './_lib/route';
 
 const TripMap = dynamic(() => import('./_components/trip-map'), { ssr: false });
 
 const LAKE_MIN_AREA = 10_000; // m² — fades sub-hectare off-route ponds out of the chart
+const SNAP_MAX_M = 300;
+
+interface Waypoint {
+  snap: Snap;
+  dayEnd: boolean;
+}
+
+/**
+ * navigator.clipboard only exists in secure contexts — over plain LAN HTTP
+ * (or with a browser shield blocking it) it is undefined and the write
+ * silently never happens. Fall back to the deprecated-but-working
+ * execCommand path, and report honestly whether either took.
+ */
+async function copyText(text: string): Promise<boolean> {
+  if (window.isSecureContext && navigator.clipboard) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      /* blocked — try the legacy path */
+    }
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}
 
 export default function PaddlePage() {
   useHeaderConfig({ scopeClass: 'pd-theme' });
@@ -33,6 +72,11 @@ export default function PaddlePage() {
   // but modest, so the default presses it up a little.
   const [reliefScale, setReliefScale] = useState(1.5);
 
+  // ── route planning ──
+  const [planning, setPlanning] = useState(false);
+  const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
+  const [cost, setCost] = useState<CostParams>(DEFAULT_COST);
+
   useEffect(() => {
     fetch('/api/paddle/parks')
       .then((r) => r.json())
@@ -50,6 +94,7 @@ export default function PaddlePage() {
     let stale = false;
     setLakes(null);
     setNetwork(null);
+    setWaypoints([]); // snaps index into the old park's segments
     Promise.all([
       fetch(`/api/paddle/lakes?park=${park}&minArea=${LAKE_MIN_AREA}`).then((r) => r.json()),
       fetch(`/api/paddle/network?park=${park}`).then((r) => r.json()),
@@ -69,16 +114,122 @@ export default function PaddlePage() {
 
   const onHover = useCallback((info: HoverInfo | null) => setHover(info), []);
 
-  // Click-to-copy flash: the readout confirms which spot just hit the
-  // clipboard — or admits the clipboard refused, leaving the coords up
-  // long enough to transcribe.
-  const [copied, setCopied] = useState<{ coords: string; ok: boolean } | null>(null);
-  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const onCopyCoords = useCallback((coords: string, ok: boolean) => {
-    setCopied({ coords, ok });
-    if (copyTimer.current) clearTimeout(copyTimer.current);
-    copyTimer.current = setTimeout(() => setCopied(null), ok ? 1800 : 6000);
+  // Transient readout flash — copy confirmations, snap misses.
+  const [flash, setFlash] = useState<{ text: string; tone: 'ok' | 'warn' } | null>(null);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showFlash = useCallback((text: string, tone: 'ok' | 'warn', ms: number) => {
+    setFlash({ text, tone });
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setFlash(null), ms);
   }, []);
+
+  const router = useMemo(() => (network ? new TripRouter(network) : null), [network]);
+  const planningRef = useRef(planning);
+  planningRef.current = planning;
+  const routerRef = useRef(router);
+  routerRef.current = router;
+
+  const onMapClick = useCallback(
+    (lngLat: [number, number], shiftKey: boolean) => {
+      if (!planningRef.current || shiftKey) {
+        const coords = `${lngLat[1].toFixed(5)}, ${lngLat[0].toFixed(5)}`;
+        void copyText(coords).then((ok) =>
+          showFlash(ok ? `copied · ${coords}` : `clipboard blocked · ${coords}`, ok ? 'ok' : 'warn', ok ? 1800 : 6000),
+        );
+        return;
+      }
+      const snap = routerRef.current?.snap(lngLat, SNAP_MAX_M);
+      if (!snap) {
+        showFlash(`no route within ${SNAP_MAX_M} m`, 'warn', 2000);
+        return;
+      }
+      setWaypoints((wps) => [...wps, { snap, dayEnd: false }]);
+    },
+    [showFlash],
+  );
+
+  const legs = useMemo<Leg[]>(() => {
+    if (!router || waypoints.length < 2) return [];
+    const out: Leg[] = [];
+    for (let i = 0; i + 1 < waypoints.length; i++) {
+      out.push(router.route(waypoints[i].snap, waypoints[i + 1].snap, cost));
+    }
+    return out;
+  }, [router, waypoints, cost]);
+
+  const routeFC = useMemo<GeoJSON.FeatureCollection | null>(() => {
+    if (!legs.length) return null;
+    return {
+      type: 'FeatureCollection',
+      features: legs.flatMap((leg) =>
+        leg.pieces
+          .filter((p) => p.coords.length >= 2)
+          .map((p) => ({
+            type: 'Feature' as const,
+            properties: { kind: p.kind },
+            geometry: { type: 'LineString' as const, coordinates: p.coords },
+          })),
+      ),
+    };
+  }, [legs]);
+
+  const totals = useMemo(() => {
+    const t = { paddleM: 0, portageM: 0, trackM: 0, carries: 0, timeH: 0, unreachable: 0 };
+    for (const leg of legs) {
+      if (!leg.found) {
+        t.unreachable++;
+        continue;
+      }
+      t.paddleM += leg.paddleM;
+      t.portageM += leg.portageM;
+      t.trackM += leg.trackM;
+      t.carries += leg.carries;
+      t.timeH += leg.timeH;
+    }
+    return t;
+  }, [legs]);
+
+  // Day splits: a waypoint marked "day end" closes the day after the leg
+  // that arrives at it; the final waypoint closes the last day implicitly.
+  const days = useMemo(() => {
+    if (!legs.length) return [];
+    const out: { paddleM: number; portageM: number; carries: number; timeH: number }[] = [];
+    let cur = { paddleM: 0, portageM: 0, carries: 0, timeH: 0 };
+    let used = false;
+    legs.forEach((leg, i) => {
+      if (leg.found) {
+        cur.paddleM += leg.paddleM;
+        cur.portageM += leg.portageM;
+        cur.carries += leg.carries;
+        cur.timeH += leg.timeH;
+        used = true;
+      }
+      if (waypoints[i + 1]?.dayEnd && used) {
+        out.push(cur);
+        cur = { paddleM: 0, portageM: 0, carries: 0, timeH: 0 };
+        used = false;
+      }
+    });
+    if (used) out.push(cur);
+    return out;
+  }, [legs, waypoints]);
+
+  const exportGpx = useCallback(() => {
+    const coords: [number, number][] = [];
+    for (const leg of legs) {
+      for (const c of leg.coords) {
+        const last = coords[coords.length - 1];
+        if (!last || last[0] !== c[0] || last[1] !== c[1]) coords.push(c);
+      }
+    }
+    const gpx = toGpx(coords, waypoints.map((w) => w.snap.point), `The Outfitter — ${park}`);
+    const url = URL.createObjectURL(new Blob([gpx], { type: 'application/gpx+xml' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `outfitter-${park}-route.gpx`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [legs, waypoints, park]);
 
   const current = parks?.find((p) => p.slug === park) ?? null;
   const stats = current?.stats ?? null;
@@ -95,8 +246,10 @@ export default function PaddlePage() {
             showChart={showChart}
             showRelief={showRelief}
             reliefScale={reliefScale}
+            route={routeFC}
+            waypoints={waypoints.map((w) => w.snap.point)}
             onHover={onHover}
-            onCopyCoords={onCopyCoords}
+            onMapClick={onMapClick}
           />
         ) : (
           <div className="flex h-full items-center justify-center">
@@ -129,8 +282,179 @@ export default function PaddlePage() {
             </div>
           )}
 
-          {stats && (
-            <dl className="mt-4 space-y-2">
+          {/* ── the route ledger ── */}
+          <div className="mt-4 border-t border-border pt-3">
+            <button
+              onClick={() => setPlanning((v) => !v)}
+              className="flex w-full items-center justify-between text-left"
+            >
+              <span className="pd-etch">Route planner</span>
+              <span
+                className={`rounded-sm border px-2 py-0.5 text-[11px] transition-colors ${
+                  planning ? 'border-primary text-primary' : 'border-border text-muted-foreground'
+                }`}
+              >
+                {planning ? 'plotting' : 'stowed'}
+              </span>
+            </button>
+
+            {planning && (
+              <>
+                <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+                  Click the map to drop waypoints. Shift-click still copies coordinates.
+                </p>
+                <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <span>paddle</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={12}
+                    step={0.5}
+                    value={cost.paddleKmh}
+                    onChange={(e) => setCost((c) => ({ ...c, paddleKmh: Math.max(1, Number(e.target.value) || 1) }))}
+                    className="pd-readout w-11 rounded-sm border border-border bg-transparent px-1 py-0 text-right text-[11px]"
+                    aria-label="Paddling speed km/h"
+                  />
+                  <span>· walk</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={8}
+                    step={0.5}
+                    value={cost.walkKmh}
+                    onChange={(e) => setCost((c) => ({ ...c, walkKmh: Math.max(1, Number(e.target.value) || 1) }))}
+                    className="pd-readout w-11 rounded-sm border border-border bg-transparent px-1 py-0 text-right text-[11px]"
+                    aria-label="Walking speed km/h"
+                  />
+                  <span>km/h</span>
+                </div>
+                <button
+                  onClick={() => setCost((c) => ({ ...c, doubleCarry: !c.doubleCarry }))}
+                  className="mt-1.5 flex w-full items-center justify-between text-left text-[11px] text-muted-foreground"
+                  title="Double-carrying walks every portage three times"
+                >
+                  <span>carries</span>
+                  <span
+                    className={`rounded-sm border px-2 py-0.5 transition-colors ${
+                      cost.doubleCarry ? 'border-primary text-primary' : 'border-border'
+                    }`}
+                  >
+                    {cost.doubleCarry ? 'double ×3' : 'single ×1'}
+                  </span>
+                </button>
+              </>
+            )}
+
+            {waypoints.length > 0 && (
+              <>
+                {legs.length > 0 && (
+                  <dl className="mt-3 space-y-1">
+                    <div className="flex items-baseline justify-between">
+                      <dt className="text-[11px] text-muted-foreground">Paddling</dt>
+                      <dd className="pd-readout text-[12px]" style={{ color: 'var(--pd-blue)' }}>
+                        {fmtKm(totals.paddleM)}
+                      </dd>
+                    </div>
+                    <div className="flex items-baseline justify-between">
+                      <dt className="text-[11px] text-muted-foreground">
+                        Carrying · {totals.carries} {totals.carries === 1 ? 'carry' : 'carries'}
+                      </dt>
+                      <dd className="pd-readout text-[12px]" style={{ color: 'var(--pd-red)' }}>
+                        {fmtKm(totals.portageM)}
+                      </dd>
+                    </div>
+                    {totals.trackM > 0 && (
+                      <div className="flex items-baseline justify-between">
+                        <dt className="text-[11px] text-muted-foreground">of it on tracks</dt>
+                        <dd className="pd-readout text-[12px]" style={{ color: 'var(--pd-track)' }}>
+                          {fmtKm(totals.trackM)}
+                        </dd>
+                      </div>
+                    )}
+                    <div className="flex items-baseline justify-between">
+                      <dt className="text-[11px] text-muted-foreground">Underway</dt>
+                      <dd className="pd-readout text-[12px]">{fmtHours(totals.timeH)}</dd>
+                    </div>
+                  </dl>
+                )}
+                {totals.unreachable > 0 && (
+                  <p className="mt-1.5 text-[10px]" style={{ color: 'var(--pd-red)' }}>
+                    {totals.unreachable} {totals.unreachable === 1 ? 'leg has' : 'legs have'} no connecting
+                    route — the network is split there.
+                  </p>
+                )}
+
+                <div className="mt-2 max-h-36 space-y-0.5 overflow-y-auto pr-1">
+                  {waypoints.map((wp, i) => (
+                    <div key={i} className="flex items-center gap-1.5 text-[10px]">
+                      <span className="pd-readout w-4 shrink-0 text-right">{i + 1}</span>
+                      <span className="pd-readout flex-1 truncate text-muted-foreground">
+                        {fmtLatLon(wp.snap.point)}
+                      </span>
+                      <button
+                        onClick={() =>
+                          setWaypoints((wps) => wps.map((w, k) => (k === i ? { ...w, dayEnd: !w.dayEnd } : w)))
+                        }
+                        title="End the day here"
+                        className={`rounded-sm border px-1 leading-4 transition-colors ${
+                          wp.dayEnd ? 'border-primary text-primary' : 'border-border text-muted-foreground'
+                        }`}
+                      >
+                        ◗
+                      </button>
+                      <button
+                        onClick={() => setWaypoints((wps) => wps.filter((_, k) => k !== i))}
+                        title="Remove waypoint"
+                        className="rounded-sm border border-border px-1 leading-4 text-muted-foreground hover:text-foreground"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {days.length > 1 && (
+                  <div className="mt-2 space-y-0.5 border-t border-border pt-2">
+                    {days.map((d, i) => (
+                      <p key={i} className="flex items-baseline justify-between text-[10px]">
+                        <span className="pd-etch">Day {i + 1}</span>
+                        <span className="pd-readout text-muted-foreground">
+                          {fmtKm(d.paddleM + d.portageM)} · {d.carries} {d.carries === 1 ? 'carry' : 'carries'} ·{' '}
+                          {fmtHours(d.timeH)}
+                        </span>
+                      </p>
+                    ))}
+                  </div>
+                )}
+
+                <div className="mt-2 flex gap-1.5">
+                  <button
+                    onClick={() => setWaypoints((wps) => wps.slice(0, -1))}
+                    className="rounded-sm border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+                  >
+                    undo
+                  </button>
+                  <button
+                    onClick={() => setWaypoints([])}
+                    className="rounded-sm border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+                  >
+                    clear
+                  </button>
+                  {legs.length > 0 && totals.unreachable === 0 && (
+                    <button
+                      onClick={exportGpx}
+                      className="ml-auto rounded-sm border border-primary px-2 py-0.5 text-[11px] text-primary"
+                    >
+                      GPX ↓
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+
+          {stats && !planning && waypoints.length === 0 && (
+            <dl className="mt-4 space-y-2 border-t border-border pt-3">
               <div className="flex items-baseline justify-between">
                 <dt className="text-[11px] text-muted-foreground">Open water</dt>
                 <dd className="pd-readout text-sm" style={{ color: 'var(--pd-blue)' }}>
@@ -236,8 +560,8 @@ export default function PaddlePage() {
           )}
 
           <p className="mt-4 text-[10px] leading-relaxed text-muted-foreground">
-            Surveyed from Ontario&rsquo;s open hydro &amp; trail data. Route planning
-            arrives on this table next.
+            Surveyed from Ontario&rsquo;s open hydro &amp; trail data; carries traced from the
+            paper chart.
           </p>
         </div>
 
@@ -276,6 +600,13 @@ export default function PaddlePage() {
                 <span className="pd-readout ml-2 text-muted-foreground">{Math.round(hover.elevM)} m ASL</span>
               )}
             </p>
+          ) : hover?.type === 'campsite' ? (
+            <p className="truncate text-[11px]">
+              <span className="pd-etch" style={{ color: 'var(--color-brand-maroon)' }}>
+                Campsite
+              </span>
+              <span className="ml-2">{hover.name ?? 'unnamed'}</span>
+            </p>
           ) : hover?.type === 'ground' ? (
             <p className="text-[11px]">
               <span className="pd-etch">Ground</span>
@@ -284,20 +615,23 @@ export default function PaddlePage() {
               )}
             </p>
           ) : (
-            <p className="text-[11px] text-muted-foreground">tracing the chart…</p>
+            <p className="text-[11px] text-muted-foreground">
+              {planning ? 'plotting a route…' : 'tracing the chart…'}
+            </p>
           )}
-          {copied ? (
+          {flash ? (
             <p className="mt-0.5 text-[10px]">
               <span
                 className="pd-etch"
-                style={{ color: copied.ok ? 'var(--color-primary)' : 'var(--color-destructive, #b0402c)' }}
+                style={{ color: flash.tone === 'ok' ? 'var(--color-primary)' : 'var(--color-destructive, #b0402c)' }}
               >
-                {copied.ok ? 'copied' : 'clipboard blocked'} · {copied.coords}
+                {flash.text}
               </span>
             </p>
           ) : hover ? (
             <p className="pd-readout mt-0.5 text-[10px] text-muted-foreground">
-              {fmtLatLon(hover.lngLat)} · click to copy
+              {fmtLatLon(hover.lngLat)}
+              {planning ? ' · click to drop a waypoint' : ' · click to copy'}
             </p>
           ) : null}
         </div>
