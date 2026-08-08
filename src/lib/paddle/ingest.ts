@@ -9,6 +9,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { Pool } from 'pg';
 import { fetchLayer, LAYERS, type EsriFeature } from './arcgis';
+import { alignPortagesToChart } from './chartalign';
 import { classifyPaths } from './classify';
 import { buildGraph } from './graph';
 import { PARKS } from './parks';
@@ -138,6 +139,17 @@ export async function ingestPark(
   const midLat = (park.bbox[1] + park.bbox[3]) / 2;
   log('building graph topology...');
   const graph = buildGraph(classified, midLat);
+
+  // With a purchased chart on disk, its GPS-derived portage lines replace
+  // OTN's frequently schematic ones (and correct the lengths with them).
+  const align = await alignPortagesToChart(graph.segments, slug, log);
+  if (align) {
+    log(
+      `chart alignment: ${align.aligned} portages traced from the chart — ` +
+        `${align.noSnap} no-snap, ${align.noPath} no-path, ` +
+        `${align.rejected} failed sanity, ${align.offChart} off-chart`,
+    );
+  }
 
   const paddleKm = graph.segments.filter((s) => s.kind === 'paddle').reduce((t, s) => t + s.lengthM, 0) / 1000;
   const portageSegs = graph.segments.filter((s) => s.kind === 'portage');
