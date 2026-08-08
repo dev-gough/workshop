@@ -24,6 +24,23 @@ interface Waypoint {
   dayEnd: boolean;
 }
 
+interface TripSummary {
+  slug: string;
+  name: string;
+  waypoints: number;
+  updated_at: string;
+}
+
+/** Persisted trip: geometry only — waypoints re-snap to the current network
+ *  on load, so saved trips survive re-ingests. */
+interface TripData {
+  park: string;
+  slug: string;
+  name: string;
+  waypoints: [number, number, number][];
+  cost: Partial<CostParams>;
+}
+
 /**
  * navigator.clipboard only exists in secure contexts — over plain LAN HTTP
  * (or with a browser shield blocking it) it is undefined and the write
@@ -76,6 +93,9 @@ export default function PaddlePage() {
   const [planning, setPlanning] = useState(false);
   const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
   const [cost, setCost] = useState<CostParams>(DEFAULT_COST);
+  const [tripName, setTripName] = useState('');
+  const [tripSlug, setTripSlug] = useState<string | null>(null);
+  const [trips, setTrips] = useState<TripSummary[] | null>(null);
 
   useEffect(() => {
     fetch('/api/paddle/parks')
@@ -95,6 +115,8 @@ export default function PaddlePage() {
     setLakes(null);
     setNetwork(null);
     setWaypoints([]); // snaps index into the old park's segments
+    setTripSlug(null);
+    setTripName('');
     Promise.all([
       fetch(`/api/paddle/lakes?park=${park}&minArea=${LAKE_MIN_AREA}`).then((r) => r.json()),
       fetch(`/api/paddle/network?park=${park}`).then((r) => r.json()),
@@ -147,6 +169,109 @@ export default function PaddlePage() {
     },
     [showFlash],
   );
+
+  // ── saved trips ──
+  const parkRef = useRef(park);
+  parkRef.current = park;
+  const refreshTrips = useCallback(async () => {
+    const d = await fetch(`/api/paddle/trips?park=${parkRef.current}`)
+      .then((r) => r.json())
+      .catch(() => null);
+    if (d?.trips) setTrips(d.trips);
+  }, []);
+  useEffect(() => {
+    if (planning) void refreshTrips();
+  }, [planning, park, refreshTrips]);
+
+  const pendingTrip = useRef<TripData | null>(null);
+  const applyPending = useCallback(() => {
+    const trip = pendingTrip.current;
+    const r = routerRef.current;
+    if (!trip || !r) return;
+    pendingTrip.current = null;
+    const wps: Waypoint[] = [];
+    let missed = 0;
+    for (const [lon, lat, dayEnd] of trip.waypoints) {
+      const snap = r.snap([lon, lat], 400);
+      if (snap) wps.push({ snap, dayEnd: !!dayEnd });
+      else missed++;
+    }
+    setWaypoints(wps);
+    setTripName(trip.name);
+    setTripSlug(trip.slug);
+    setCost((c) => ({ ...c, ...trip.cost }));
+    setPlanning(true);
+    showFlash(
+      missed ? `trip loaded — ${missed} waypoint${missed > 1 ? 's' : ''} off-network` : `trip loaded · ${trip.name}`,
+      missed ? 'warn' : 'ok',
+      2500,
+    );
+  }, [showFlash]);
+  useEffect(() => {
+    applyPending();
+  }, [router, applyPending]);
+
+  const loadTrip = useCallback(
+    async (slug: string) => {
+      const d = await fetch(`/api/paddle/trips/${slug}`)
+        .then((r) => r.json())
+        .catch(() => null);
+      if (!d?.trip) {
+        showFlash('trip not found', 'warn', 2500);
+        return;
+      }
+      pendingTrip.current = d.trip as TripData;
+      if (d.trip.park !== parkRef.current) setPark(d.trip.park); // re-snap once the new park's router is up
+      else applyPending();
+    },
+    [applyPending, showFlash],
+  );
+
+  // share links: /projects/paddle?trip=<slug>
+  useEffect(() => {
+    const slug = new URLSearchParams(window.location.search).get('trip');
+    if (slug) void loadTrip(slug);
+  }, [loadTrip]);
+
+  const saveTrip = useCallback(async () => {
+    if (!waypoints.length) return;
+    const d = await fetch('/api/paddle/trips', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        park,
+        name: tripName.trim() || 'Untitled trip',
+        slug: tripSlug ?? undefined,
+        waypoints: waypoints.map((w) => [w.snap.point[0], w.snap.point[1], w.dayEnd ? 1 : 0]),
+        cost,
+      }),
+    })
+      .then((r) => r.json())
+      .catch(() => null);
+    if (d?.slug) {
+      setTripSlug(d.slug);
+      showFlash('trip saved', 'ok', 1800);
+      void refreshTrips();
+    } else {
+      showFlash('save failed', 'warn', 2500);
+    }
+  }, [waypoints, park, tripName, tripSlug, cost, showFlash, refreshTrips]);
+
+  const deleteTrip = useCallback(
+    async (slug: string, name: string) => {
+      if (!window.confirm(`Delete trip “${name}”?`)) return;
+      await fetch(`/api/paddle/trips/${slug}`, { method: 'DELETE' }).catch(() => null);
+      if (slug === tripSlug) setTripSlug(null);
+      void refreshTrips();
+    },
+    [tripSlug, refreshTrips],
+  );
+
+  const copyShareLink = useCallback(() => {
+    if (!tripSlug) return;
+    const url = `${window.location.origin}/projects/paddle?trip=${tripSlug}`;
+    void copyText(url).then((ok) => showFlash(ok ? 'share link copied' : url, ok ? 'ok' : 'warn', ok ? 1800 : 6000));
+  }, [tripSlug, showFlash]);
 
   const legs = useMemo<Leg[]>(() => {
     if (!router || waypoints.length < 2) return [];
@@ -450,6 +575,64 @@ export default function PaddlePage() {
                   )}
                 </div>
               </>
+            )}
+
+            {planning && (
+              <div className="mt-2 border-t border-border pt-2">
+                <div className="flex gap-1.5">
+                  <input
+                    value={tripName}
+                    onChange={(e) => setTripName(e.target.value)}
+                    placeholder="trip name"
+                    maxLength={80}
+                    className="min-w-0 flex-1 rounded-sm border border-border bg-transparent px-1.5 py-0.5 text-[11px] placeholder:text-muted-foreground"
+                  />
+                  <button
+                    onClick={() => void saveTrip()}
+                    disabled={!waypoints.length}
+                    className={`rounded-sm border px-2 py-0.5 text-[11px] ${
+                      waypoints.length
+                        ? 'border-primary text-primary'
+                        : 'cursor-default border-border text-muted-foreground opacity-60'
+                    }`}
+                  >
+                    save
+                  </button>
+                </div>
+                {tripSlug && (
+                  <button
+                    onClick={copyShareLink}
+                    className="mt-1 text-[10px] text-muted-foreground hover:text-foreground"
+                    title="Copy a link that opens this trip"
+                  >
+                    share · ?trip={tripSlug}
+                  </button>
+                )}
+                {trips && trips.length > 0 && (
+                  <div className="mt-1.5 max-h-24 space-y-0.5 overflow-y-auto pr-1">
+                    {trips.map((t) => (
+                      <div key={t.slug} className="flex items-center gap-1.5 text-[10px]">
+                        <button
+                          onClick={() => void loadTrip(t.slug)}
+                          className={`flex-1 truncate text-left ${
+                            t.slug === tripSlug ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          {t.name}
+                        </button>
+                        <span className="pd-readout shrink-0 text-muted-foreground">{t.waypoints} wp</span>
+                        <button
+                          onClick={() => void deleteTrip(t.slug, t.name)}
+                          title="Delete trip"
+                          className="rounded-sm border border-border px-1 leading-4 text-muted-foreground hover:text-foreground"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
