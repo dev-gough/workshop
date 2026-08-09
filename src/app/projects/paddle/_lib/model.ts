@@ -58,7 +58,20 @@ export function fmtLatLon(lngLat: [number, number]): string {
 
 /** Panel views. Future field features (GPS, leg timing, photos) join as new
  *  entries here + a component — the shell doesn't care how many there are. */
-export type View = 'map' | 'trips' | 'trip';
+export type View = 'map' | 'trips' | 'trip' | 'review';
+
+/** A kind-change proposal from the imagery flagger (paddle_kind_overrides). */
+export interface ReviewItem {
+  id: number;
+  seg_hint: number | null;
+  before_kind: 'paddle' | 'portage';
+  coords: [number, number][];
+  pieces: { coords: [number, number][]; kind: 'paddle' | 'portage' | 'track' }[];
+  evidence: { waterFrac: number; nullFrac: number; samples: number; lengthM: number; confidence: number };
+  status: 'proposed' | 'approved' | 'rejected' | 'unclear';
+  created_at: string;
+  decided_at: string | null;
+}
 
 export interface TripStats {
   paddleM: number;

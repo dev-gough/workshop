@@ -9,7 +9,7 @@ import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PageTransition from '@/components/motion/PageTransition';
 import { useHeaderConfig } from '@/components/header-config';
-import type { HoverInfo, Network, ParkInfo, View } from './_lib/model';
+import type { HoverInfo, Network, ParkInfo, ReviewItem, View } from './_lib/model';
 import { TripRouter } from './_lib/route';
 import { copyText } from './_lib/clipboard';
 import { useTripPlan } from './_lib/use-trip-plan';
@@ -17,6 +17,7 @@ import PanelShell from './_components/panel-shell';
 import MapPanel from './_components/map-panel';
 import TripsPanel from './_components/trips-panel';
 import TripPanel from './_components/trip-panel';
+import ReviewPanel from './_components/review-panel';
 import Readout, { type Flash } from './_components/readout';
 
 const TripMap = dynamic(() => import('./_components/trip-map'), { ssr: false });
@@ -80,6 +81,23 @@ export default function PaddlePage() {
     };
   }, [park]);
 
+  // Re-pull just the network after an approved review edits segments.
+  const [netNonce, setNetNonce] = useState(0);
+  useEffect(() => {
+    if (netNonce === 0) return;
+    let stale = false;
+    fetch(`/api/paddle/network?park=${park}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (stale || d.error) return;
+        setNetwork(d);
+      })
+      .catch(() => {});
+    return () => {
+      stale = true;
+    };
+  }, [netNonce, park]);
+
   const router = useMemo(() => (network ? new TripRouter(network) : null), [network]);
 
   // ── map display ──
@@ -97,6 +115,57 @@ export default function PaddlePage() {
   const planningRef = useRef(planning);
   planningRef.current = planning;
 
+  // ── imagery review queue ──
+  const [reviews, setReviews] = useState<ReviewItem[] | null>(null);
+  const [reviewId, setReviewId] = useState<number | null>(null);
+  const [reviewFocus, setReviewFocus] = useState<[number, number, number, number] | null>(null);
+  const [reviewBusy, setReviewBusy] = useState(false);
+  useEffect(() => {
+    if (view !== 'review') return;
+    let stale = false;
+    fetch(`/api/paddle/reviews?park=${park}`)
+      .then((r) => r.json())
+      .then((d) => !stale && !d.error && setReviews(d.reviews))
+      .catch(() => {});
+    return () => {
+      stale = true;
+    };
+  }, [view, park]);
+  useEffect(() => {
+    // park switch invalidates the queue and any selection
+    setReviews(null);
+    setReviewId(null);
+    setReviewFocus(null);
+  }, [park]);
+
+  const selectReview = useCallback((r: ReviewItem) => {
+    setReviewId(r.id);
+    setShowImagery(true); // the whole point is to look at the photo
+    const lons = r.coords.map((c) => c[0]);
+    const lats = r.coords.map((c) => c[1]);
+    // pad the section's bbox so the fly-to shows context around it
+    const pad = 0.004;
+    setReviewFocus([
+      Math.min(...lons) - pad,
+      Math.min(...lats) - pad,
+      Math.max(...lons) + pad,
+      Math.max(...lats) + pad,
+    ]);
+  }, []);
+
+  const reviewFC = useMemo<GeoJSON.FeatureCollection | null>(() => {
+    const r = reviews?.find((x) => x.id === reviewId);
+    if (!r) return null;
+    return {
+      type: 'FeatureCollection',
+      features: r.pieces.map((p) => ({
+        type: 'Feature',
+        properties: { kind: p.kind },
+        geometry: { type: 'LineString', coordinates: p.coords },
+      })),
+    };
+  }, [reviews, reviewId]);
+
   // ── flashes ──
   const [flash, setFlash] = useState<Flash | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -105,6 +174,32 @@ export default function PaddlePage() {
     if (flashTimer.current) clearTimeout(flashTimer.current);
     flashTimer.current = setTimeout(() => setFlash(null), ms);
   }, []);
+
+  const decideReview = useCallback(
+    async (r: ReviewItem, status: ReviewItem['status']) => {
+      setReviewBusy(true);
+      try {
+        const res = await fetch(`/api/paddle/reviews/${r.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status }),
+        });
+        const d = await res.json();
+        if (d.error) throw new Error(d.error);
+        setReviews((cur) => cur?.map((x) => (x.id === r.id ? { ...x, status } : x)) ?? null);
+        if (d.applied?.applied) {
+          setNetNonce((n) => n + 1); // the ribbon just changed — redraw it
+          showFlash(`applied — ${d.applied.reason}`, 'ok', 2200);
+        } else if (status === 'approved') {
+          showFlash(`approved, not applied: ${d.applied?.reason ?? 'unknown'}`, 'warn', 4500);
+        }
+      } catch (e) {
+        showFlash(String(e), 'warn', 4000);
+      }
+      setReviewBusy(false);
+    },
+    [showFlash],
+  );
 
   // ── the trip domain ──
   const onTripOpened = useCallback((kind: 'loaded' | 'new') => {
@@ -158,7 +253,8 @@ export default function PaddlePage() {
             reliefScale={reliefScale}
             route={plan.routeFC}
             waypoints={plan.waypoints.map((w) => w.snap.point)}
-            focus={plan.focus}
+            review={view === 'review' ? reviewFC : null}
+            focus={view === 'review' ? reviewFocus : plan.focus}
             onHover={onHover}
             onMapClick={onMapClick}
           />
@@ -177,6 +273,7 @@ export default function PaddlePage() {
             { view: 'map', label: 'Map' },
             { view: 'trips', label: 'Trips' },
             { view: 'trip', label: tripTabLabel },
+            { view: 'review', label: 'Review' },
           ]}
           onSelectTab={selectTab}
         >
@@ -207,6 +304,15 @@ export default function PaddlePage() {
             />
           )}
           {view === 'trip' && <TripPanel plan={plan} />}
+          {view === 'review' && (
+            <ReviewPanel
+              reviews={reviews}
+              selectedId={reviewId}
+              onSelect={selectReview}
+              onDecide={decideReview}
+              busy={reviewBusy}
+            />
+          )}
         </PanelShell>
       </div>
     </PageTransition>

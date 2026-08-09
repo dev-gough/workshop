@@ -29,6 +29,8 @@ interface TripMapProps {
   /** The planned route (kind-tagged LineStrings) and its waypoints. */
   route: GeoJSON.FeatureCollection | null;
   waypoints: [number, number][];
+  /** Selected review proposal — dashed kind-colored pieces over the ribbon. */
+  review: GeoJSON.FeatureCollection | null;
   /** Fly the table to these bounds when set ([w,s,e,n]) — e.g. a loaded trip. */
   focus: [number, number, number, number] | null;
   onHover: (info: HoverInfo | null) => void;
@@ -60,7 +62,7 @@ function networkToGeoJSON(network: Network): GeoJSON.FeatureCollection {
   };
 }
 
-export default function TripMap({ park, lakes, network, showChart, showImagery, showRelief, reliefScale, route, waypoints, focus, onHover, onMapClick }: TripMapProps) {
+export default function TripMap({ park, lakes, network, showChart, showImagery, showRelief, reliefScale, route, waypoints, review, focus, onHover, onMapClick }: TripMapProps) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const { theme } = useTheme();
@@ -101,6 +103,7 @@ export default function TripMap({ park, lakes, network, showChart, showImagery, 
       },
       route: { type: 'geojson', data: EMPTY_FC },
       wps: { type: 'geojson', data: EMPTY_FC },
+      review: { type: 'geojson', data: EMPTY_FC },
     };
     if (park.chart) {
       sources.jeff = {
@@ -248,6 +251,35 @@ export default function TripMap({ park, lakes, network, showChart, showImagery, 
           'circle-color': pal.campsite,
           'circle-radius': ['interpolate', ['linear'], ['zoom'], 7, 1.2, 11, 2.6, 14, 4.5],
           'circle-opacity': 0.9,
+        },
+      },
+      // a selected review proposal: paper halo + dashed line in the
+      // PROPOSED kind's color, riding over the current ribbon so before
+      // (solid, current color) and after (dashed, new color) read together
+      {
+        id: 'review-casing',
+        type: 'line',
+        source: 'review',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': pal.routeCasing,
+          'line-width': ['interpolate', ['linear'], ['zoom'], 7, 5, 11, 8, 14, 12],
+          'line-opacity': 0.7,
+        },
+      },
+      {
+        id: 'review-line',
+        type: 'line',
+        source: 'review',
+        paint: {
+          'line-color': [
+            'match', ['get', 'kind'],
+            'portage', pal.portage,
+            'track', pal.track,
+            pal.paddle,
+          ] as unknown as maplibregl.ExpressionSpecification,
+          'line-width': ['interpolate', ['linear'], ['zoom'], 7, 2.5, 11, 4.5, 14, 7],
+          'line-dasharray': [1.6, 1.6],
         },
       },
       // the planned route rides above everything, on a paper halo
@@ -432,6 +464,16 @@ export default function TripMap({ park, lakes, network, showChart, showImagery, 
     else map.once('load', apply);
   }, [route, waypoints]);
 
+  // the review proposal under inspection
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const apply = () =>
+      (map.getSource('review') as maplibregl.GeoJSONSource | undefined)?.setData(review ?? EMPTY_FC);
+    if (map.getSource('review')) apply();
+    else map.once('load', apply);
+  }, [review]);
+
   // press the relief up out of the paper, flatten it back down, or rescale it
   useEffect(() => {
     const map = mapRef.current;
@@ -459,6 +501,13 @@ export default function TripMap({ park, lakes, network, showChart, showImagery, 
       map.setPaintProperty('net-portage', 'line-color', pal.portage);
       map.setPaintProperty('net-track', 'line-color', pal.track);
       map.setPaintProperty('camps', 'circle-color', pal.campsite);
+      map.setPaintProperty('review-casing', 'line-color', pal.routeCasing);
+      map.setPaintProperty('review-line', 'line-color', [
+        'match', ['get', 'kind'],
+        'portage', pal.portage,
+        'track', pal.track,
+        pal.paddle,
+      ] as unknown as maplibregl.ExpressionSpecification);
       map.setPaintProperty('route-casing', 'line-color', pal.routeCasing);
       map.setPaintProperty('route-line', 'line-color', [
         'match', ['get', 'kind'],

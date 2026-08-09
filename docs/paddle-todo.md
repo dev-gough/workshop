@@ -53,6 +53,16 @@ GPS-aware, fully offline in-park.
   Deep pass (same day): `--corridor 500` adds native z16–17 within 500 m of
   the network; off-corridor z16–17 is synthesized from z15 at serve time
   (readImageryTileDeep), so the map stays seamless at full zoom.
+- Imagery review queue — shipped 2026-08-08. `npm run flag-imagery-kinds --
+  --park <slug>` samples the z17 corridor under every segment (water = dark
+  + flat; calibrate with `--calibrate` per mosaic vintage) and writes
+  kind-change proposals into paddle_kind_overrides. Review tab: ranked
+  queue, tap → fly-to with aerials pinned, proposal dashed in the proposed
+  kind's color over the current ribbon, approve/reject/unclear. Approvals
+  edit paddle_segments immediately (flip or mid-segment split with new
+  nodes) and re-apply after every re-ingest (geometry-anchored). The
+  imagery is a witness, not an author — nothing changes without approval.
+  Open queues: Temagami 248 (111 km flagged), Algonquin 309.
 - Chart licensing: Jeff's tiles are a personal-use purchase. Decide how the
   crew handles copies before sharing installs (per-person purchase is the
   clean answer; the tool must also work chart-less on the vector base).

@@ -12,6 +12,7 @@ import { fetchLayer, LAYERS, type EsriFeature } from './arcgis';
 import { alignPortagesToChart } from './chartalign';
 import { classifyPaths } from './classify';
 import { buildGraph } from './graph';
+import { applyApprovedOverrides } from './overrides';
 import { PARKS } from './parks';
 
 const CACHE_ROOT = path.join(process.cwd(), '.cache/paddle');
@@ -214,6 +215,12 @@ export async function ingestPark(
   } finally {
     client.release();
   }
+
+  // Reviewed imagery decisions outlive the rebuild — re-apply them to the
+  // fresh segments (geometry-anchored, so id churn doesn't matter). Updates
+  // paddle_parks.stats itself when it changes anything.
+  log('re-applying approved kind overrides...');
+  await applyApprovedOverrides(pool, slug, log);
 
   return result;
 }
