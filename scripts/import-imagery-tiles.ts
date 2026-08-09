@@ -24,6 +24,10 @@ import { PARKS } from '../src/lib/paddle/parks';
 import { CORRIDOR_MAX_ZOOM, IMAGERY_MAX_ZOOM, imageryTileDir } from '../src/lib/paddle/imagerytiles';
 
 const MIN_ZOOM = 4;
+// Bbox-mode pad: imagery runs a little past the park window so zoomed-in
+// views near the boundary don't end on a hard data edge (the client's
+// source bounds extend further still; Quebec-side tiles are voids anyway).
+const BBOX_PAD_DEG = 0.15;
 const SOURCE =
   'https://ws.lioservices.lrc.gov.on.ca/arcgis2/rest/services/LIO_Imagery/Ontario_Imagery_Web_Map_Service/MapServer/WMTS/tile/1.0.0/LIO_Imagery_Ontario_Imagery_Web_Map_Service/default/GoogleMapsCompatible';
 
@@ -53,7 +57,12 @@ const tileY = (lat: number, z: number) => {
 type Job = { z: number; x: number; y: number };
 
 function bboxJobs(): Job[] {
-  const [w, s, e, n] = park!.bbox;
+  const [w, s, e, n] = [
+    park!.bbox[0] - BBOX_PAD_DEG,
+    park!.bbox[1] - BBOX_PAD_DEG,
+    park!.bbox[2] + BBOX_PAD_DEG,
+    park!.bbox[3] + BBOX_PAD_DEG,
+  ];
   const jobs: Job[] = [];
   for (let z = MIN_ZOOM; z <= maxZoom; z++) {
     const x0 = tileX(w, z);

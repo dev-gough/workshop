@@ -105,13 +105,25 @@ export default function TripMap({ park, lakes, network, showChart, showImagery, 
       wps: { type: 'geojson', data: EMPTY_FC },
       review: { type: 'geojson', data: EMPTY_FC },
     };
+    // Raster bounds pad WELL past the park bbox (matches the DEM pad). With
+    // bounds clamped to the bbox, MapLibre draws a boundary tile in full at
+    // low zoom (it's partially inside) but skips it entirely once zoomed-in
+    // tiles fall wholly outside — content near the edge "cut off" as you
+    // zoomed. Padded, the only visible edge is where the data itself ends,
+    // identical at every zoom; misses cost one cached transparent pixel.
+    const rasterBounds: [number, number, number, number] = [
+      bbox[0] - 0.4,
+      bbox[1] - 0.4,
+      bbox[2] + 0.4,
+      bbox[3] + 0.4,
+    ];
     if (park.chart) {
       sources.jeff = {
         type: 'raster',
         tiles: [`/api/paddle/tiles/${park.slug}/{z}/{x}/{y}`],
         tileSize: 256,
         maxzoom: park.chart.maxZoom, // MapLibre overzooms past the package's top level
-        bounds: bbox,
+        bounds: rasterBounds,
       };
     }
     if (park.imagery) {
@@ -120,7 +132,7 @@ export default function TripMap({ park, lakes, network, showChart, showImagery, 
         tiles: [`/api/paddle/imagery/${park.slug}/{z}/{x}/{y}`],
         tileSize: 256,
         maxzoom: park.imagery.maxZoom, // overzooms fine — source orthos are 20–40 cm
-        bounds: bbox,
+        bounds: rasterBounds,
       };
     }
     if (park.dem) {
@@ -420,7 +432,10 @@ export default function TripMap({ park, lakes, network, showChart, showImagery, 
         map.setLayoutProperty('jeff-chart', 'visibility', showChart ? 'visible' : 'none');
       }
     };
-    if (map.isStyleLoaded()) apply();
+    // Gate on the layer existing, never isStyleLoaded() — the latter
+    // flickers false during tile churn (constant with z17 imagery) and the
+    // once('load') fallback never fires again, eating the toggle.
+    if (map.getLayer('jeff-chart')) apply();
     else map.once('load', apply);
   }, [showChart]);
 
@@ -433,7 +448,7 @@ export default function TripMap({ park, lakes, network, showChart, showImagery, 
         map.setLayoutProperty('imagery', 'visibility', showImagery ? 'visible' : 'none');
       }
     };
-    if (map.isStyleLoaded()) apply();
+    if (map.getLayer('imagery')) apply();
     else map.once('load', apply);
   }, [showImagery]);
 
@@ -483,7 +498,7 @@ export default function TripMap({ park, lakes, network, showChart, showImagery, 
       map.setTerrain(showRelief ? { source: 'dem', exaggeration: reliefScale } : null);
       map.setLayoutProperty('relief-shade', 'visibility', showRelief ? 'visible' : 'none');
     };
-    if (map.isStyleLoaded()) apply();
+    if (map.getSource('dem')) apply();
     else map.once('load', apply);
   }, [showRelief, reliefScale]);
 
@@ -531,7 +546,7 @@ export default function TripMap({ park, lakes, network, showChart, showImagery, 
         map.setPaintProperty('relief-shade', 'hillshade-exaggeration', pal.hillshadeExaggeration);
       }
     };
-    if (map.isStyleLoaded()) apply();
+    if (map.getLayer('paper')) apply();
     else map.once('load', apply);
   }, [theme]);
 
