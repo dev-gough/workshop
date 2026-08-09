@@ -117,6 +117,8 @@ export default function PaddlePage() {
 
   // ── imagery review queue ──
   const [reviews, setReviews] = useState<ReviewItem[] | null>(null);
+  const reviewsRef = useRef<ReviewItem[] | null>(null);
+  reviewsRef.current = reviews;
   const [reviewId, setReviewId] = useState<number | null>(null);
   const [reviewFocus, setReviewFocus] = useState<[number, number, number, number] | null>(null);
   const [reviewBusy, setReviewBusy] = useState(false);
@@ -186,7 +188,19 @@ export default function PaddlePage() {
         });
         const d = await res.json();
         if (d.error) throw new Error(d.error);
-        setReviews((cur) => cur?.map((x) => (x.id === r.id ? { ...x, status } : x)) ?? null);
+        const updated =
+          reviewsRef.current?.map((x) => (x.id === r.id ? { ...x, status } : x)) ?? null;
+        setReviews(updated);
+        // verdict in — slide the next open suspect onto the table (list
+        // order, wrapping past the end); none left → stay put, selection off
+        if (updated) {
+          const idx = updated.findIndex((x) => x.id === r.id);
+          const next = [...updated.slice(idx + 1), ...updated.slice(0, idx)].find(
+            (x) => x.status === 'proposed',
+          );
+          if (next) selectReview(next);
+          else setReviewId(null);
+        }
         if (d.applied?.applied) {
           setNetNonce((n) => n + 1); // the ribbon just changed — redraw it
           showFlash(`applied — ${d.applied.reason}`, 'ok', 2200);
@@ -198,7 +212,7 @@ export default function PaddlePage() {
       }
       setReviewBusy(false);
     },
-    [showFlash],
+    [showFlash, selectReview],
   );
 
   // ── the trip domain ──
