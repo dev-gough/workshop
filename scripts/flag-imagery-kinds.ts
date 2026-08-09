@@ -15,6 +15,15 @@
  * texture at 0.8 m/px). Canopy is the opposite — strong speckle. Shadowed
  * shoreline is the gray zone; the smoothing + length floors keep isolated
  * ambiguous samples from becoming proposals.
+ *
+ * OHN gate (the lesson of Devon's first review round): samples inside a
+ * mapped waterbody polygon COUNT AS WATER regardless of pixels. Leaf-off
+ * marsh/beaver-meadow complexes are mapped waterbodies that photograph as
+ * bright tan grass with a dark channel — pixel-flagging them proposed
+ * portages across the middle of "lakes". The imagery witness only
+ * testifies where OHN is weak: stream-proximity calls and unmapped water.
+ * The gate only SUPPRESSES dry-flags on paddle segments; it never
+ * manufactures wet-flags on portages from OHN alone.
  */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -169,12 +178,57 @@ interface Seg {
   coords: [number, number][];
 }
 
+interface Lake {
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+  rings: [number, number][][];
+}
+
+/** Even-odd point-in-rings — handles island holes regardless of winding. */
+function inRings(rings: [number, number][][], p: [number, number]): boolean {
+  let inside = false;
+  for (const ring of rings) {
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i];
+      const [xj, yj] = ring[j];
+      if (yi > p[1] !== yj > p[1] && p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi) {
+        inside = !inside;
+      }
+    }
+  }
+  return inside;
+}
+
+async function loadLakes(): Promise<Lake[]> {
+  const { rows } = (await pool.query(`SELECT rings FROM paddle_lakes WHERE park = $1`, [
+    slug,
+  ])) as { rows: { rings: [number, number][][] }[] };
+  return rows.map((l) => {
+    let x0 = 180;
+    let x1 = -180;
+    let y0 = 90;
+    let y1 = -90;
+    for (const ring of l.rings) {
+      for (const [x, y] of ring) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+    return { x0, x1, y0, y1, rings: l.rings };
+  });
+}
+
 async function main() {
   const { rows: segs } = (await pool.query(
     `SELECT id, kind, length_m, coords FROM paddle_segments WHERE park = $1 ORDER BY id`,
     [slug],
   )) as { rows: Seg[] };
-  console.log(`${slug}: ${segs.length} segments`);
+  const lakes = await loadLakes();
+  console.log(`${slug}: ${segs.length} segments, ${lakes.length} waterbody polygons for the gate`);
 
   if (calibrate) {
     await runCalibration(segs);
@@ -203,8 +257,30 @@ async function main() {
   for (const seg of work) {
     if (++scanned % 250 === 0) console.log(`  ${scanned}/${work.length} scanned, ${proposals} proposals`);
     const pts = samplePoints(seg.coords);
-    const feats = await Promise.all(pts.map(([lon, lat]) => features(lon, lat)));
-    const nullFrac = feats.filter((f) => f === null).length / feats.length;
+    // OHN gate (paddle only): candidate lakes overlapping this segment's bbox
+    const pad = 0.0005;
+    let sx0 = 180;
+    let sx1 = -180;
+    let sy0 = 90;
+    let sy1 = -90;
+    for (const [x, y] of seg.coords) {
+      if (x < sx0) sx0 = x;
+      if (x > sx1) sx1 = x;
+      if (y < sy0) sy0 = y;
+      if (y > sy1) sy1 = y;
+    }
+    const nearby =
+      seg.kind === 'paddle'
+        ? lakes.filter((l) => l.x1 >= sx0 - pad && l.x0 <= sx1 + pad && l.y1 >= sy0 - pad && l.y0 <= sy1 + pad)
+        : [];
+    const gated = pts.map(
+      (p) => nearby.some((l) => p[0] >= l.x0 && p[0] <= l.x1 && p[1] >= l.y0 && p[1] <= l.y1 && inRings(l.rings, p)),
+    );
+
+    const feats = await Promise.all(
+      pts.map((p, i) => (gated[i] ? null : features(p[0], p[1]))),
+    );
+    const nullFrac = feats.filter((f, i) => f === null && !gated[i]).length / feats.length;
     if (nullFrac > NULL_MAX_FRAC) {
       skippedNull++;
       continue;
@@ -212,8 +288,10 @@ async function main() {
     // null samples inherit their neighbor so runs stay contiguous
     const flags: boolean[] = [];
     let last = false;
-    for (const f of feats) {
-      if (f) last = f.lum <= WATER_MAX_LUM && f.std <= WATER_MAX_STD;
+    for (let i = 0; i < feats.length; i++) {
+      const f = feats[i];
+      if (gated[i]) last = true; // mapped waterbody — OHN outranks pixels
+      else if (f) last = f.lum <= WATER_MAX_LUM && f.std <= WATER_MAX_STD;
       flags.push(last);
     }
     const blipN = Math.max(1, Math.round(SMOOTH_BLIP_M / STEP_M));

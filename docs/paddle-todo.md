@@ -62,7 +62,11 @@ GPS-aware, fully offline in-park.
   edit paddle_segments immediately (flip or mid-segment split with new
   nodes) and re-apply after every re-ingest (geometry-anchored). The
   imagery is a witness, not an author — nothing changes without approval.
-  Open queues: Temagami 248 (111 km flagged), Algonquin 309.
+  OHN gate (first review round's lesson): samples inside mapped waterbody
+  polygons count as water regardless of pixels — leaf-off marsh complexes
+  photograph as dry grass and were 2/3 of the original queue. The witness
+  only testifies where OHN is weak. Open queues after gating: Temagami 81,
+  Algonquin 102.
 - Chart licensing: Jeff's tiles are a personal-use purchase. Decide how the
   crew handles copies before sharing installs (per-person purchase is the
   clean answer; the tool must also work chart-less on the vector base).
