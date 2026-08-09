@@ -53,6 +53,12 @@ GPS-aware, fully offline in-park.
   Deep pass (same day): `--corridor 500` adds native z16–17 within 500 m of
   the network; off-corridor z16–17 is synthesized from z15 at serve time
   (readImageryTileDeep), so the map stays seamless at full zoom.
+  2026-08-08: corridor ceiling raised to z19 — research confirmed OIWMS
+  serves NATIVE ~20 cm at z19 (z20+ 400s; Algonquin ~93% covered, Temagami
+  ~65% — Lady Evelyn/NW tops out at native z18/40 cm until COOP 2026 lands
+  on GeoHub ~2027, then re-import). Paid imagery market is COARSER than
+  these free orthos (best archive 30 cm, $28k+ for corridors, no public
+  self-hosting) — only ever useful for recency (SkySat AOI ~$150–600).
 - Imagery review queue — shipped 2026-08-08. `npm run flag-imagery-kinds --
   --park <slug>` samples the z17 corridor under every segment (water = dark
   + flat; calibrate with `--calibrate` per mosaic vintage) and writes

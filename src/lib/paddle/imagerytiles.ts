@@ -15,10 +15,13 @@ import sharp from 'sharp';
  *  latitude. Going deeper everywhere quadruples tile count per level. */
 export const IMAGERY_MAX_ZOOM = 15;
 
-/** Top zoom of the route-corridor import (`--corridor`): z16–17 only
- *  within a buffer of the network, where the crew actually paddles. Off
- *  corridor these levels are synthesized from the z15 pyramid on demand. */
-export const CORRIDOR_MAX_ZOOM = 17;
+/** Top zoom of the route-corridor import (`--corridor`): deep levels only
+ *  within a buffer of the network, where the crew actually paddles. z19 is
+ *  OIWMS's hard ceiling (native ~20 cm; z20+ 400s everywhere) and is only
+ *  ~65% present over Temagami — its NW interior tops out at native z18
+ *  (~40 cm FRI). Missing/off-corridor tiles synthesize from the nearest
+ *  on-disk ancestor at serve time, so partial z19 degrades gracefully. */
+export const CORRIDOR_MAX_ZOOM = 19;
 
 export const IMAGERY_ATTRIBUTION = 'Aerial imagery: Ontario GeoHub (OIWMS), OGL–Ontario';
 
