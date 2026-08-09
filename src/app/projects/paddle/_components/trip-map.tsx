@@ -40,6 +40,33 @@ interface TripMapProps {
 
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
+/** The classic topo campsite triangle, drawn at runtime (the inline style
+ *  has no sprite sheet) — solid fill on a paper halo so it reads on the
+ *  vector base, the chart, and dark aerial photography alike. */
+function campTriangle(fill: string, halo: string): ImageData {
+  const s = 44;
+  const c = document.createElement('canvas');
+  c.width = s;
+  c.height = s;
+  const ctx = c.getContext('2d')!;
+  ctx.lineJoin = 'round';
+  const path = () => {
+    ctx.beginPath();
+    ctx.moveTo(s / 2, 6);
+    ctx.lineTo(s - 5, s - 7);
+    ctx.lineTo(5, s - 7);
+    ctx.closePath();
+  };
+  path();
+  ctx.strokeStyle = halo;
+  ctx.lineWidth = 7;
+  ctx.stroke();
+  path();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  return ctx.getImageData(0, 0, s, s);
+}
+
 function waypointFC(waypoints: [number, number][]): GeoJSON.FeatureCollection {
   return {
     type: 'FeatureCollection',
@@ -257,12 +284,13 @@ export default function TripMap({ park, lakes, network, showChart, showImagery, 
       },
       {
         id: 'camps',
-        type: 'circle',
+        type: 'symbol',
         source: 'camps',
-        paint: {
-          'circle-color': pal.campsite,
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 7, 1.2, 11, 2.6, 14, 4.5],
-          'circle-opacity': 0.9,
+        layout: {
+          'icon-image': themeRef.current === 'dark' ? 'camp-dark' : 'camp-light',
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 7, 0.3, 11, 0.5, 14, 0.85],
+          'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
         },
       },
       // a selected review proposal: paper halo + dashed line in the
@@ -355,6 +383,16 @@ export default function TripMap({ park, lakes, network, showChart, showImagery, 
       }),
     );
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+
+    // Both theme colorways up front — the theme effect just swaps icon-image.
+    map.on('load', () => {
+      for (const mode of ['light', 'dark'] as const) {
+        const p = MAP_PALETTES[mode];
+        if (!map.hasImage(`camp-${mode}`)) {
+          map.addImage(`camp-${mode}`, campTriangle(p.campsite, p.routeCasing), { pixelRatio: 2 });
+        }
+      }
+    });
 
     map.on('mousemove', (e: maplibregl.MapMouseEvent) => {
       // Ground elevation under the cursor — only meaningful once the terrain
@@ -516,7 +554,7 @@ export default function TripMap({ park, lakes, network, showChart, showImagery, 
       map.setPaintProperty('net-paddle', 'line-color', pal.paddle);
       map.setPaintProperty('net-portage', 'line-color', pal.portage);
       map.setPaintProperty('net-track', 'line-color', pal.track);
-      map.setPaintProperty('camps', 'circle-color', pal.campsite);
+      map.setLayoutProperty('camps', 'icon-image', theme === 'dark' ? 'camp-dark' : 'camp-light');
       map.setPaintProperty('review-casing', 'line-color', pal.routeCasing);
       map.setPaintProperty('review-line', 'line-color', [
         'match', ['get', 'kind'],
