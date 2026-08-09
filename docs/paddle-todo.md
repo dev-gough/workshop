@@ -18,6 +18,11 @@ GPS-aware, fully offline in-park.
   graphs), shown when hovering a carry / in the trip ledger.
 - Waypoint drag-to-adjust; insert-between; day ends that snap to campsites.
 - Campsite curation UI (paddle_campsites table already survives re-ingest).
+  OSM base layer shipped 2026-08-08: `npm run import-osm-campsites --
+  --park <slug>` (ODbL, idempotent upsert on source_ref, status
+  'unverified' until curated; Algonquin 2,107 / Temagami 59 — Temagami is
+  thin, grow it in-app + push edits back to OSM). Ontario publishes no
+  campsite open data (verified against all LIO services + GeoHub).
 
 ## Field kit (in-park use — short ideas, expand as built)
 

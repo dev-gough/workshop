@@ -347,6 +347,7 @@ export default function TripMap({ park, lakes, network, showChart, showImagery, 
         compact: true,
         customAttribution: [
           'Water & routes: Ontario GeoHub (OHN/OTN), OGL–Ontario',
+          'Campsites: © OpenStreetMap contributors (ODbL) + crew',
           ...(park.imagery ? [park.imagery.attribution] : []),
           ...(park.chart ? [park.chart.attribution] : []),
           ...(park.dem ? ['Terrain: Mapzen terrarium via AWS Open Data (NRCan CDEM)'] : []),
