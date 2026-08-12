@@ -90,3 +90,61 @@ export async function fetchHealth(): Promise<VillageHealth> {
   const res = await villageFetch('/health');
   return (await res.json()) as VillageHealth;
 }
+
+/** One force-loaded chunk belonging to the rendered colony, with its own vertical slice. */
+export interface VillageChunkRef {
+  x: number;
+  z: number;
+  /** Inclusive. Each chunk is clipped to its own surface shell, so these differ per chunk. */
+  minY: number;
+  maxY: number;
+}
+
+export interface VillageManifest {
+  ok: boolean;
+  api: number;
+  dimension: string;
+  colony: { id: number; name: string; active: boolean; center: { x: number; y: number; z: number } };
+  bounds: { minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number };
+  chunks: VillageChunkRef[];
+  chunkCount: number;
+  /**
+   * Force-loaded chunks claimed by some other colony, or none at all. Non-zero means something is
+   * holding chunks resident that this colony does not own — a stale force-load from a deleted
+   * colony is the case that actually happened here, and it cost a square kilometre of ticking ocean.
+   */
+  orphanChunks: number;
+}
+
+/** A palette entry: a block state, plus for Domum Ornamentum the vanilla blocks it is dressed in. */
+export interface VillagePaletteEntry {
+  block: string;
+  properties?: Record<string, string>;
+  materials?: Record<string, string>;
+}
+
+export interface VillageChunk {
+  ok: boolean;
+  api: number;
+  x: number;
+  z: number;
+  minY: number;
+  maxY: number;
+  height: number;
+  solidBlocks: number;
+  /** Index 0 is always air. */
+  palette: VillagePaletteEntry[];
+  /** base64 little-endian uint16, indexed `((y - minY) * 16 + z) * 16 + x`. */
+  data: string;
+}
+
+export async function fetchManifest(colony?: number): Promise<VillageManifest> {
+  const query = colony === undefined ? '' : `?colony=${colony}`;
+  const res = await villageFetch(`/world/manifest${query}`);
+  return (await res.json()) as VillageManifest;
+}
+
+export async function fetchChunk(x: number, z: number): Promise<VillageChunk> {
+  const res = await villageFetch(`/world/chunk?x=${x}&z=${z}`);
+  return (await res.json()) as VillageChunk;
+}

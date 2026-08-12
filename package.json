@@ -44,6 +44,7 @@
     "sharp": "^0.34.5",
     "tailwind-merge": "^3.3.1",
     "tailwindcss-animate": "^1.0.7",
+    "three": "0.185.1",
     "uplot": "^1.6.32",
     "yahoo-finance2": "^3.15.2"
   },
@@ -55,6 +56,7 @@
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/three": "0.185.4",
     "eslint": "^9",
     "eslint-config-next": "15.5.3",
     "playwright": "^1.61.1",
