@@ -65,7 +65,17 @@ export async function GET() {
     const uptimeSeconds = Math.floor(parseFloat(uptimeRaw[0]));
 
     // Disk
-    const dfOutput = execSync('df -B1 --output=source,size,used,avail,pcent,target 2>/dev/null || df -k').toString();
+    // df exits nonzero when any single mount is unreadable -- a dead gvfs FUSE
+    // endpoint, an unreachable NFS share -- but still prints every filesystem it
+    // could stat. Keep that output: partial disk data beats a 500 that blanks
+    // the whole dashboard. (The old `|| df -k` fallback hit the same dead mount
+    // and also exited nonzero, and reported KB where this parser expects bytes.)
+    let dfOutput: string;
+    try {
+      dfOutput = execSync('df -B1 --output=source,size,used,avail,pcent,target 2>/dev/null').toString();
+    } catch (err) {
+      dfOutput = String((err as { stdout?: Buffer | string }).stdout ?? '');
+    }
     const disks = dfOutput
       .split('\n')
       .slice(1)
