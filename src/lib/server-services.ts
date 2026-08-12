@@ -17,6 +17,10 @@ export const TRACKED_SERVICES = [
   'minecraft-atm9sky',
   'minecraft-above-beyond',
   'minecraft-star-technology',
+  // Scratch server for the MineColonies fork. Kept off this list while it was
+  // purely a build target; it earns a place now that the village viewer reads
+  // from it and "is it running" becomes a question worth answering from here.
+  'minecraft-mcdev',
 ];
 
 // Names permitted for log reads/streams (identical set to TRACKED_SERVICES).
