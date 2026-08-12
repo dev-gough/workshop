@@ -29,6 +29,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
 import pool from '../src/lib/db';
+import { paddleCachePath } from '../src/lib/config';
 import { PARKS } from '../src/lib/paddle/parks';
 import { haversineM } from '../src/lib/paddle/classify';
 import { cutAtArcsM, polylineLenM } from '../src/lib/paddle/overrides';
@@ -84,7 +85,7 @@ async function tile(x: number, y: number): Promise<Tile | null> {
   if (hit !== undefined) return hit;
   let out: Tile | null = null;
   for (const ext of ['jpg', 'png']) {
-    const file = path.join(process.cwd(), '.cache', 'paddle', slug!, 'imagery', String(Z), String(x), `${y}.${ext}`);
+    const file = path.join(paddleCachePath(), slug!, 'imagery', String(Z), String(x), `${y}.${ext}`);
     try {
       await fs.access(file);
       const { data, info } = await sharp(file).raw().toBuffer({ resolveWithObject: true });

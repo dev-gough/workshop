@@ -2,7 +2,7 @@
  * On-disk aerial imagery tiles for a park — Ontario's OIWMS orthophoto
  * mosaic (GEOspatial Ontario's "best available" province-wide imagery,
  * 20–40 cm aerial acquisitions around Temagami) cached as plain XYZ tiles
- * under `.cache/paddle/<slug>/imagery/{z}/{x}/{y}.jpg|png` by
+ * under `<paths.paddleCache>/<slug>/imagery/{z}/{x}/{y}.jpg|png` by
  * `npm run import-imagery-tiles`. Open Government Licence – Ontario, which
  * is what makes self-hosting (and later offline bundling) legal.
  */
@@ -10,6 +10,7 @@ import { promises as fs } from 'node:fs';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
+import { paddleCachePath } from '../config';
 
 /** Top zoom the importer fetches bbox-wide — ~3 m/px at Temagami's
  *  latitude. Going deeper everywhere quadruples tile count per level. */
@@ -26,7 +27,7 @@ export const CORRIDOR_MAX_ZOOM = 19;
 export const IMAGERY_ATTRIBUTION = 'Aerial imagery: Ontario GeoHub (OIWMS), OGL–Ontario';
 
 export function imageryTileDir(slug: string): string {
-  return path.join(process.cwd(), '.cache', 'paddle', slug, 'imagery');
+  return path.join(paddleCachePath(), slug, 'imagery');
 }
 
 /** Whether a park's imagery tiles have been imported. */

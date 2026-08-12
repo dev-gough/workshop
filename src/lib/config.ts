@@ -39,6 +39,20 @@ export interface PathsConfig {
   brainfuckRepo: string;
   /** Path to the Python interpreter for the BrainFuck venv. Defaults to `<brainfuckRepo>/.venv/bin/python`. */
   pythonBin: string;
+  /**
+   * Root of the paddle park data — tile pyramids and cached ArcGIS layer JSON,
+   * laid out as `<root>/<slug>/{dem,imagery,jeff,*.json}`. Defaults to
+   * `../paddle-cache`, i.e. deliberately OUTSIDE the repo.
+   *
+   * This must stay out of the project tree. Next's output file tracer globs
+   * `**` under the tracing root at build time; with ~1.9M tiles in the tree it
+   * exhausted the build worker's heap at any ceiling, and
+   * `outputFileTracingExcludes` prunes the tracer's result rather than its walk,
+   * so it could not prevent the enumeration. Renaming the directory in place did
+   * not help either — only moving it out of the root did. Tiles are runtime data,
+   * read when a request asks for them; nothing here is ever a build input.
+   */
+  paddleCache: string;
 }
 
 export interface JellyfinConfig {
@@ -171,6 +185,10 @@ function validate(raw: unknown): Config {
     musicDirectory: asOptionalString(p, 'musicDirectory'),
     brainfuckRepo,
     pythonBin,
+    paddleCache:
+      typeof p.paddleCache === 'string' && p.paddleCache.length > 0
+        ? p.paddleCache
+        : '../paddle-cache',
   };
 
   const s = isObject(raw.services) ? raw.services : {};
@@ -314,4 +332,17 @@ export function pythonBinPath(): string {
   return path.isAbsolute(c.paths.pythonBin)
     ? c.paths.pythonBin
     : path.resolve(process.cwd(), c.paths.pythonBin);
+}
+
+/**
+ * Resolve `paths.paddleCache` to an absolute path (relative paths use cwd).
+ * Call this per-use rather than caching it in a module-level const: reading it
+ * lazily keeps `getConfig()` off the import path, so a missing config.json
+ * cannot break module loading during a build.
+ */
+export function paddleCachePath(): string {
+  const c = getConfig();
+  return path.isAbsolute(c.paths.paddleCache)
+    ? c.paths.paddleCache
+    : path.resolve(process.cwd(), c.paths.paddleCache);
 }

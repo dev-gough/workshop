@@ -14,8 +14,8 @@ import { classifyPaths } from './classify';
 import { buildGraph } from './graph';
 import { applyApprovedOverrides } from './overrides';
 import { PARKS } from './parks';
+import { paddleCachePath } from '../config';
 
-const CACHE_ROOT = path.join(process.cwd(), '.cache/paddle');
 // ~5 m generalization on water geometry; both sources are only 10 m accurate.
 const WATER_OFFSET_DEG = 0.00005;
 
@@ -25,7 +25,7 @@ async function cached(
   refetch: boolean,
   fetcher: () => Promise<EsriFeature[]>,
 ): Promise<EsriFeature[]> {
-  const file = path.join(CACHE_ROOT, park, `${name}.json`);
+  const file = path.join(paddleCachePath(), park, `${name}.json`);
   if (!refetch) {
     try {
       return JSON.parse(await fs.readFile(file, 'utf-8'));

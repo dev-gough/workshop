@@ -11,12 +11,13 @@
 import { open } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { paddleCachePath } from '../config';
 
 const BUNDLE_DIM = 128;
 const INDEX_START = 64;
 
 export function chartTileDir(slug: string): string {
-  return path.join(process.cwd(), '.cache', 'paddle', slug, 'jeff', 'tile');
+  return path.join(paddleCachePath(), slug, 'jeff', 'tile');
 }
 
 /** Whether a park's purchased chart tiles are actually on disk. */

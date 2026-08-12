@@ -15,9 +15,11 @@
 
   "paths": {
     "_comment": "musicDirectory is the root for /projects/barfoo and the soulseek staging area (which writes to <musicDirectory>/.slskd-downloads). brainfuckRepo defaults to vendor/brainfuck-genetic (the git submodule); pythonBin defaults to <brainfuckRepo>/.venv/bin/python — but point it at pypy3 if available: the GA runner is pure Python with tight interpreter loops and runs ~11x faster under PyPy (measured 330 -> 3,805 gens/s on PyPy 7.3.15).",
+    "_paddleCache_comment": "paddleCache is the root of the paddle park data (<root>/<slug>/{dem,imagery,jeff,*.json}) and defaults to ../paddle-cache — deliberately OUTSIDE the repo. Keep it out of the project tree: Next's output file tracer globs ** under the tracing root at build time, and ~1.9M tiles in the tree exhaust the build worker's heap at any ceiling. outputFileTracingExcludes prunes the tracer's result, not its walk, and renaming the directory in place does not help either.",
     "musicDirectory": null,
     "brainfuckRepo": "vendor/brainfuck-genetic",
-    "pythonBin": "vendor/brainfuck-genetic/.venv/bin/python"
+    "pythonBin": "vendor/brainfuck-genetic/.venv/bin/python",
+    "paddleCache": "../paddle-cache"
   },
 
   "services": {

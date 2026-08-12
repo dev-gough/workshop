@@ -8,7 +8,7 @@
  *
  *   npm run import-osm-campsites -- --park temagami [--refetch]
  *
- * Overpass pulls are cached in .cache/paddle/<slug>/osm-campsites.json.
+ * Overpass pulls are cached in <paths.paddleCache>/<slug>/osm-campsites.json.
  * Relevance: within NEAR_NET_M of the route network OR within NEAR_SHORE_M
  * of an on-network lake's shoreline — the route polyline runs down the
  * middle of big lakes, so shoreline sites sit far from it (car campgrounds
@@ -19,6 +19,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import pool from '../src/lib/db';
+import { paddleCachePath } from '../src/lib/config';
 import { PARKS } from '../src/lib/paddle/parks';
 import { haversineM } from '../src/lib/paddle/classify';
 
@@ -49,7 +50,7 @@ interface OsmElement {
 }
 
 async function fetchElements(): Promise<OsmElement[]> {
-  const file = path.join(process.cwd(), '.cache', 'paddle', slug!, 'osm-campsites.json');
+  const file = path.join(paddleCachePath(), slug!, 'osm-campsites.json');
   if (!refetch) {
     try {
       return JSON.parse(await fs.readFile(file, 'utf-8')).elements;

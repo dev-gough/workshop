@@ -1,12 +1,13 @@
 /**
  * On-disk DEM tiles for a park — plain XYZ PNGs in the Mapzen "terrarium"
  * encoding (elevation = R·256 + G + B/256 − 32768), cached under
- * `.cache/paddle/<slug>/dem/{z}/{x}/{y}.png` by `npm run import-dem-tiles`.
+ * `<paths.paddleCache>/<slug>/dem/{z}/{x}/{y}.png` by `npm run import-dem-tiles`.
  * MapLibre consumes them as a raster-dem source for 3D terrain + hillshade.
  */
 import { promises as fs } from 'node:fs';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { paddleCachePath } from '../config';
 
 /** Top zoom the importer fetches — matches the ~30 m CDEM source resolution. */
 export const DEM_MAX_ZOOM = 12;
@@ -20,7 +21,7 @@ export const DEM_MAX_ZOOM = 12;
 export const DEM_PAD_DEG = 0.4;
 
 export function demTileDir(slug: string): string {
-  return path.join(process.cwd(), '.cache', 'paddle', slug, 'dem');
+  return path.join(paddleCachePath(), slug, 'dem');
 }
 
 /** Whether a park's DEM tiles have been imported. */
