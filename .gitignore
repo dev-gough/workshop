@@ -51,3 +51,7 @@ config.json
 # Paddle Planner raw Ontario open-data pulls (regenerable via
 # `npm run sync-paddle -- --refetch`; ~50MB per park).
 /.cache/
+
+# Village viewer texture atlas — derived from MineColonies (All Rights Reserved)
+# and Mojang assets. Local-only, never commit, never serve outside localhost.
+/public/village/
