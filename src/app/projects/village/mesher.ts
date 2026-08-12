@@ -78,28 +78,28 @@ export interface MeshResult {
 /**
  * Resolve one palette entry to its six face texture indices and tint flags.
  *
- * Domum Ornamentum blocks carry no texture of their own — they are baked from
- * component materials chosen at placement — so they resolve through the vanilla
- * block filling their first material slot. Colonies dress a given block in one
- * material overwhelmingly often, and the MVP's cubes cannot show a per-slot
- * split anyway, so first-slot is both cheap and very nearly right.
+ * **Materials win over the block's own atlas entry.** Domum Ornamentum blocks
+ * carry no real texture — they are baked client-side from component materials
+ * chosen at placement — but they *do* ship placeholder models, so looking the
+ * block up directly always succeeds and quietly returns the default skin. That
+ * is how every domum block in the colony ended up wearing oak planks regardless
+ * of what it was actually built from. If the mod resolved materials for this
+ * block, those materials are the answer.
+ *
+ * First slot only: colonies dress a given block in one material overwhelmingly
+ * often, and the MVP's cubes cannot show a per-slot split anyway.
  */
 export function resolveEntry(
   atlas: AtlasData,
   entry: PaletteEntry,
 ): { tex: number[]; tint: number[]; occludes: boolean } | null {
-  const direct = lookup(atlas, entry.block, entry.properties ?? {});
-  if (direct) {
-    return direct;
-  }
-  const materials = entry.materials ? Object.values(entry.materials) : [];
-  for (const material of materials) {
+  for (const material of entry.materials ? Object.values(entry.materials) : []) {
     const viaMaterial = lookup(atlas, material, {});
     if (viaMaterial) {
       return viaMaterial;
     }
   }
-  return null;
+  return lookup(atlas, entry.block, entry.properties ?? {});
 }
 
 function lookup(atlas: AtlasData, block: string, properties: Record<string, string>) {

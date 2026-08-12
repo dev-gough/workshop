@@ -47,7 +47,7 @@ export default function VillagePage() {
   const [progress, setProgress] = useState<Progress>({ phase: 'idle', loaded: 0, total: 0, quads: 0 });
   const [manifest, setManifest] = useState<Manifest | null>(null);
   const [locked, setLocked] = useState(false);
-  const [position, setPosition] = useState({ x: 0, y: 0, z: 0 });
+  const readoutRef = useRef<HTMLSpanElement>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const requestLockRef = useRef<(() => void) | null>(null);
 
@@ -152,12 +152,17 @@ export default function VillagePage() {
         alphaTest: 0.5,
       });
 
+      const held = new Set<string>();
       const controls = new PointerLockControls(camera, renderer.domElement);
       requestLockRef.current = () => controls.lock();
       controls.addEventListener('lock', () => setLocked(true));
-      controls.addEventListener('unlock', () => setLocked(false));
+      controls.addEventListener('unlock', () => {
+        setLocked(false);
+        // Releasing the pointer while a key is down never delivers its keyup,
+        // so the camera would drift forever on a key nobody is holding.
+        held.clear();
+      });
 
-      const held = new Set<string>();
       const onKeyDown = (e: KeyboardEvent) => {
         held.add(e.code);
         // Space scrolls the page and ctrl+W closes the tab; neither is welcome
@@ -167,8 +172,10 @@ export default function VillagePage() {
         }
       };
       const onKeyUp = (e: KeyboardEvent) => held.delete(e.code);
+      const onBlur = () => held.clear();
       window.addEventListener('keydown', onKeyDown);
       window.addEventListener('keyup', onKeyUp);
+      window.addEventListener('blur', onBlur);
 
       const onResize = () => {
         camera.aspect = mount.clientWidth / mount.clientHeight;
@@ -286,6 +293,7 @@ export default function VillagePage() {
       const WORLD_UP = new THREE.Vector3(0, 1, 0);
       let raf = 0;
       let sinceReport = 0;
+      let lastReadout = '';
 
       const tick = () => {
         raf = requestAnimationFrame(tick);
@@ -315,14 +323,22 @@ export default function VillagePage() {
         if (held.has('Space')) camera.position.y += speed;
         if (held.has('ShiftLeft') || held.has('ShiftRight')) camera.position.y -= speed;
 
+        // The readout is written straight to the DOM. Driving it through React
+        // state re-rendered the whole page several times a second, and only
+        // while the camera was actually moving — which is exactly when the
+        // pointer-lock look broke. A 60fps loop has no business in the React
+        // render cycle regardless.
         sinceReport += delta;
-        if (sinceReport > 0.15) {
+        if (sinceReport > 0.1) {
           sinceReport = 0;
-          setPosition({
-            x: Math.round(camera.position.x),
-            y: Math.round(camera.position.y),
-            z: Math.round(camera.position.z),
-          });
+          const text =
+            `x ${Math.round(camera.position.x)}   ` +
+            `y ${Math.round(camera.position.y)}   ` +
+            `z ${Math.round(camera.position.z)}`;
+          if (text !== lastReadout && readoutRef.current) {
+            lastReadout = text;
+            readoutRef.current.textContent = text;
+          }
         }
         renderer.render(scene, camera);
       };
@@ -332,6 +348,7 @@ export default function VillagePage() {
         cancelAnimationFrame(raf);
         window.removeEventListener('keydown', onKeyDown);
         window.removeEventListener('keyup', onKeyUp);
+        window.removeEventListener('blur', onBlur);
         window.removeEventListener('resize', onResize);
         document.removeEventListener('fullscreenchange', onResize);
         controls.dispose();
@@ -454,9 +471,7 @@ export default function VillagePage() {
 
           {locked && (
             <div className="pointer-events-none absolute bottom-3 left-3 rounded-lg bg-neutral-950/70 px-3 py-2 font-mono text-xs text-neutral-200 tabular-nums">
-              <div>
-                x {position.x} &nbsp; y {position.y} &nbsp; z {position.z}
-              </div>
+              <span ref={readoutRef}>x 0   y 0   z 0</span>
               <div className="mt-1 text-neutral-400">WASD move · space/shift up/down · ctrl sprint · esc release</div>
             </div>
           )}
