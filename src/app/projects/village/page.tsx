@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, Boxes, Loader2, MousePointerClick } from 'lucide-react';
+import { AlertCircle, Boxes, Loader2, Maximize2, Minimize2, MousePointerClick } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 // Type-only: the runtime import is dynamic below so three stays out of the
 // shared bundle, but the types are erased at compile time and cost nothing.
@@ -36,20 +36,39 @@ interface Progress {
   message?: string;
 }
 
-/** Movement, in blocks per second. Shift multiplies it. */
+/** Movement, in blocks per second. Ctrl multiplies it, as sprint does in game. */
 const WALK_SPEED = 22;
 const SPRINT_MULTIPLIER = 4;
 const EYE_START_HEIGHT = 24;
 
 export default function VillagePage() {
   const mountRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
   const [progress, setProgress] = useState<Progress>({ phase: 'idle', loaded: 0, total: 0, quads: 0 });
   const [manifest, setManifest] = useState<Manifest | null>(null);
   const [locked, setLocked] = useState(false);
   const [position, setPosition] = useState({ x: 0, y: 0, z: 0 });
+  const [fullscreen, setFullscreen] = useState(false);
   const requestLockRef = useRef<(() => void) | null>(null);
 
   const enterView = useCallback(() => requestLockRef.current?.(), []);
+
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+    } else {
+      void frameRef.current?.requestFullscreen();
+    }
+  }, []);
+
+  // The browser can leave fullscreen without asking (esc, or the pointer-lock
+  // release that esc also triggers), so the flag follows the document rather
+  // than the click that requested it.
+  useEffect(() => {
+    const onChange = () => setFullscreen(document.fullscreenElement === frameRef.current);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -122,10 +141,15 @@ export default function VillagePage() {
 
       // Vertex colours already carry Minecraft's per-face directional shading, so
       // the material is unlit — a real light would fight that and wash it out.
+      // alphaTest rather than transparency: crops, torches, glass and leaves are
+      // cutouts, and without it every transparent texel draws black — which is
+      // what turned the wheat fields into rows of black cubes. Discarding beats
+      // blending here because cutouts need no depth sorting.
       const material = new THREE.MeshBasicMaterial({
         map: atlasTexture,
         vertexColors: true,
         side: THREE.DoubleSide,
+        alphaTest: 0.5,
       });
 
       const controls = new PointerLockControls(camera, renderer.domElement);
@@ -136,6 +160,8 @@ export default function VillagePage() {
       const held = new Set<string>();
       const onKeyDown = (e: KeyboardEvent) => {
         held.add(e.code);
+        // Space scrolls the page and ctrl+W closes the tab; neither is welcome
+        // mid-flight, and both are only intercepted while the pointer is locked.
         if (e.code === 'Space' || e.code.startsWith('Arrow')) {
           e.preventDefault();
         }
@@ -150,6 +176,9 @@ export default function VillagePage() {
         renderer.setSize(mount.clientWidth, mount.clientHeight);
       };
       window.addEventListener('resize', onResize);
+      // Entering fullscreen resizes the container without firing a window
+      // resize, so the canvas would keep the old aspect and letterbox itself.
+      document.addEventListener('fullscreenchange', onResize);
 
       // ── Meshing ──
 
@@ -254,22 +283,37 @@ export default function VillagePage() {
       const clock = new THREE.Clock();
       const forward = new THREE.Vector3();
       const right = new THREE.Vector3();
+      const WORLD_UP = new THREE.Vector3(0, 1, 0);
       let raf = 0;
       let sinceReport = 0;
 
       const tick = () => {
         raf = requestAnimationFrame(tick);
         const delta = Math.min(clock.getDelta(), 0.1);
-        const speed = WALK_SPEED * (held.has('ShiftLeft') || held.has('ShiftRight') ? SPRINT_MULTIPLIER : 1) * delta;
+        const sprinting = held.has('ControlLeft') || held.has('ControlRight');
+        const speed = WALK_SPEED * (sprinting ? SPRINT_MULTIPLIER : 1) * delta;
 
+        // Creative flight, not noclip: WASD stays in the horizontal plane no
+        // matter where you are looking, and altitude is space/shift only. Letting
+        // W follow the pitch makes precise movement around a building miserable —
+        // you sink or climb every time you glance up or down.
         camera.getWorldDirection(forward);
-        right.crossVectors(forward, camera.up).normalize();
+        forward.y = 0;
+        if (forward.lengthSq() < 1e-6) {
+          // Looking straight up or down: no usable heading, so fall back to the
+          // camera's own up-vector projection rather than freezing in place.
+          forward.set(0, 0, -1).applyQuaternion(camera.quaternion);
+          forward.y = 0;
+        }
+        forward.normalize();
+        right.crossVectors(forward, WORLD_UP).normalize();
+
         if (held.has('KeyW')) camera.position.addScaledVector(forward, speed);
         if (held.has('KeyS')) camera.position.addScaledVector(forward, -speed);
         if (held.has('KeyD')) camera.position.addScaledVector(right, speed);
         if (held.has('KeyA')) camera.position.addScaledVector(right, -speed);
-        if (held.has('KeyE') || held.has('Space')) camera.position.y += speed;
-        if (held.has('KeyQ')) camera.position.y -= speed;
+        if (held.has('Space')) camera.position.y += speed;
+        if (held.has('ShiftLeft') || held.has('ShiftRight')) camera.position.y -= speed;
 
         sinceReport += delta;
         if (sinceReport > 0.15) {
@@ -289,6 +333,7 @@ export default function VillagePage() {
         window.removeEventListener('keydown', onKeyDown);
         window.removeEventListener('keyup', onKeyUp);
         window.removeEventListener('resize', onResize);
+        document.removeEventListener('fullscreenchange', onResize);
         controls.dispose();
         meshes.forEach((mesh) => mesh.geometry.dispose());
         material.dispose();
@@ -344,8 +389,24 @@ export default function VillagePage() {
           </div>
         ))}
 
-        <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-neutral-200 bg-neutral-900 dark:border-neutral-800">
+        <div
+          ref={frameRef}
+          className={
+            fullscreen
+              ? 'relative size-full overflow-hidden bg-neutral-900'
+              : 'relative aspect-video w-full overflow-hidden rounded-xl border border-neutral-200 bg-neutral-900 dark:border-neutral-800'
+          }
+        >
           <div ref={mountRef} className="size-full" />
+
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            className="absolute right-3 top-3 z-10 rounded-lg bg-neutral-950/60 p-2 text-neutral-200 transition hover:bg-neutral-950/80"
+          >
+            {fullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+          </button>
 
           {progress.phase === 'error' && (
             <div className="absolute inset-0 flex items-center justify-center bg-neutral-950/90 p-6">
@@ -396,7 +457,7 @@ export default function VillagePage() {
               <div>
                 x {position.x} &nbsp; y {position.y} &nbsp; z {position.z}
               </div>
-              <div className="mt-1 text-neutral-400">WASD move · Q/E down/up · shift sprint · esc release</div>
+              <div className="mt-1 text-neutral-400">WASD move · space/shift up/down · ctrl sprint · esc release</div>
             </div>
           )}
         </div>

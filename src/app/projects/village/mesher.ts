@@ -44,8 +44,8 @@ export interface AtlasData {
   textures: string[];
   /** Pixel rects into atlas.png, parallel to `textures`: [x, y, w, h]. */
   uvs: [number, number, number, number][];
-  /** [textureIndices[6], tintFlags[6]] */
-  facesets: [number[], number[]][];
+  /** [textureIndices[6], tintFlags[6], occludes] — atlas version 2. */
+  facesets: [number[], number[], number][];
   blocks: Record<string, { variants: { when: Record<string, string>; set: number }[] }>;
 }
 
@@ -84,7 +84,10 @@ export interface MeshResult {
  * material overwhelmingly often, and the MVP's cubes cannot show a per-slot
  * split anyway, so first-slot is both cheap and very nearly right.
  */
-export function resolveEntry(atlas: AtlasData, entry: PaletteEntry): { tex: number[]; tint: number[] } | null {
+export function resolveEntry(
+  atlas: AtlasData,
+  entry: PaletteEntry,
+): { tex: number[]; tint: number[]; occludes: boolean } | null {
   const direct = lookup(atlas, entry.block, entry.properties ?? {});
   if (direct) {
     return direct;
@@ -113,18 +116,18 @@ function lookup(atlas: AtlasData, block: string, properties: Record<string, stri
       }
     }
     if (matches) {
-      const [tex, tint] = atlas.facesets[variant.set];
-      return { tex, tint };
+      const [tex, tint, occludes] = atlas.facesets[variant.set];
+      return { tex, tint, occludes: occludes === 1 };
     }
   }
   // A block whose variants are all keyed on properties we were not given — a log
   // referenced as a domum material, say. Any variant is a better answer than a hole.
-  const [tex, tint] = atlas.facesets[record.variants[0].set];
-  return { tex, tint };
+  const [tex, tint, occludes] = atlas.facesets[record.variants[0].set];
+  return { tex, tint, occludes: occludes === 1 };
 }
 
 /**
- * Mesh a chunk: emit only faces whose neighbour is air.
+ * Mesh a chunk: emit every face whose neighbour does not fully occlude it.
  *
  * Neighbours outside this chunk count as air. That over-draws the shell where
  * two chunks meet, but those faces sit buried inside solid terrain and are
@@ -135,9 +138,14 @@ export function meshChunk(atlas: AtlasData, chunk: ChunkPayload): MeshResult {
   const { indices, height, minY, palette } = chunk;
 
   // Resolve the palette once per chunk rather than once per block face.
-  const resolved: ({ tex: number[]; tint: number[] } | null)[] = palette.map((entry, i) =>
+  const resolved = palette.map((entry, i) =>
     i === 0 || entry.block === 'minecraft:air' ? null : resolveEntry(atlas, entry),
   );
+  // A neighbour only hides a face if it actually fills its cube with opaque
+  // texels. Crops, torches, slabs, fences, glass and leaves do not, so the face
+  // behind them still has to be drawn — otherwise alpha testing punches the
+  // sprite out and you see through the hole into nothing.
+  const occludes = resolved.map((r) => r?.occludes === true);
 
   const position: number[] = [];
   const uv: number[] = [];
@@ -171,7 +179,13 @@ export function meshChunk(atlas: AtlasData, chunk: ChunkPayload): MeshResult {
           const nx = x + (f === 4 ? -1 : f === 5 ? 1 : 0);
           const ny = y + (f === 0 ? -1 : f === 1 ? 1 : 0);
           const nz = z + (f === 2 ? -1 : f === 3 ? 1 : 0);
-          if (at(nx, ny, nz) !== 0) {
+          const neighbour = at(nx, ny, nz);
+          // Cull against an opaque neighbour, or against an identical one. The
+          // second rule is what stops a lake drawing every internal water face:
+          // the palette index encodes block state and materials, so matching
+          // indices really are the same block, and the shared face is never
+          // visible from either side.
+          if (neighbour === id || occludes[neighbour]) {
             continue;
           }
 
