@@ -1,13 +1,16 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, Boxes, Loader2, Maximize2, Minimize2, MousePointerClick } from 'lucide-react';
+import { AlertCircle, Boxes, Check, Link2, Loader2, Maximize2, Minimize2, MousePointerClick } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
+import { copyText } from '@/lib/clipboard';
 // Type-only: the runtime import is dynamic below so three stays out of the
 // shared bundle, but the types are erased at compile time and cost nothing.
 import type * as ThreeTypes from 'three';
 import { decodeChunkData, type AtlasData, type MeshResult } from './mesher';
 import { CitizenLayer } from './citizens';
+import { applyCameraView, cameraLink, parseCameraQuery, readCameraView } from './camera';
+import { installDebugHandle } from './debug';
 import type { VillageFrame, VillageRoster } from '@/lib/village';
 
 // ── Types ──
@@ -54,6 +57,41 @@ export default function VillagePage() {
   const [streamLive, setStreamLive] = useState(false);
   const readoutRef = useRef<HTMLSpanElement>(null);
   const streamRef = useRef<HTMLSpanElement>(null);
+  const [flash, setFlash] = useState<{ text: string; ok: boolean } | null>(null);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Set once the scene exists; returns a pasteable link to wherever the camera
+  // is right now. Held in a ref because the scene lives outside React.
+  const linkRef = useRef<(() => string) | null>(null);
+
+  // Counts every render of this component, for `window.villageViewer.stats()`.
+  // Incrementing during render is impure, but this is a debug counter whose
+  // whole job is to notice renders — and React StrictMode double-counting in
+  // dev is exactly the sort of thing it should be visible about.
+  const reactRenders = useRef(0);
+  reactRenders.current++;
+
+  const copyLink = useCallback(() => {
+    const link = linkRef.current?.();
+    if (!link) {
+      return;
+    }
+    void copyText(link).then((ok) => {
+      setFlash({ text: ok ? 'camera link copied' : link, ok });
+      if (flashTimer.current) {
+        clearTimeout(flashTimer.current);
+      }
+      // Longer on failure, and showing the link itself, so it can be copied by
+      // hand — paddle's rule, for the same reason: over plain LAN HTTP the
+      // clipboard API does not exist and the failure has to stay readable.
+      flashTimer.current = setTimeout(() => setFlash(null), ok ? 1800 : 8000);
+    });
+  }, []);
+
+  useEffect(() => () => {
+    if (flashTimer.current) {
+      clearTimeout(flashTimer.current);
+    }
+  }, []);
   const [fullscreen, setFullscreen] = useState(false);
   const requestLockRef = useRef<(() => void) | null>(null);
 
@@ -138,7 +176,16 @@ export default function VillagePage() {
 
       const camera = new THREE.PerspectiveCamera(70, mount.clientWidth / mount.clientHeight, 0.1, 1000);
       const { colony, bounds } = manifestBody;
-      camera.position.set(colony.center.x, bounds.maxY + EYE_START_HEIGHT, colony.center.z + 60);
+
+      // An explicit ?cam= wins over the default framing, which is what makes a
+      // view reproducible — a screenshot script, or a link to the spot where
+      // something looked wrong, lands in exactly the same place every time.
+      const requested = parseCameraQuery(window.location.search);
+      if (requested) {
+        applyCameraView(camera, requested);
+      } else {
+        camera.position.set(colony.center.x, bounds.maxY + EYE_START_HEIGHT, colony.center.z + 60);
+      }
 
       const renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -331,13 +378,29 @@ export default function VillagePage() {
       const clock = new THREE.Clock();
       const forward = new THREE.Vector3();
       const right = new THREE.Vector3();
+      const scratch = new THREE.Vector3();
       const WORLD_UP = new THREE.Vector3(0, 1, 0);
       let raf = 0;
+      let frames = 0;
       let sinceReport = 0;
       let lastReadout = '';
 
+      linkRef.current = () => cameraLink(readCameraView(camera, scratch));
+      const removeDebugHandle = installDebugHandle({
+        three: THREE,
+        scene,
+        camera,
+        renderer,
+        citizens,
+        applyView: (next) => applyCameraView(camera, next),
+        frames: () => frames,
+        reactRenders: () => reactRenders.current,
+        quads: () => quadTotal,
+      });
+
       const tick = () => {
         raf = requestAnimationFrame(tick);
+        frames++;
         const delta = Math.min(clock.getDelta(), 0.1);
         const sprinting = held.has('ControlLeft') || held.has('ControlRight');
         const speed = WALK_SPEED * (sprinting ? SPRINT_MULTIPLIER : 1) * delta;
@@ -394,6 +457,10 @@ export default function VillagePage() {
         // remounted page is a slot nobody gets back until the server restarts.
         events.close();
         citizens.dispose();
+        // A handle onto a disposed renderer is worse than no handle: everything
+        // on it still answers, and every answer describes a scene nobody draws.
+        removeDebugHandle();
+        linkRef.current = null;
         window.removeEventListener('keydown', onKeyDown);
         window.removeEventListener('keyup', onKeyUp);
         window.removeEventListener('blur', onBlur);
@@ -464,14 +531,37 @@ export default function VillagePage() {
         >
           <div ref={mountRef} className="size-full" />
 
-          <button
-            type="button"
-            onClick={toggleFullscreen}
-            title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-            className="absolute right-3 top-3 z-10 rounded-lg bg-neutral-950/60 p-2 text-neutral-200 transition hover:bg-neutral-950/80"
-          >
-            {fullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-          </button>
+          {/* Above the click-to-fly overlay, and only reachable with the pointer
+              released — which is the moment you have arrived somewhere worth
+              keeping, so the ordering works out. */}
+          <div className="absolute right-3 top-3 z-10 flex items-center gap-2">
+            {flash && (
+              <span
+                className={`max-w-md truncate rounded-lg px-2.5 py-1.5 font-mono text-xs ${
+                  flash.ok ? 'bg-emerald-500/20 text-emerald-200' : 'bg-amber-500/20 text-amber-100'
+                }`}
+              >
+                {flash.ok ? flash.text : `clipboard blocked · ${flash.text}`}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={copyLink}
+              disabled={progress.phase !== 'ready'}
+              title="Copy a link to this exact camera position"
+              className="rounded-lg bg-neutral-950/60 p-2 text-neutral-200 transition hover:bg-neutral-950/80 disabled:opacity-40"
+            >
+              {flash?.ok ? <Check className="size-4" /> : <Link2 className="size-4" />}
+            </button>
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+              className="rounded-lg bg-neutral-950/60 p-2 text-neutral-200 transition hover:bg-neutral-950/80"
+            >
+              {fullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+            </button>
+          </div>
 
           {/* The text is written imperatively at 10 Hz, so it stays a constant here — anything
               derived from state would be re-patched by React on every reconnect. */}
@@ -540,7 +630,7 @@ export default function VillagePage() {
           <Boxes className="size-3.5" />
           Every block renders as a full cube — stairs, slabs and fences included. Grass uses a fixed plains tint.
           Citizens stream live at 10 Hz; their labels show the job AI state, or the brain state when they are not
-          working.
+          working. Press esc, then the link button, to copy a URL that reopens this exact camera position.
         </p>
       </div>
     </PageTransition>

@@ -11,7 +11,7 @@ import PageTransition from '@/components/motion/PageTransition';
 import { useHeaderConfig } from '@/components/header-config';
 import type { HoverInfo, Network, ParkInfo, ReviewItem, View } from './_lib/model';
 import { TripRouter } from './_lib/route';
-import { copyText } from './_lib/clipboard';
+import { copyText } from '@/lib/clipboard';
 import { useTripPlan } from './_lib/use-trip-plan';
 import PanelShell from './_components/panel-shell';
 import MapPanel from './_components/map-panel';

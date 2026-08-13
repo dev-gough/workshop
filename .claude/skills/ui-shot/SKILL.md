@@ -39,7 +39,21 @@ node .claude/skills/ui-shot/shot.mjs /projects/soulseek --admin
 
 # Cookie-gated UI (e.g. BarFoo's who's-listening overlay; repeatable)
 node .claude/skills/ui-shot/shot.mjs /projects/barfoo --cookie 'barfoo_user=devon'
+
+# Village viewer: address the 3D camera by URL, and give it time to mesh
+node .claude/skills/ui-shot/shot.mjs '/projects/village?cam=-64,90,-18&look=185,28' --settle 26000
 ```
+
+The village viewer takes `?cam=x,y,z&look=yaw,pitch` (Minecraft angles: yaw 0
+faces +Z, pitch positive looks down) precisely so it can be screenshot without
+driving a camera by hand — do **not** try to fly it with `--click` and key
+presses. Headless Chromium delivers no pointer-lock movement deltas, so it
+cannot be made to look up or down at all, and software rendering is slow enough
+that the page's per-frame delta clamp eats most of the movement. It also never
+reaches `networkidle` (the citizen event stream is open forever), so `goto`
+always burns its full timeout before the `--settle` even starts. Budget ~50s.
+`window.villageViewer` exposes `view()`, `goTo()`, `markers()` and `stats()` if
+you need assertions rather than pixels.
 
 Selectors are Playwright locators: CSS (`.hall-door`), `text=History`,
 `role=button[name="Save"]` all work. `--el`/`--hover`/`--click` use the

@@ -16,6 +16,7 @@
     "flag-imagery-kinds": "npx tsx scripts/flag-imagery-kinds.ts",
     "import-osm-campsites": "npx tsx scripts/import-osm-campsites.ts",
     "paddle-verify": "npx tsx scripts/paddle-verify.ts",
+    "village-verify": "npx tsx scripts/village-verify.ts",
     "poll-challenges": "npx tsx scripts/poll-challenges.ts",
     "mirror-challenge-icons": "npx tsx scripts/mirror-challenge-icons.ts",
     "prune-metrics": "npx tsx scripts/prune-metrics.ts",

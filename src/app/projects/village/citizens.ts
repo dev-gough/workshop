@@ -163,6 +163,28 @@ export class CitizenLayer {
     }
   }
 
+  /**
+   * Every tracked citizen, for the debug handle. Reads state rather than
+   * mutating it, so calling it from the console mid-flight is safe.
+   */
+  list(): { id: number; name: string; job: string | null; x: number; y: number; z: number; label: string; labelVisible: boolean }[] {
+    const out = [];
+    for (const [id, marker] of this.markers) {
+      const entry = this.roster.get(id);
+      out.push({
+        id,
+        name: entry?.name ?? `#${id}`,
+        job: entry?.job ?? null,
+        x: marker.current.x,
+        y: marker.current.y,
+        z: marker.current.z,
+        label: marker.label,
+        labelVisible: marker.sprite.visible,
+      });
+    }
+    return out;
+  }
+
   dispose(): void {
     for (const marker of this.markers.values()) {
       this.destroy(marker);

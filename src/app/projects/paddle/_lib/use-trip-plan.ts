@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TripData, TripStats, TripSummary } from './model';
 import { DEFAULT_COST, toGpx, type CostParams, type Leg, type Snap, type TripRouter } from './route';
-import { copyText } from './clipboard';
+import { copyText } from '@/lib/clipboard';
 
 const SNAP_MAX_M = 300;    // map-click waypoint snapping
 const RESNAP_MAX_M = 400;  // stored-trip waypoints get a little more slack

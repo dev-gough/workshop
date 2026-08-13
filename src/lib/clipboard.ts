@@ -1,4 +1,9 @@
 /**
+ * Copy text to the clipboard, honestly.
+ *
+ * Written for paddle's copy-coordinates gesture and shared from here since the
+ * village viewer's camera-link button needs exactly the same guarantee.
+ *
  * navigator.clipboard only exists in secure contexts — over plain LAN HTTP
  * (or with a browser shield blocking it) it is undefined and the write
  * silently never happens. Fall back to the deprecated-but-working
