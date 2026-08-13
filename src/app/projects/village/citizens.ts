@@ -39,6 +39,18 @@ const DEG_TO_RAD = Math.PI / 180;
 const LABEL_WIDTH = 256;
 const LABEL_HEIGHT = 72;
 
+/**
+ * Labels hold a constant size on screen, because a nameplate is UI rather than scenery: a citizen a
+ * block away should not get a sign that fills the frame, and one across the plaza should still be
+ * readable. `sizeAttenuation: false` gets that by cancelling the perspective divide — which means
+ * the sprite's scale is then read as the size it would have *one block* from the camera. So the size
+ * is expressed as the world size it used to have, divided by the distance it looked right at.
+ */
+const LABEL_WORLD_HEIGHT = 0.79;
+const LABEL_REFERENCE_DISTANCE = 9;
+const LABEL_SCALE_Y = LABEL_WORLD_HEIGHT / LABEL_REFERENCE_DISTANCE;
+const LABEL_SCALE_X = LABEL_SCALE_Y * (LABEL_WIDTH / LABEL_HEIGHT);
+
 interface Marker {
   group: ThreeTypes.Group;
   sprite: ThreeTypes.Sprite;
@@ -221,8 +233,10 @@ export class CitizenLayer {
 
     // depthTest off so a citizen inside a building still shows where they are — the whole point of
     // watching is finding the one who has stopped moving, and they are usually indoors.
-    const sprite = new three.Sprite(new three.SpriteMaterial({ map: texture, depthTest: false, transparent: true }));
-    sprite.scale.set(2.8, 0.79, 1);
+    const sprite = new three.Sprite(
+      new three.SpriteMaterial({ map: texture, depthTest: false, transparent: true, sizeAttenuation: false }),
+    );
+    sprite.scale.set(LABEL_SCALE_X, LABEL_SCALE_Y, 1);
     sprite.position.y = 2.35;
     sprite.renderOrder = 10;
     group.add(sprite);
