@@ -7,6 +7,8 @@ import PageTransition from '@/components/motion/PageTransition';
 // shared bundle, but the types are erased at compile time and cost nothing.
 import type * as ThreeTypes from 'three';
 import { decodeChunkData, type AtlasData, type MeshResult } from './mesher';
+import { CitizenLayer } from './citizens';
+import type { VillageFrame, VillageRoster } from '@/lib/village';
 
 // ── Types ──
 
@@ -47,7 +49,11 @@ export default function VillagePage() {
   const [progress, setProgress] = useState<Progress>({ phase: 'idle', loaded: 0, total: 0, quads: 0 });
   const [manifest, setManifest] = useState<Manifest | null>(null);
   const [locked, setLocked] = useState(false);
+  // Connected / reconnecting only. The citizen count and tick change ten times a
+  // second and are written straight to the DOM below, never through React.
+  const [streamLive, setStreamLive] = useState(false);
   const readoutRef = useRef<HTMLSpanElement>(null);
+  const streamRef = useRef<HTMLSpanElement>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const requestLockRef = useRef<(() => void) | null>(null);
 
@@ -285,6 +291,41 @@ export default function VillagePage() {
       }
       setProgress((p) => ({ ...p, phase: 'ready' }));
 
+      // ── Citizens ──
+
+      // Opened after the geometry is up, so the first frames land in a world that
+      // exists. EventSource rather than fetch + reader: it reconnects on its own,
+      // and the mod sends a short retry delay so a redeploy reappears in seconds.
+      const citizens = new CitizenLayer(THREE, scene);
+      const events = new EventSource(`/api/village/events?colony=${colony.id}`);
+      let lastStream = '';
+
+      events.addEventListener('roster', (e) => {
+        citizens.setRoster(JSON.parse((e as MessageEvent).data) as VillageRoster);
+      });
+
+      events.addEventListener('frame', (e) => {
+        const frame = JSON.parse((e as MessageEvent).data) as VillageFrame;
+        citizens.setFrame(frame);
+        const text = `${frame.citizens.length} citizens · tick ${frame.tick.toLocaleString()}`;
+        if (text !== lastStream && streamRef.current) {
+          lastStream = text;
+          streamRef.current.textContent = text;
+        }
+      });
+
+      // The mod's own mid-stream failures: it cannot change the status code once
+      // the stream is open, so it says so in-band instead.
+      events.addEventListener('fault', (e) => {
+        const fault = JSON.parse((e as MessageEvent).data) as { error: string };
+        setProgress((p) => ({ ...p, message: fault.error }));
+      });
+
+      events.addEventListener('open', () => setStreamLive(true));
+      // Fires on every disconnect. EventSource retries by itself unless it has
+      // been closed, so this reports rather than reacts.
+      events.onerror = () => setStreamLive(events.readyState === EventSource.OPEN);
+
       // ── Loop ──
 
       const clock = new THREE.Clock();
@@ -340,12 +381,19 @@ export default function VillagePage() {
             readoutRef.current.textContent = text;
           }
         }
+
+        citizens.update(delta, camera);
         renderer.render(scene, camera);
       };
       tick();
 
       cleanupScene = () => {
         cancelAnimationFrame(raf);
+        // Close before anything else: the mod allows only three streams at once
+        // and each one holds a handler thread, so an abandoned stream from a
+        // remounted page is a slot nobody gets back until the server restarts.
+        events.close();
+        citizens.dispose();
         window.removeEventListener('keydown', onKeyDown);
         window.removeEventListener('keyup', onKeyUp);
         window.removeEventListener('blur', onBlur);
@@ -425,6 +473,17 @@ export default function VillagePage() {
             {fullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
           </button>
 
+          {/* The text is written imperatively at 10 Hz, so it stays a constant here — anything
+              derived from state would be re-patched by React on every reconnect. */}
+          {progress.phase === 'ready' && (
+            <div className="pointer-events-none absolute left-3 top-3 z-10 flex items-center gap-2 rounded-lg bg-neutral-950/70 px-3 py-1.5 font-mono text-xs text-neutral-200 tabular-nums">
+              <span
+                className={`size-1.5 rounded-full ${streamLive ? 'animate-pulse bg-emerald-400' : 'bg-amber-400'}`}
+              />
+              <span ref={streamRef}>connecting…</span>
+            </div>
+          )}
+
           {progress.phase === 'error' && (
             <div className="absolute inset-0 flex items-center justify-center bg-neutral-950/90 p-6">
               <div className="max-w-lg text-center">
@@ -480,6 +539,8 @@ export default function VillagePage() {
         <p className="mt-3 flex items-center gap-2 text-xs text-neutral-500">
           <Boxes className="size-3.5" />
           Every block renders as a full cube — stairs, slabs and fences included. Grass uses a fixed plains tint.
+          Citizens stream live at 10 Hz; their labels show the job AI state, or the brain state when they are not
+          working.
         </p>
       </div>
     </PageTransition>

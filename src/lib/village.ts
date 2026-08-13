@@ -148,3 +148,59 @@ export async function fetchChunk(x: number, z: number): Promise<VillageChunk> {
   const res = await villageFetch(`/world/chunk?x=${x}&z=${z}`);
   return (await res.json()) as VillageChunk;
 }
+
+/**
+ * The slow half of the event stream — who exists, and what they are for.
+ *
+ * Sent on connect and re-sent only when it changes, so the 10 Hz frames can be
+ * pure numbers instead of retransmitting every citizen's name ten times a
+ * second. Joined to frames on `id`.
+ */
+export interface VillageRoster {
+  colony: number;
+  name: string;
+  active: boolean;
+  citizens: {
+    id: number;
+    name: string;
+    /**
+     * Job class simple name, e.g. `JobBuilder`. Absent for an unemployed citizen — the mod's Gson
+     * omits nulls rather than writing them, so these fields are missing, not null.
+     */
+    job?: string;
+    /** False when the citizen's chunk is not loaded — nothing to draw. */
+    loaded: boolean;
+    home?: { x: number; y: number; z: number };
+    work?: { x: number; y: number; z: number };
+  }[];
+}
+
+/** One citizen in one frame. Loaded citizens only. */
+export interface VillageCitizenFrame {
+  id: number;
+  /** Exact entity position, not block-snapped: the viewer interpolates between frames. */
+  x: number;
+  y: number;
+  z: number;
+  /** Body yaw in degrees, Minecraft convention: 0 is +Z (south), increasing clockwise. */
+  yaw: number;
+  /** Head yaw, which leads the body — citizens look at their work before turning to it. */
+  headYaw: number;
+  pitch: number;
+  eye: number;
+  saturation: number;
+  asleep: boolean;
+  idle: boolean;
+  /** Pathfinding stuck level; rises as pathing keeps failing. Absent for a citizen with no navigator. */
+  stuck?: number;
+  /** Citizen "brain" state — the sleep/eat/work decision. */
+  brain?: string;
+  /** Job AI state — the work loop itself. */
+  state?: string;
+}
+
+export interface VillageFrame {
+  tick: number;
+  gameTime: number;
+  citizens: VillageCitizenFrame[];
+}
