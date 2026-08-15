@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, Boxes, Check, Link2, Loader2, Maximize2, Minimize2, MousePointerClick } from 'lucide-react';
+import { AlertCircle, Boxes, Check, Link2, Loader2, Maximize2, Minimize2, MousePointerClick, Users } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import { copyText } from '@/lib/clipboard';
 // Type-only: the runtime import is dynamic below so three stays out of the
@@ -41,6 +41,11 @@ interface Progress {
   message?: string;
 }
 
+/** `JobBuilder` → `builder`: the class-name prefix is wire format, not English. */
+function jobLabel(job: string | undefined): string {
+  return job ? job.replace(/^Job/, '').toLowerCase() : 'unemployed';
+}
+
 /** Movement, in blocks per second. Ctrl multiplies it, as sprint does in game. */
 const WALK_SPEED = 22;
 const SPRINT_MULTIPLIER = 4;
@@ -62,6 +67,23 @@ export default function VillagePage() {
   // Set once the scene exists; returns a pasteable link to wherever the camera
   // is right now. Held in a ref because the scene lives outside React.
   const linkRef = useRef<(() => string) | null>(null);
+
+  // ── POV state ──
+  // `following` is the React copy — it changes only on click / esc / the citizen
+  // unloading, so it may drive the sidebar highlight and HUD shell. Everything
+  // that changes at 10 Hz (AI states, saturation, stuck) is written straight to
+  // the DOM through the refs below, never through React: the render loop driving
+  // React state is the regression `stats()` exists to catch.
+  const [roster, setRosterState] = useState<VillageRoster | null>(null);
+  const [following, setFollowing] = useState<number | null>(null);
+  const [panelOpen, setPanelOpen] = useState(true);
+  const followApi = useRef<{ start: (id: number) => void; stop: () => void } | null>(null);
+  /** Per-citizen sidebar state line, keyed by id. */
+  const rowStateRefs = useRef(new Map<number, HTMLSpanElement>());
+  const hudBrainRef = useRef<HTMLSpanElement>(null);
+  const hudStateRef = useRef<HTMLSpanElement>(null);
+  const hudSaturationRef = useRef<HTMLSpanElement>(null);
+  const hudStuckRef = useRef<HTMLSpanElement>(null);
 
   // Counts every render of this component, for `window.villageViewer.stats()`.
   // Incrementing during render is impure, but this is a debug counter whose
@@ -206,6 +228,9 @@ export default function VillagePage() {
       });
 
       const held = new Set<string>();
+      // Assigned once the citizen layer exists; esc has to work from the keydown
+      // handler installed here, before that layer is built.
+      let exitFollow: (() => void) | null = null;
       const controls = new PointerLockControls(camera, renderer.domElement);
       requestLockRef.current = () => controls.lock();
       controls.addEventListener('lock', () => setLocked(true));
@@ -222,6 +247,11 @@ export default function VillagePage() {
         // mid-flight, and both are only intercepted while the pointer is locked.
         if (e.code === 'Space' || e.code.startsWith('Arrow')) {
           e.preventDefault();
+        }
+        // POV mode never holds pointer lock, so esc reaches us here rather than
+        // being spent on releasing the pointer.
+        if (e.code === 'Escape') {
+          exitFollow?.();
         }
       };
       const onKeyUp = (e: KeyboardEvent) => held.delete(e.code);
@@ -347,9 +377,64 @@ export default function VillagePage() {
       const events = new EventSource(`/api/village/events?colony=${colony.id}`);
       let lastStream = '';
 
+      // ── POV camera ──
+
+      const followRef = { current: null as number | null };
+      const startFollow = (id: number) => {
+        // The POV camera owns the view; a locked pointer would fight it for the
+        // same quaternion every mouse move.
+        controls.unlock();
+        followRef.current = id;
+        citizens.follow(id);
+        setFollowing(id);
+      };
+      const stopFollow = () => {
+        if (followRef.current === null) {
+          return;
+        }
+        followRef.current = null;
+        citizens.follow(null);
+        // Free-cam resumes from where the citizen left the camera — dropping out
+        // of a POV is usually "wait, what is that", and that is here, not
+        // wherever the camera was parked before.
+        setFollowing(null);
+      };
+      exitFollow = stopFollow;
+      followApi.current = { start: startFollow, stop: stopFollow };
+
+      // `?follow=<id>` rides a citizen from the first frame they appear in — the
+      // POV equivalent of `?cam=`, and what makes a POV screenshot scriptable.
+      let pendingFollow: number | null = null;
+      {
+        const raw = new URLSearchParams(window.location.search).get('follow');
+        if (raw !== null && Number.isFinite(Number(raw))) {
+          pendingFollow = Number(raw);
+        }
+      }
+
       events.addEventListener('roster', (e) => {
-        citizens.setRoster(JSON.parse((e as MessageEvent).data) as VillageRoster);
+        const roster = JSON.parse((e as MessageEvent).data) as VillageRoster;
+        citizens.setRoster(roster);
+        setRosterState(roster);
       });
+
+      // 10 Hz frames touch the DOM only on an actual state transition — the same
+      // rule the marker labels follow. The comparison reads the node itself
+      // rather than a shadow map, so a row remounted by a roster change (whose
+      // text resets to the placeholder) is caught on the next frame.
+      const writeRow = (id: number, text: string, stuck: boolean) => {
+        const el = rowStateRefs.current.get(id);
+        if (!el || el.textContent === text) {
+          return;
+        }
+        el.textContent = text;
+        el.classList.toggle('text-red-300', stuck);
+      };
+      const writeHud = (el: HTMLSpanElement | null, text: string) => {
+        if (el && el.textContent !== text) {
+          el.textContent = text;
+        }
+      };
 
       events.addEventListener('frame', (e) => {
         const frame = JSON.parse((e as MessageEvent).data) as VillageFrame;
@@ -358,6 +443,37 @@ export default function VillagePage() {
         if (text !== lastStream && streamRef.current) {
           lastStream = text;
           streamRef.current.textContent = text;
+        }
+
+        if (pendingFollow !== null && frame.citizens.some((c) => c.id === pendingFollow)) {
+          startFollow(pendingFollow);
+          pendingFollow = null;
+        }
+
+        const present = new Set<number>();
+        for (const c of frame.citizens) {
+          present.add(c.id);
+          writeRow(c.id, c.asleep ? 'asleep' : (c.state ?? c.brain ?? 'idle'), (c.stuck ?? 0) > 0);
+        }
+        for (const id of rowStateRefs.current.keys()) {
+          if (!present.has(id)) {
+            writeRow(id, 'unloaded', false);
+          }
+        }
+
+        if (followRef.current !== null) {
+          const c = frame.citizens.find((cc) => cc.id === followRef.current);
+          if (!c) {
+            // The ridden citizen left the loaded set; a camera frozen at their
+            // last position with a live-looking HUD would read as "stuck".
+            stopFollow();
+          } else {
+            writeHud(hudBrainRef.current, c.brain ?? '—');
+            writeHud(hudStateRef.current, c.state ?? '—');
+            writeHud(hudSaturationRef.current, `${c.saturation.toFixed(1)} / 20`);
+            writeHud(hudStuckRef.current, String(c.stuck ?? 0));
+            hudStuckRef.current?.classList.toggle('text-red-300', (c.stuck ?? 0) > 0);
+          }
         }
       });
 
@@ -393,6 +509,8 @@ export default function VillagePage() {
         renderer,
         citizens,
         applyView: (next) => applyCameraView(camera, next),
+        follow: (id) => (id === null ? stopFollow() : startFollow(id)),
+        following: () => followRef.current,
         frames: () => frames,
         reactRenders: () => reactRenders.current,
         quads: () => quadTotal,
@@ -408,24 +526,27 @@ export default function VillagePage() {
         // Creative flight, not noclip: WASD stays in the horizontal plane no
         // matter where you are looking, and altitude is space/shift only. Letting
         // W follow the pitch makes precise movement around a building miserable —
-        // you sink or climb every time you glance up or down.
-        camera.getWorldDirection(forward);
-        forward.y = 0;
-        if (forward.lengthSq() < 1e-6) {
-          // Looking straight up or down: no usable heading, so fall back to the
-          // camera's own up-vector projection rather than freezing in place.
-          forward.set(0, 0, -1).applyQuaternion(camera.quaternion);
+        // you sink or climb every time you glance up or down. Suspended entirely
+        // while riding a citizen: the entity owns the camera.
+        if (followRef.current === null) {
+          camera.getWorldDirection(forward);
           forward.y = 0;
-        }
-        forward.normalize();
-        right.crossVectors(forward, WORLD_UP).normalize();
+          if (forward.lengthSq() < 1e-6) {
+            // Looking straight up or down: no usable heading, so fall back to the
+            // camera's own up-vector projection rather than freezing in place.
+            forward.set(0, 0, -1).applyQuaternion(camera.quaternion);
+            forward.y = 0;
+          }
+          forward.normalize();
+          right.crossVectors(forward, WORLD_UP).normalize();
 
-        if (held.has('KeyW')) camera.position.addScaledVector(forward, speed);
-        if (held.has('KeyS')) camera.position.addScaledVector(forward, -speed);
-        if (held.has('KeyD')) camera.position.addScaledVector(right, speed);
-        if (held.has('KeyA')) camera.position.addScaledVector(right, -speed);
-        if (held.has('Space')) camera.position.y += speed;
-        if (held.has('ShiftLeft') || held.has('ShiftRight')) camera.position.y -= speed;
+          if (held.has('KeyW')) camera.position.addScaledVector(forward, speed);
+          if (held.has('KeyS')) camera.position.addScaledVector(forward, -speed);
+          if (held.has('KeyD')) camera.position.addScaledVector(right, speed);
+          if (held.has('KeyA')) camera.position.addScaledVector(right, -speed);
+          if (held.has('Space')) camera.position.y += speed;
+          if (held.has('ShiftLeft') || held.has('ShiftRight')) camera.position.y -= speed;
+        }
 
         // The readout is written straight to the DOM. Driving it through React
         // state re-rendered the whole page several times a second, and only
@@ -446,6 +567,12 @@ export default function VillagePage() {
         }
 
         citizens.update(delta, camera);
+        // After the interpolation advances, so the camera rides this frame's
+        // pose rather than the last one — at 10 Hz input that lag is visible.
+        const pose = citizens.followedPose();
+        if (pose) {
+          applyCameraView(camera, pose);
+        }
         renderer.render(scene, camera);
       };
       tick();
@@ -461,6 +588,7 @@ export default function VillagePage() {
         // on it still answers, and every answer describes a scene nobody draws.
         removeDebugHandle();
         linkRef.current = null;
+        followApi.current = null;
         window.removeEventListener('keydown', onKeyDown);
         window.removeEventListener('keyup', onKeyUp);
         window.removeEventListener('blur', onBlur);
@@ -546,6 +674,17 @@ export default function VillagePage() {
             )}
             <button
               type="button"
+              onClick={() => setPanelOpen((v) => !v)}
+              disabled={progress.phase !== 'ready'}
+              title={panelOpen ? 'Hide citizens' : 'Show citizens'}
+              className={`rounded-lg bg-neutral-950/60 p-2 transition hover:bg-neutral-950/80 disabled:opacity-40 ${
+                panelOpen ? 'text-emerald-300' : 'text-neutral-200'
+              }`}
+            >
+              <Users className="size-4" />
+            </button>
+            <button
+              type="button"
               onClick={copyLink}
               disabled={progress.phase !== 'ready'}
               title="Copy a link to this exact camera position"
@@ -562,6 +701,48 @@ export default function VillagePage() {
               {fullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
             </button>
           </div>
+
+          {/* The roster shell renders through React (it changes a few times an hour); each row's
+              state line is a placeholder the frame handler overwrites imperatively at 10 Hz. */}
+          {progress.phase === 'ready' && panelOpen && roster && (
+            <div className="absolute right-3 top-[3.25rem] z-10 max-h-[calc(100%-5rem)] w-60 overflow-y-auto rounded-lg bg-neutral-950/70 p-1.5">
+              <div className="px-1.5 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-neutral-400">
+                Citizens
+              </div>
+              {roster.citizens.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  disabled={!c.loaded}
+                  onClick={() =>
+                    following === c.id ? followApi.current?.stop() : followApi.current?.start(c.id)
+                  }
+                  title={c.loaded ? 'Ride this citizen' : 'Not loaded — nothing to ride'}
+                  className={`block w-full rounded-md px-1.5 py-1 text-left transition disabled:opacity-40 ${
+                    following === c.id ? 'bg-emerald-500/20' : 'enabled:hover:bg-white/10'
+                  }`}
+                >
+                  <span className="flex items-baseline justify-between gap-2">
+                    <span className="truncate text-xs font-medium text-neutral-100">{c.name}</span>
+                    <span className="shrink-0 text-[10px] text-neutral-500">{jobLabel(c.job)}</span>
+                  </span>
+                  <span
+                    ref={(el) => {
+                      const map = rowStateRefs.current;
+                      if (el) {
+                        map.set(c.id, el);
+                      } else {
+                        map.delete(c.id);
+                      }
+                    }}
+                    className="block truncate font-mono text-[10px] text-neutral-400"
+                  >
+                    {c.loaded ? '…' : 'unloaded'}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* The text is written imperatively at 10 Hz, so it stays a constant here — anything
               derived from state would be re-patched by React on every reconnect. */}
@@ -605,7 +786,34 @@ export default function VillagePage() {
             </div>
           )}
 
-          {progress.phase === 'ready' && !locked && (
+          {/* The POV HUD: shell from React (changes on click), live values written
+              imperatively by the frame handler. This is the phase 4 payoff — the
+              state pair that turns "the builder looks stuck" into a diagnosis. */}
+          {following !== null && (
+            <div className="pointer-events-none absolute bottom-3 left-3 z-10 rounded-lg bg-neutral-950/70 px-3 py-2 font-mono text-xs text-neutral-200 tabular-nums">
+              <div className="mb-1 flex items-baseline gap-2">
+                <span className="font-semibold text-emerald-300">
+                  {roster?.citizens.find((c) => c.id === following)?.name ?? `#${following}`}
+                </span>
+                <span className="text-[10px] text-neutral-400">
+                  {jobLabel(roster?.citizens.find((c) => c.id === following)?.job)}
+                </span>
+              </div>
+              <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+                <span className="text-neutral-500">brain</span>
+                <span ref={hudBrainRef}>—</span>
+                <span className="text-neutral-500">state</span>
+                <span ref={hudStateRef}>—</span>
+                <span className="text-neutral-500">saturation</span>
+                <span ref={hudSaturationRef}>—</span>
+                <span className="text-neutral-500">stuck</span>
+                <span ref={hudStuckRef}>—</span>
+              </div>
+              <div className="mt-1 text-neutral-400">esc returns to free-cam</div>
+            </div>
+          )}
+
+          {progress.phase === 'ready' && !locked && following === null && (
             <button
               type="button"
               onClick={enterView}
@@ -630,7 +838,8 @@ export default function VillagePage() {
           <Boxes className="size-3.5" />
           Every block renders as a full cube — stairs, slabs and fences included. Grass uses a fixed plains tint.
           Citizens stream live at 10 Hz; their labels show the job AI state, or the brain state when they are not
-          working. Press esc, then the link button, to copy a URL that reopens this exact camera position.
+          working. Click a citizen in the panel to ride their point of view — the HUD reads out the AI driving
+          them — and esc returns to free-cam. The link button copies a URL that reopens this exact camera position.
         </p>
       </div>
     </PageTransition>

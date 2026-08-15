@@ -43,6 +43,8 @@ export interface VillageDebug {
   goTo(view: Partial<CameraView>): void;
   /** A pasteable URL for the current view. */
   link(): string;
+  /** Ride a citizen's POV, or null to return to free-cam. Same path the sidebar click takes. */
+  follow(id: number | null): void;
   /** Every citizen marker, with its position projected into canvas pixels. */
   markers(): MarkerReport[];
   /**
@@ -51,7 +53,7 @@ export interface VillageDebug {
    * React tree again — the fault that broke pointer-lock look while moving, and
    * the one the phase 4 state HUD is most likely to reintroduce.
    */
-  stats(): { frames: number; reactRenders: number; citizens: number; quads: number };
+  stats(): { frames: number; reactRenders: number; citizens: number; quads: number; following: number | null };
 }
 
 declare global {
@@ -67,6 +69,8 @@ export interface DebugSources {
   renderer: ThreeTypes.WebGLRenderer;
   citizens: CitizenLayer;
   applyView: (view: CameraView) => void;
+  follow: (id: number | null) => void;
+  following: () => number | null;
   frames: () => number;
   reactRenders: () => number;
   quads: () => number;
@@ -93,6 +97,7 @@ export function installDebugHandle(sources: DebugSources): () => void {
     view,
     goTo: (next) => sources.applyView({ ...view(), ...next }),
     link: () => cameraLink(view()),
+    follow: (id) => sources.follow(id),
     markers: () => {
       const canvas = sources.renderer.domElement;
       return sources.citizens.list().map((citizen) => {
@@ -120,6 +125,7 @@ export function installDebugHandle(sources: DebugSources): () => void {
       reactRenders: sources.reactRenders(),
       citizens: sources.citizens.count,
       quads: sources.quads(),
+      following: sources.following(),
     }),
   };
 

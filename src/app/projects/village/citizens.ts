@@ -14,6 +14,7 @@
  */
 import type * as ThreeTypes from 'three';
 import type { VillageCitizenFrame, VillageFrame, VillageRoster } from '@/lib/village';
+import type { CameraView } from './camera';
 
 type Three = typeof ThreeTypes;
 
@@ -57,9 +58,10 @@ interface Marker {
   canvas: HTMLCanvasElement;
   texture: ThreeTypes.CanvasTexture;
   body: ThreeTypes.Mesh;
-  /** Where the marker is being drawn, chasing `target`. */
-  current: { x: number; y: number; z: number; yaw: number };
-  target: { x: number; y: number; z: number; yaw: number };
+  /** Where the marker is being drawn, chasing `target`. Pitch and eye height ride along unused by
+   *  the marker itself — they exist so a POV camera reads one interpolated pose, not two. */
+  current: { x: number; y: number; z: number; yaw: number; pitch: number; eye: number };
+  target: { x: number; y: number; z: number; yaw: number; pitch: number; eye: number };
   /** Last text drawn into the canvas, so it is only redrawn when it changes. */
   label: string;
 }
@@ -74,6 +76,8 @@ export class CitizenLayer {
   private readonly jobMaterials = new Map<string, ThreeTypes.MeshBasicMaterial>();
   /** Reused by `update` so a 60 fps loop allocates nothing. */
   private readonly scratch: ThreeTypes.Vector3;
+  /** The citizen whose POV the camera is riding, or null. Their marker is hidden — the camera sits inside its head. */
+  private followedId: number | null = null;
 
   constructor(
     private readonly three: Three,
@@ -123,6 +127,8 @@ export class CitizenLayer {
       target.y = citizen.y;
       target.z = citizen.z;
       target.yaw = citizen.headYaw;
+      target.pitch = citizen.pitch;
+      target.eye = citizen.eye;
 
       const jumped =
         (target.x - current.x) ** 2 + (target.y - current.y) ** 2 + (target.z - current.z) ** 2 >
@@ -132,6 +138,8 @@ export class CitizenLayer {
         current.y = target.y;
         current.z = target.z;
         current.yaw = target.yaw;
+        current.pitch = target.pitch;
+        current.eye = target.eye;
       }
 
       this.relabel(marker, citizen);
@@ -164,6 +172,9 @@ export class CitizenLayer {
       // Shortest way round: a citizen turning from 350° to 10° must not spin 340° the long way.
       const turn = ((target.yaw - current.yaw + 540) % 360) - 180;
       current.yaw += turn * k;
+      // Pitch never wraps (±90) and eye height barely moves; a plain lerp is enough for both.
+      current.pitch += (target.pitch - current.pitch) * k;
+      current.eye += (target.eye - current.eye) * k;
 
       marker.group.position.set(current.x, current.y, current.z);
       // Minecraft yaw is degrees clockwise from +Z; three.js rotates counter-clockwise about +Y,
@@ -173,6 +184,31 @@ export class CitizenLayer {
       this.scratch.set(current.x, current.y, current.z);
       marker.sprite.visible = this.scratch.distanceTo(camera.position) < LABEL_DISTANCE;
     }
+  }
+
+  /**
+   * Ride a citizen's POV, or null to stop. The followed marker is hidden whole — body, head and
+   * label — because the camera sits at its eye position, and the inside of a head box is the one
+   * view nobody asked for.
+   */
+  follow(id: number | null): void {
+    this.followedId = id;
+    for (const [markerId, marker] of this.markers) {
+      marker.group.visible = markerId !== id;
+    }
+  }
+
+  /**
+   * The followed citizen's interpolated eye-level view, in Minecraft angles — directly consumable
+   * by `applyCameraView`. Null when nobody is followed, or the followed citizen is not loaded.
+   */
+  followedPose(): CameraView | null {
+    const marker = this.followedId === null ? undefined : this.markers.get(this.followedId);
+    if (!marker) {
+      return null;
+    }
+    const { current } = marker;
+    return { x: current.x, y: current.y + current.eye, z: current.z, yaw: current.yaw, pitch: current.pitch };
   }
 
   /**
@@ -241,6 +277,9 @@ export class CitizenLayer {
     sprite.renderOrder = 10;
     group.add(sprite);
 
+    // A citizen can be followed before they are loaded (`?follow=` on a fresh page); their marker
+    // must be born hidden, not flash for a frame.
+    group.visible = citizen.id !== this.followedId;
     this.group.add(group);
 
     const marker: Marker = {
@@ -249,8 +288,8 @@ export class CitizenLayer {
       canvas,
       texture,
       body,
-      current: { x: citizen.x, y: citizen.y, z: citizen.z, yaw: citizen.headYaw },
-      target: { x: citizen.x, y: citizen.y, z: citizen.z, yaw: citizen.headYaw },
+      current: { x: citizen.x, y: citizen.y, z: citizen.z, yaw: citizen.headYaw, pitch: citizen.pitch, eye: citizen.eye },
+      target: { x: citizen.x, y: citizen.y, z: citizen.z, yaw: citizen.headYaw, pitch: citizen.pitch, eye: citizen.eye },
       label: '',
     };
     this.markers.set(citizen.id, marker);
