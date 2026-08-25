@@ -45,7 +45,7 @@ export interface GameData {
   assists: number;
   points_gained: number;
   tier_ups: number;
-  game_creation: number;
+  game_creation: number | string;
 }
 
 export interface PtAccount {
@@ -144,7 +144,11 @@ export interface HomeData {
 // ── Small shared helpers ──
 
 export function timeAgo(ts: number | string): string {
-  const ms = typeof ts === 'string' ? new Date(ts).getTime() : (ts > 1e12 ? ts : ts * 1000);
+  // Digit strings (pg bigint / unix epoch) parse as numbers; ISO datetimes don't,
+  // so they fall through to Date. `new Date("1756…")` is Invalid Date → "NaNd ago".
+  const n = typeof ts === 'number' ? ts : Number(ts);
+  const ms = Number.isFinite(n) ? (n > 1e12 ? n : n * 1000) : new Date(ts).getTime();
+  if (!Number.isFinite(ms)) return '—';
   const mins = Math.floor((Date.now() - ms) / 60000);
   if (mins < 1) return 'just now';
   if (mins < 60) return `${mins}m ago`;

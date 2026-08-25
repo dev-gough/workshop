@@ -44,7 +44,9 @@ export function Noticeboard({ music, games, fetches, splitwiser, brainfuck }: {
 
     const g = games[0];
     if (g) {
-      const ts = g.game_creation > 1e12 ? g.game_creation : g.game_creation * 1000;
+      // game_creation is a pg bigint, so the API yields a digit string.
+      const created = Number(g.game_creation);
+      const ts = created > 1e12 ? created : created * 1000;
       items.push({
         key: 'game', ts,
         icon: Swords, color: g.win ? '#34d399' : '#f87171',
