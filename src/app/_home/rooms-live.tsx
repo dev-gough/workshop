@@ -572,9 +572,9 @@ export function SpaceflightRoom({ spaceflight, className }: {
   );
 }
 
-// ── 18 · The Outfitter — a corner of the trip chart, pinned to the door ──
-// Tile carries hex copies of the room's day palette (.pd-theme): chart
-// paper, ink lakes, canoe-red portages.
+// ── 18 · The Outfitter — a pause-map of canoe country, pinned to the door ──
+// Tile carries hex copies of the radar home (.pd-radar): night void, GPS
+// cyan outline, mission gold. The chart itself is still paper, behind the door.
 
 export function PaddleRoom({ parks, className }: { parks: PaddlePark[]; className?: string }) {
   // Sum the charts on the table — every ingested park counts.
@@ -593,34 +593,45 @@ export function PaddleRoom({ parks, className }: { parks: PaddlePark[]; classNam
 
   return (
     <Door href="/projects/paddle" number="RM 18" room="The Outfitter" className={className}>
-      <div className="relative flex h-full flex-col justify-between overflow-hidden bg-[#f0e9d8] p-4 pb-9">
-        {/* the chart: seeded lake blobs, one blue route, red carries between */}
+      <div className="relative flex h-full flex-col justify-between overflow-hidden bg-[#06080c] p-4 pb-9">
         <svg viewBox="0 0 200 90" className="absolute inset-0 h-full w-full" preserveAspectRatio="xMidYMid slice" aria-hidden>
-          <g fill="#a9c9d4">
+          <g fill="#04060a" stroke="#1a6a78" strokeWidth="0.6">
             <path d="M8 28c10-9 30-12 38-4s2 22-8 26S6 46 4 40s0-8 4-12z" />
             <path d="M70 52c6-12 24-16 34-9s10 20 0 27-26 5-32-3-4-9-2-15z" />
             <path d="M136 18c8-7 24-8 31-1s6 17-1 23-21 7-28 0-6-16-2-22z" />
             <path d="M158 62c5-5 16-6 21 0s3 13-3 17-15 3-19-3-2-10 1-14z" />
           </g>
-          <path d="M22 38 C 40 44, 60 52, 84 60" fill="none" stroke="#276a8c" strokeWidth="2" strokeLinecap="round" />
-          <path d="M104 62 C 120 56, 128 40, 148 30" fill="none" stroke="#276a8c" strokeWidth="2" strokeLinecap="round" />
-          <path d="M84 60 L 104 62" fill="none" stroke="#b0402c" strokeWidth="2.4" strokeLinecap="round" />
-          <path d="M148 30 L 160 46" fill="none" stroke="#b0402c" strokeWidth="2.4" strokeLinecap="round" />
+          <path d="M22 38 C 40 44, 60 52, 84 60" fill="none" stroke="#3ee8ff" strokeWidth="1.2" strokeLinecap="round" opacity="0.45" />
+          <path d="M104 62 C 120 56, 128 40, 148 30" fill="none" stroke="#3ee8ff" strokeWidth="1.2" strokeLinecap="round" opacity="0.45" />
+          <path d="M84 60 L 104 62" fill="none" stroke="#ff4d8a" strokeWidth="1.6" strokeLinecap="round" />
+          <path
+            d="M2 42 C 6 10, 48 4, 72 20 S 108 6, 138 18 S 186 8, 198 40 S 184 86, 138 80 S 86 90, 44 82 S 0 70, 2 42 Z"
+            fill="none"
+            stroke="#3ee8ff"
+            strokeWidth="1.7"
+            strokeLinejoin="round"
+            style={{ filter: 'drop-shadow(0 0 5px #3ee8ff)' }}
+          />
         </svg>
-        <p className="relative text-[10px] font-semibold uppercase tracking-[0.2em] text-[#b0402c]">The map table</p>
+        <p
+          className="relative text-[10px] font-semibold uppercase tracking-[0.22em] text-[#ffcc33]"
+          style={{ fontFamily: 'var(--font-drs-display), var(--font-geist-sans), sans-serif' }}
+        >
+          The Outfitter
+        </p>
         <div className="relative">
           {stats ? (
             <>
-              <p className="font-mono text-lg font-semibold tabular-nums text-[#26332c]">
+              <p className="font-mono text-lg font-semibold tabular-nums text-[#3ee8ff]">
                 {Math.round(stats.paddleKm).toLocaleString()} km
-                <span className="text-xs font-normal text-[#71705c]"> of open water</span>
+                <span className="text-xs font-normal text-[#7a8796]"> of water</span>
               </p>
-              <p className="truncate text-[11px] text-[#71705c]">
+              <p className="truncate text-[11px] text-[#7a8796]">
                 {parkNames} · {stats.portages.toLocaleString()} portages · {Math.round(stats.portageKm)} km carried
               </p>
             </>
           ) : (
-            <p className="text-xs text-[#71705c]">The chart is still rolled up…</p>
+            <p className="text-xs text-[#7a8796]">The chart is still rolled up…</p>
           )}
         </div>
       </div>

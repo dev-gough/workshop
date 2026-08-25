@@ -2706,3 +2706,97 @@
   font-size: 10px;
 }
 .pd-theme .maplibregl-ctrl-attrib a { color: var(--pd-dim); }
+
+/* ── Home (cards) — dark-always. Neon plates on night; the chart at /map
+   keeps pd-theme's paper/headlamp pair. ── */
+.pd-theme.pd-radar,
+.dark .pd-theme.pd-radar {
+  --pd-paper:  #010204;
+  --pd-card:   #121820;
+  --pd-raise:  #1a222c;
+  --pd-line:   #252d38;
+  --pd-ink:    #e8eef4;
+  --pd-dim:    #7a8796;
+  --pd-neon:   #3ee8ff;
+  --pd-gold:   #ffcc33;
+  --pd-pink:   #ff4d8a;
+  --pd-red:    var(--pd-pink);
+  --pd-blue:   var(--pd-neon);
+
+  --color-background:           var(--pd-paper);
+  --color-foreground:           var(--pd-ink);
+  --color-card:                 var(--pd-card);
+  --color-card-foreground:      var(--pd-ink);
+  --color-muted:                var(--pd-raise);
+  --color-muted-foreground:     var(--pd-dim);
+  --color-border:               var(--pd-line);
+  --color-primary:              var(--pd-gold);
+  --color-primary-foreground:   #0a0c10;
+  --color-ring:                 var(--pd-neon);
+  --color-accent:               var(--pd-raise);
+  --color-accent-foreground:    var(--pd-ink);
+
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  color: var(--pd-ink);
+  background-color: var(--pd-paper);
+  background-image:
+    repeating-linear-gradient(0deg, transparent 0 55px, hsl(190 90% 70% / 0.018) 55px 56px),
+    repeating-linear-gradient(90deg, transparent 0 55px, hsl(190 90% 70% / 0.018) 55px 56px);
+}
+
+.pd-radar-outline {
+  fill: none;
+  stroke: var(--pd-neon);
+  stroke-width: 1.8;
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  opacity: 0.82;
+  transition: opacity 200ms ease, stroke-width 200ms ease;
+}
+
+.pd-park-card {
+  border: 1px solid var(--pd-line);
+  background: var(--pd-card);
+  border-radius: 4px;
+  overflow: hidden;
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+.pd-park-card.is-last {
+  border-color: color-mix(in srgb, var(--pd-neon) 35%, var(--pd-line));
+}
+.pd-park-card:hover,
+.pd-park-card:focus-visible {
+  border-color: color-mix(in srgb, var(--pd-neon) 70%, var(--pd-line));
+  box-shadow: 0 0 28px color-mix(in srgb, var(--pd-neon) 16%, transparent);
+}
+.pd-park-card:hover .pd-radar-outline,
+.pd-park-card:focus-visible .pd-radar-outline {
+  opacity: 1;
+  stroke-width: 2.3;
+}
+
+.pd-park-name {
+  font-family: var(--font-drs-display), var(--font-geist-sans), sans-serif;
+  font-size: clamp(0.95rem, 2.2vw, 1.25rem);
+  font-weight: 400;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--pd-gold);
+  padding: 1.25rem 1rem 0.25rem;
+  text-shadow: 0 0 12px color-mix(in srgb, var(--pd-gold) 35%, transparent);
+  transition: text-shadow 200ms ease;
+}
+.pd-park-card:hover .pd-park-name,
+.pd-park-card:focus-visible .pd-park-name {
+  text-shadow: 0 0 18px color-mix(in srgb, var(--pd-gold) 55%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pd-park-card,
+  .pd-radar-outline,
+  .pd-park-name {
+    transition: none;
+  }
+}

@@ -1,3 +1,6 @@
+/** Resume the last park on the radar / chart. Shared by home and map. */
+export const LAST_PARK_KEY = 'pd-last-park';
+
 export interface ParkStats {
   paddleKm: number;
   portageKm: number;
@@ -8,6 +11,13 @@ export interface ParkStats {
   accessPoints: number;
   componentCount: number;
   largestComponentShare: number;
+}
+
+/** Neon silhouette for a home-screen park card. */
+export interface ParkOutline {
+  slug: string;
+  name: string;
+  outline: [number, number][];
 }
 
 export interface ParkInfo {

@@ -3,6 +3,7 @@
 // MAP view: park identity + picker, network stats, legend, and the layer
 // controls (chart, terrain). Future layer toggles (tracks, photos) go here.
 
+import Link from 'next/link';
 import type { ParkInfo } from '../_lib/model';
 
 interface MapPanelProps {
@@ -37,7 +38,9 @@ export default function MapPanel({
   const stats = current?.stats ?? null;
   return (
     <>
-      <p className="pd-etch">RM 18 · The Outfitter</p>
+      <Link href="/projects/paddle" className="pd-etch hover:text-foreground">
+        RM 18 · The Outfitter
+      </Link>
       <h1 className="ws-serif mt-0.5 text-xl font-semibold leading-tight">
         {current?.name ?? 'Paddle Planner'}
       </h1>

@@ -238,7 +238,7 @@ export function useTripPlan(opts: {
     [applyPending, setPark, showFlash],
   );
 
-  // share links: /projects/paddle?trip=<slug>
+  // share links: /projects/paddle/map?trip=<slug>
   useEffect(() => {
     const slug = new URLSearchParams(window.location.search).get('trip');
     if (slug) void loadTrip(slug);
@@ -296,7 +296,7 @@ export function useTripPlan(opts: {
 
   const copyShareLink = useCallback(() => {
     if (!tripSlug) return;
-    const url = `${window.location.origin}/projects/paddle?trip=${tripSlug}`;
+    const url = `${window.location.origin}/projects/paddle/map?trip=${tripSlug}`;
     void copyText(url).then((ok) => showFlash(ok ? 'share link copied' : url, ok ? 'ok' : 'warn', ok ? 1800 : 6000));
   }, [tripSlug, showFlash]);
 
