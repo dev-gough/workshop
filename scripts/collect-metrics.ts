@@ -25,6 +25,8 @@ const TRACKED_SERVICES = [
   'minecraft-meatballcraft',
   'minecraft-atm9sky',
   'minecraft-above-beyond',
+  'minecraft-star-technology',
+  'minecraft-tekkit',
 ];
 
 const RETENTION_DAYS = 7;

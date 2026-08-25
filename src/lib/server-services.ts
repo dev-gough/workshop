@@ -17,6 +17,7 @@ export const TRACKED_SERVICES = [
   'minecraft-atm9sky',
   'minecraft-above-beyond',
   'minecraft-star-technology',
+  'minecraft-tekkit',
   // Scratch server for the MineColonies fork. Kept off this list while it was
   // purely a build target; it earns a place now that the village viewer reads
   // from it and "is it running" becomes a question worth answering from here.

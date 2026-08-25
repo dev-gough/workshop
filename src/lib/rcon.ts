@@ -40,10 +40,28 @@ export function sendRconCommand(
     const socket = new net.Socket();
     let responseBuffer = Buffer.alloc(0);
     let authenticated = false;
+    let settled = false;
     const timeout = setTimeout(() => {
-      socket.destroy();
-      reject(new Error('RCON timeout'));
+      finish(new Error('RCON timeout'));
     }, timeoutMs);
+
+    const finish = (err?: Error, body?: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      socket.destroy();
+      if (err) {
+        // MCPC / 1.2.5 RCON often RSTs after tell/say instead of a response packet.
+        const reset = err.message.includes('ECONNRESET') || err.message.includes('EPIPE');
+        if (authenticated && reset) {
+          resolve(body ?? '');
+          return;
+        }
+        reject(err);
+        return;
+      }
+      resolve(body ?? '');
+    };
 
     socket.connect(port, host, () => {
       socket.write(encodePacket(1, PACKET_TYPE.AUTH, password));
@@ -62,29 +80,26 @@ export function sendRconCommand(
 
         if (!authenticated) {
           if (packet.id === -1) {
-            clearTimeout(timeout);
-            socket.destroy();
-            reject(new Error('RCON authentication failed'));
+            finish(new Error('RCON authentication failed'));
             return;
           }
           authenticated = true;
           socket.write(encodePacket(2, PACKET_TYPE.COMMAND, command));
         } else {
-          clearTimeout(timeout);
-          socket.destroy();
-          resolve(packet.body);
+          finish(undefined, packet.body);
           return;
         }
       }
     });
 
     socket.on('error', (err) => {
-      clearTimeout(timeout);
-      reject(err);
+      finish(err);
     });
 
     socket.on('close', () => {
-      clearTimeout(timeout);
+      // 1.2.5 MCPC often closes without a command-response packet. If we already
+      // authed, treat that as an empty success; otherwise let timeout/error win.
+      if (authenticated) finish(undefined, '');
     });
   });
 }

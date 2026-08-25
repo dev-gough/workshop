@@ -31,6 +31,7 @@ const SERVICE_ENDPOINTS: Record<string, ServiceEndpoint[]> = {
   'minecraft-atm9sky':      [{ port: 25569, label: 'Minecraft' }],
   'minecraft-above-beyond': [{ port: 25565, label: 'Minecraft (shared port)' }],
   'minecraft-star-technology': [{ port: 25566, label: 'Minecraft' }],
+  'minecraft-tekkit':       [{ port: 25570, label: 'Minecraft (Tekkit Classic 1.2.5)' }],
   'minecraft-mcdev':        [{ port: 25571, label: 'Minecraft (MineColonies dev)' }, { port: 25601, protocol: 'http', label: 'World data (localhost only)' }],
 };
 
