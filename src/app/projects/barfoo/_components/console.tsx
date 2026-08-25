@@ -164,8 +164,8 @@ export function NowPlayingConsole({ queueOpen, onToggleQueue, onShuffle, onOpenA
           </div>
         </div>
 
-        {/* Transport */}
-        <div className="flex shrink-0 items-center gap-1.5">
+        {/* Transport — scroll here to nudge volume */}
+        <div className="flex shrink-0 items-center gap-1.5" onWheel={handleVolumeWheel}>
           <Button variant="ghost" size="icon" onClick={playPrev} className="h-8 w-8" aria-label="Previous track">
             <SkipBack className="h-4 w-4" />
           </Button>

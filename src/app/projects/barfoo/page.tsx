@@ -35,6 +35,7 @@ export default function BarFooPage() {
     albums, albumsLoading, currentTrack, shuffleMode,
     username, setUsername,
     playPlaylist: ctxPlayPlaylist, shuffleAll: ctxShuffleAll,
+    togglePlayPause,
   } = useAudio();
 
   // ── Local UI state ──
@@ -108,6 +109,25 @@ export default function BarFooPage() {
     // Clean the URL so the deep link isn't re-applied on refresh / back-nav
     window.history.replaceState(null, '', window.location.pathname);
   }, [albums, openAlbum, openArtist]);
+
+  // Space toggles play/pause unless typing in a field (search, dialogs, etc.).
+  // Capture phase runs before a focused button can treat Space as a click.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== ' ' && e.code !== 'Space') return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) return;
+      }
+      if (!currentTrack) return;
+      e.preventDefault();
+      togglePlayPause();
+    };
+    window.addEventListener('keydown', onKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
+  }, [currentTrack, togglePlayPause]);
 
   // ── Shuffle / playlist playback (both bring the queue out) ──
   const shuffleEverything = () => { setQueueOpen(true); ctxShuffleAll(); };
