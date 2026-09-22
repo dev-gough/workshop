@@ -6,7 +6,7 @@
 // element; everything above it stays quiet.
 
 import { useEffect, useRef } from 'react';
-import { ListMusic, Music, Pause, Play, Shuffle, SkipBack, SkipForward, Volume1, Volume2, VolumeX } from 'lucide-react';
+import { AudioWaveform, ListMusic, Music, Pause, Play, Shuffle, SkipBack, SkipForward, Volume1, Volume2, VolumeX } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Button } from '@/components/ui/button';
 import { useAudio } from '@/components/AudioProvider';
@@ -97,11 +97,12 @@ function VuMeter() {
   return <canvas ref={canvasRef} style={{ width: 84, height: 30 }} aria-hidden />;
 }
 
-export function NowPlayingConsole({ queueOpen, onToggleQueue, onShuffle, onOpenAlbum, onOpenArtist }: {
+export function NowPlayingConsole({ queueOpen, onToggleQueue, onShuffle, onVisualize, onOpenAlbum, onOpenArtist }: {
   queueOpen: boolean;
   onToggleQueue: () => void;
   /** Shuffle the whole library (page wrapper also opens the queue). */
   onShuffle: () => void;
+  onVisualize: () => void;
   onOpenAlbum: (albumIndex: number) => void;
   onOpenArtist: (artist: string) => void;
 }) {
@@ -216,6 +217,14 @@ export function NowPlayingConsole({ queueOpen, onToggleQueue, onShuffle, onOpenA
 
         {/* Shuffle + queue */}
         <div className="flex shrink-0 items-center gap-0.5">
+          <Button
+            variant="ghost" size="icon" onClick={onVisualize}
+            className="h-8 w-8 text-primary"
+            aria-label="Open fullscreen visualizers"
+            title="Visualizer lounge"
+          >
+            <AudioWaveform className="h-3.5 w-3.5" />
+          </Button>
           <Button
             variant="ghost" size="icon" onClick={onShuffle}
             className={`h-8 w-8 ${shuffleMode ? 'text-primary' : ''}`}

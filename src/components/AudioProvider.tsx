@@ -106,7 +106,9 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
     return saved ? parseFloat(saved) : 1;
   });
   const [muted, setMuted] = useState(false);
-  const [username, setUsernameState] = useState<string | null>(() => getCookie('barfoo_user'));
+  // Cookies are browser-only; hydrate this after mount so the server and first
+  // client render agree (otherwise every remembered listener caused a mismatch).
+  const [username, setUsernameState] = useState<string | null>(null);
   const [queue, setQueue] = useState<TrackRef[]>([]);
   const [queueIndex, setQueueIndex] = useState(-1);
   const [shuffleMode, setShuffleMode] = useState(false);
@@ -121,6 +123,7 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { volumeRef.current = volume; }, [volume]);
   useEffect(() => { mutedRef.current = muted; }, [muted]);
+  useEffect(() => { setUsernameState(getCookie('barfoo_user')); }, []);
 
   // ── Web Audio API analyser (lazy init on first play) ──
   const ensureAnalyser = useCallback(() => {

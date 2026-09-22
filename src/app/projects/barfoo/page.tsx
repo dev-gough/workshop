@@ -7,6 +7,7 @@
 // and survives leaving the room; this file is the room itself.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { Disc, ListMusic, Shuffle } from 'lucide-react';
 import { AnimatePresence, MotionConfig, motion } from 'motion/react';
 import { Button } from '@/components/ui/button';
@@ -21,6 +22,7 @@ import { SidePanel } from './_components/panel';
 import { PlaylistsView } from './_components/playlists';
 import { SearchBox } from './_components/search';
 import { StatsView } from './_components/stats';
+import { VisualizerStage } from './_components/visualizer-stage';
 import {
   PlaylistActionsProvider,
   type GeneratedPlaylist,
@@ -58,7 +60,9 @@ export default function BarFooPage() {
   const [newPlaylistOpen, setNewPlaylistOpen] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState('');
   const [pendingAdd, setPendingAdd] = useState<PendingAdd | null>(null);
+  const [visualizerOpen, setVisualizerOpen] = useState(false);
   const wallRef = useRef<HTMLDivElement>(null);
+  const visualizerRef = useRef<HTMLDivElement>(null);
 
   // ── The size fader — how tightly the wall is shelved ──
   const [sizePx, setSizePx] = useState(SIZE_DEFAULT);
@@ -239,6 +243,16 @@ export default function BarFooPage() {
     setNewPlaylistOpen(true);
   };
 
+  const openVisualizers = useCallback(() => {
+    // Keep the fullscreen request inside the button's user gesture. flushSync
+    // mounts the already-declared stage before that activation expires.
+    flushSync(() => setVisualizerOpen(true));
+    visualizerRef.current?.requestFullscreen().catch(() => {
+      // Fullscreen can be denied by browser policy; the fixed stage still works.
+    });
+  }, []);
+  const closeVisualizers = useCallback(() => setVisualizerOpen(false), []);
+
   const hasPlayer = currentTrack !== null;
   const tabs: { key: View; label: string }[] = [
     { key: 'library', label: 'Library' },
@@ -408,11 +422,18 @@ export default function BarFooPage() {
               queueOpen={queueOpen}
               onToggleQueue={() => setQueueOpen(o => !o)}
               onShuffle={shuffleEverything}
+              onVisualize={openVisualizers}
               onOpenAlbum={openAlbum}
               onOpenArtist={openArtist}
             />
           )}
         </AnimatePresence>
+
+        <VisualizerStage
+          open={visualizerOpen}
+          onClose={closeVisualizers}
+          stageRef={visualizerRef}
+        />
 
         {/* ── Who's listening? (plays and playlists are per listener) ── */}
         {!username && (
