@@ -19,15 +19,21 @@ export async function GET(request: NextRequest) {
     const symbol = sp.get('symbol')?.trim();
     if (!symbol) return NextResponse.json({ error: 'provide a symbol or search query' }, { status: 400 });
 
-    const quote = await getQuote(symbol);
     const historyRange = sp.get('history');
-    let history = undefined;
     if (historyRange) {
       const valid = ['1mo', '3mo', '6mo', '1y', '5y'] as const;
       const range = (valid as readonly string[]).includes(historyRange) ? (historyRange as (typeof valid)[number]) : '6mo';
-      history = await getHistory(symbol, range);
+      // Quote and chart history are independent upstream requests. Start them
+      // together so symbol-detail rendering pays the slower latency, not both.
+      const [quote, history] = await Promise.all([
+        getQuote(symbol),
+        getHistory(symbol, range),
+      ]);
+      return NextResponse.json({ quote, history });
     }
-    return NextResponse.json({ quote, history });
+
+    const quote = await getQuote(symbol);
+    return NextResponse.json({ quote });
   } catch (error) {
     console.error('paper-trading quote GET error:', error);
     return NextResponse.json({ error: 'Failed to fetch quote' }, { status: 500 });
