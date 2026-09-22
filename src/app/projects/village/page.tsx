@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, Boxes, Check, Link2, Loader2, Maximize2, Minimize2, MousePointerClick, Users } from 'lucide-react';
+import { AlertCircle, Boxes, Check, Link2, Loader2, Map as MapIcon, Maximize2, Minimize2, MousePointerClick, Users } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import { copyText } from '@/lib/clipboard';
 // Type-only: the runtime import is dynamic below so three stays out of the
@@ -11,6 +11,7 @@ import { decodeChunkData, type AtlasData, type MeshResult } from './mesher';
 import { CitizenLayer } from './citizens';
 import { applyCameraView, cameraLink, parseCameraQuery, readCameraView } from './camera';
 import { installDebugHandle } from './debug';
+import { createRadarTransform, drawSettlementRadar } from './radar';
 import type { VillageFrame, VillageRoster } from '@/lib/village';
 
 // ── Types ──
@@ -77,6 +78,9 @@ export default function VillagePage() {
   const [roster, setRosterState] = useState<VillageRoster | null>(null);
   const [following, setFollowing] = useState<number | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
+  const [radarOpen, setRadarOpen] = useState(true);
+  const radarRef = useRef<HTMLCanvasElement>(null);
+  const radarClickRef = useRef<((x: number, y: number) => void) | null>(null);
   const followApi = useRef<{ start: (id: number) => void; stop: () => void } | null>(null);
   /** Per-citizen sidebar state line, keyed by id. */
   const rowStateRefs = useRef(new Map<number, HTMLSpanElement>());
@@ -401,6 +405,19 @@ export default function VillagePage() {
       };
       exitFollow = stopFollow;
       followApi.current = { start: startFollow, stop: stopFollow };
+      radarClickRef.current = (x, y) => {
+        const transform = createRadarTransform(bounds, 320, 320, 18);
+        const world = transform.unproject(x, y);
+        stopFollow();
+        applyCameraView(camera, {
+          x: world.x,
+          y: bounds.maxY + 45,
+          z: world.z - 18,
+          yaw: 0,
+          pitch: 62,
+        });
+      };
+      const radarScratch = new THREE.Vector3();
 
       // `?follow=<id>` rides a citizen from the first frame they appear in — the
       // POV equivalent of `?cam=`, and what makes a POV screenshot scriptable.
@@ -474,6 +491,17 @@ export default function VillagePage() {
             writeHud(hudStuckRef.current, String(c.stuck ?? 0));
             hudStuckRef.current?.classList.toggle('text-red-300', (c.stuck ?? 0) > 0);
           }
+        }
+
+        const radarContext = radarRef.current?.getContext('2d');
+        if (radarContext) {
+          drawSettlementRadar(radarContext, {
+            bounds,
+            chunks: manifestBody.chunks,
+            citizens: frame.citizens,
+            camera: readCameraView(camera, radarScratch),
+            following: followRef.current,
+          });
         }
       });
 
@@ -588,6 +616,7 @@ export default function VillagePage() {
         // on it still answers, and every answer describes a scene nobody draws.
         removeDebugHandle();
         linkRef.current = null;
+        radarClickRef.current = null;
         followApi.current = null;
         window.removeEventListener('keydown', onKeyDown);
         window.removeEventListener('keyup', onKeyUp);
@@ -674,6 +703,17 @@ export default function VillagePage() {
             )}
             <button
               type="button"
+              onClick={() => setRadarOpen((v) => !v)}
+              disabled={progress.phase !== 'ready'}
+              title={radarOpen ? 'Hide settlement radar' : 'Show settlement radar'}
+              className={`rounded-lg bg-neutral-950/60 p-2 transition hover:bg-neutral-950/80 disabled:opacity-40 ${
+                radarOpen ? 'text-emerald-300' : 'text-neutral-200'
+              }`}
+            >
+              <MapIcon className="size-4" />
+            </button>
+            <button
+              type="button"
               onClick={() => setPanelOpen((v) => !v)}
               disabled={progress.phase !== 'ready'}
               title={panelOpen ? 'Hide citizens' : 'Show citizens'}
@@ -752,6 +792,34 @@ export default function VillagePage() {
                 className={`size-1.5 rounded-full ${streamLive ? 'animate-pulse bg-emerald-400' : 'bg-amber-400'}`}
               />
               <span ref={streamRef}>connecting…</span>
+            </div>
+          )}
+
+          {progress.phase === 'ready' && radarOpen && (
+            <div className="absolute left-3 top-[3.25rem] z-10 overflow-hidden rounded-lg border border-white/10 bg-neutral-950/70 shadow-lg">
+              <div className="flex items-center justify-between px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-neutral-400">
+                <span>Settlement radar</span>
+                <span className="font-mono tracking-normal text-neutral-500">click to inspect</span>
+              </div>
+              <canvas
+                ref={radarRef}
+                width={320}
+                height={320}
+                title="Citizen positions and camera heading; click to open an overhead view"
+                onClick={(event) => {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  radarClickRef.current?.(
+                    ((event.clientX - rect.left) / rect.width) * event.currentTarget.width,
+                    ((event.clientY - rect.top) / rect.height) * event.currentTarget.height,
+                  );
+                }}
+                className="block size-40 cursor-crosshair sm:size-44"
+              />
+              <div className="flex gap-3 border-t border-white/10 px-2.5 py-1 font-mono text-[9px] text-neutral-500">
+                <span><i className="mr-1 inline-block size-1.5 rounded-full bg-emerald-300" />active</span>
+                <span><i className="mr-1 inline-block size-1.5 rounded-full bg-red-400" />stuck</span>
+                <span><i className="mr-1 inline-block size-1.5 rounded-full bg-violet-400" />asleep</span>
+              </div>
             </div>
           )}
 
@@ -839,7 +907,8 @@ export default function VillagePage() {
           Every block renders as a full cube — stairs, slabs and fences included. Grass uses a fixed plains tint.
           Citizens stream live at 10 Hz; their labels show the job AI state, or the brain state when they are not
           working. Click a citizen in the panel to ride their point of view — the HUD reads out the AI driving
-          them — and esc returns to free-cam. The link button copies a URL that reopens this exact camera position.
+          them — and esc returns to free-cam. The radar plots the loaded settlement and opens an overhead view at
+          any clicked point. The link button copies a URL that reopens this exact camera position.
         </p>
       </div>
     </PageTransition>

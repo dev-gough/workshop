@@ -35,6 +35,14 @@ const TELEPORT_DISTANCE = 8;
 /** Labels are readable to about here, and past it they are noise. */
 const LABEL_DISTANCE = 56;
 
+/**
+ * Camera-distance culling is perceptually UI work, not animation. Sampling it
+ * at stream frequency avoids walking every citizen and taking a square root on
+ * every rendered frame while still reacting within a tenth of a second.
+ */
+const LABEL_VISIBILITY_INTERVAL = 0.1;
+const LABEL_DISTANCE_SQUARED = LABEL_DISTANCE ** 2;
+
 const DEG_TO_RAD = Math.PI / 180;
 
 const LABEL_WIDTH = 256;
@@ -76,6 +84,9 @@ export class CitizenLayer {
   private readonly jobMaterials = new Map<string, ThreeTypes.MeshBasicMaterial>();
   /** Reused by `update` so a 60 fps loop allocates nothing. */
   private readonly scratch: ThreeTypes.Vector3;
+  /** Reused across 10 Hz snapshots; avoids allocating a Set for every frame. */
+  private readonly seenIds = new Set<number>();
+  private labelVisibilityElapsed = LABEL_VISIBILITY_INTERVAL;
   /** The citizen whose POV the camera is riding, or null. Their marker is hidden — the camera sits inside its head. */
   private followedId: number | null = null;
 
@@ -116,7 +127,8 @@ export class CitizenLayer {
    * unloaded and their marker goes with them — no timeout bookkeeping needed.
    */
   setFrame(frame: VillageFrame): void {
-    const seen = new Set<number>();
+    const seen = this.seenIds;
+    seen.clear();
 
     for (const citizen of frame.citizens) {
       seen.add(citizen.id);
@@ -162,6 +174,11 @@ export class CitizenLayer {
   update(delta: number, camera: ThreeTypes.Camera): void {
     // Frame-rate independent exponential approach: the same visual convergence at 30 fps and 144.
     const k = 1 - Math.exp(-delta * SMOOTHING);
+    this.labelVisibilityElapsed += delta;
+    const refreshLabelVisibility = this.labelVisibilityElapsed >= LABEL_VISIBILITY_INTERVAL;
+    if (refreshLabelVisibility) {
+      this.labelVisibilityElapsed %= LABEL_VISIBILITY_INTERVAL;
+    }
 
     for (const marker of this.markers.values()) {
       const { current, target } = marker;
@@ -181,8 +198,10 @@ export class CitizenLayer {
       // so the sign flips and nothing else has to change.
       marker.group.rotation.y = -current.yaw * DEG_TO_RAD;
 
-      this.scratch.set(current.x, current.y, current.z);
-      marker.sprite.visible = this.scratch.distanceTo(camera.position) < LABEL_DISTANCE;
+      if (refreshLabelVisibility) {
+        this.scratch.set(current.x, current.y, current.z);
+        marker.sprite.visible = this.scratch.distanceToSquared(camera.position) < LABEL_DISTANCE_SQUARED;
+      }
     }
   }
 
