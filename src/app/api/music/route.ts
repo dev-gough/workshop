@@ -6,7 +6,8 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   try {
     const { rows } = await pool.query(
-      `SELECT id, artist, name, songs, source, added_at AS "addedAt",
+      `SELECT id, artist, name, songs, source, genres,
+              song_genres AS "songGenres", added_at AS "addedAt",
               CASE WHEN cover_path IS NOT NULL THEN '/api/music/cover/' || id END AS "coverUrl"
        FROM albums ORDER BY artist, name`
     );

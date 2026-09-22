@@ -23,7 +23,19 @@ export interface Playlist {
 export interface PlaylistDetail {
   id: number;
   name: string;
-  songs: { artist: string; album: string; song: string; position: number }[];
+  songs: PlaylistSong[];
+}
+
+export interface PlaylistSong {
+  artist: string;
+  album: string;
+  song: string;
+  position: number;
+}
+
+export interface GeneratedPlaylist {
+  name: string;
+  songs: PlaylistSong[];
 }
 
 export interface Stats {

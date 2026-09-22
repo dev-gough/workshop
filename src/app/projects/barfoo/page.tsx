@@ -6,8 +6,8 @@
 // console along the bottom. All playback state lives in AudioProvider
 // and survives leaving the room; this file is the room itself.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Disc, Shuffle } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Disc, ListMusic, Shuffle } from 'lucide-react';
 import { AnimatePresence, MotionConfig, motion } from 'motion/react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -21,7 +21,15 @@ import { SidePanel } from './_components/panel';
 import { PlaylistsView } from './_components/playlists';
 import { SearchBox } from './_components/search';
 import { StatsView } from './_components/stats';
-import { PlaylistActionsProvider, type PendingAdd, type Playlist, type PlaylistDetail, type Stats } from './_components/shared';
+import {
+  PlaylistActionsProvider,
+  type GeneratedPlaylist,
+  type PendingAdd,
+  type Playlist,
+  type PlaylistDetail,
+  type Stats,
+} from './_components/shared';
+import { buildGenrePlaylists } from '@/lib/musicLibrary';
 import { sortedTrackIndices } from '@/lib/songUtils';
 
 type View = 'library' | 'playlists' | 'stats';
@@ -34,7 +42,7 @@ export default function BarFooPage() {
   const {
     albums, albumsLoading, currentTrack, shuffleMode,
     username, setUsername,
-    playPlaylist: ctxPlayPlaylist, shuffleAll: ctxShuffleAll,
+    playPlaylist: ctxPlayPlaylist, shuffleAll: ctxShuffleAll, shuffleAlbums: ctxShuffleAlbums,
     togglePlayPause,
   } = useAudio();
 
@@ -131,6 +139,7 @@ export default function BarFooPage() {
 
   // ── Shuffle / playlist playback (both bring the queue out) ──
   const shuffleEverything = () => { setQueueOpen(true); ctxShuffleAll(); };
+  const shuffleAlbums = () => { setQueueOpen(true); ctxShuffleAlbums(); };
   const playPlaylist = (songs: PlaylistDetail['songs'], shuffle = false) => {
     setQueueOpen(true);
     ctxPlayPlaylist(songs, shuffle);
@@ -236,6 +245,17 @@ export default function BarFooPage() {
     ...(username ? [{ key: 'playlists' as View, label: 'Playlists' }] : []),
     { key: 'stats', label: 'Stats' },
   ];
+  const genrePlaylists = useMemo<GeneratedPlaylist[]>(() =>
+    buildGenrePlaylists(albums).map(({ genre, tracks }) => ({
+      name: genre,
+      songs: tracks.map(({ albumIndex, songIndex }, position) => ({
+        artist: albums[albumIndex].artist,
+        album: albums[albumIndex].name,
+        song: albums[albumIndex].songs[songIndex],
+        position,
+      })),
+    })),
+  [albums]);
 
   return (
     <PlaylistActionsProvider value={{ playlists, addToPlaylist, addAlbumToPlaylist, requestNewPlaylist }}>
@@ -245,7 +265,7 @@ export default function BarFooPage() {
       <div className="bar-theme flex flex-col" style={{ height: 'calc(100vh - 57px)' }}>
 
         {/* ── The counter: masthead, search, view tabs, size fader ── */}
-        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-2.5 sm:px-5">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2.5 sm:flex-nowrap sm:px-5">
           <div className="flex min-w-0 items-center gap-2.5">
             <span className={`bar-lamp-dot ${hasPlayer ? 'text-primary' : 'text-muted-foreground/40'}`} />
             <h1 className="bar-serif shrink-0 text-lg font-semibold tracking-tight">
@@ -261,7 +281,7 @@ export default function BarFooPage() {
 
           <SearchBox onOpenAlbum={openAlbum} onOpenArtist={openArtist} />
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex w-full shrink-0 items-center justify-between gap-2 sm:w-auto sm:justify-start">
             {/* View tabs */}
             <div role="tablist" className="flex items-center gap-0.5 rounded-[5px] border border-border bg-card/70 p-0.5">
               {tabs.map(t => (
@@ -279,14 +299,25 @@ export default function BarFooPage() {
             </div>
 
             {albums.length > 0 && (
-              <Button
-                variant="ghost" size="sm" onClick={shuffleEverything}
-                className={`h-8 w-8 p-0 text-xs sm:w-auto sm:px-3 ${shuffleMode ? 'text-primary' : ''}`}
-                aria-label="Shuffle everything"
-              >
-                <Shuffle className="h-3.5 w-3.5 sm:mr-1" />
-                <span className="hidden sm:inline">Shuffle</span>
-              </Button>
+              <div className="flex items-center">
+                <Button
+                  variant="ghost" size="sm" onClick={shuffleEverything}
+                  className={`h-8 w-8 p-0 text-xs sm:w-auto sm:px-3 ${shuffleMode ? 'text-primary' : ''}`}
+                  aria-label="Shuffle all songs"
+                >
+                  <Shuffle className="h-3.5 w-3.5 sm:mr-1" />
+                  <span className="hidden sm:inline">Songs</span>
+                </Button>
+                <Button
+                  variant="ghost" size="sm" onClick={shuffleAlbums}
+                  className="h-8 w-8 p-0 text-xs sm:w-auto sm:px-3"
+                  aria-label="Shuffle albums"
+                  title="Randomize albums, keeping each record in track order"
+                >
+                  <ListMusic className="h-3.5 w-3.5 sm:mr-1" />
+                  <span className="hidden sm:inline">Albums</span>
+                </Button>
+              </div>
             )}
 
             {/* The size fader — shelve the wall tighter or looser */}
@@ -331,6 +362,7 @@ export default function BarFooPage() {
                 <PlaylistsView
                   key="playlists"
                   playlists={playlists}
+                  generated={genrePlaylists}
                   active={activePlaylist}
                   onOpen={fetchPlaylistDetail}
                   onBack={() => setActivePlaylist(null)}

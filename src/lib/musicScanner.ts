@@ -66,6 +66,57 @@ export async function extractEmbeddedCover(albumPath: string, audioFiles: string
   return undefined;
 }
 
+export function normalizeGenres(values: string[] | undefined): string[] {
+  const genres: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values ?? []) {
+    for (const part of value.split(/[;\0]+/)) {
+      const genre = part.trim().replace(/\s+/g, ' ');
+      const key = genre.toLocaleLowerCase();
+      if (genre && !seen.has(key)) {
+        seen.add(key);
+        genres.push(genre);
+      }
+    }
+  }
+  return genres;
+}
+
+async function extractAlbumTags(
+  albumPath: string,
+  songs: string[],
+): Promise<{ cover?: Buffer; songGenres: Record<string, string[]>; genres: string[] }> {
+  const songGenres: Record<string, string[]> = {};
+  const allGenres: string[] = [];
+  let cover: Buffer | undefined;
+  const { parseFile } = await loadMusicMetadata();
+
+  for (const song of songs) {
+    try {
+      let metadata;
+      try {
+        metadata = await parseFile(path.join(albumPath, song));
+      } catch {
+        // Flat multi-disc albums are represented as Disc N/file in the queue
+        // even though the source file still sits in the album root.
+        metadata = await parseFile(path.join(albumPath, path.basename(song)));
+      }
+      const genres = normalizeGenres(metadata.common.genre);
+      if (genres.length > 0) {
+        songGenres[song] = genres;
+        allGenres.push(...genres);
+      }
+      if (!cover && metadata.common.picture?.[0]) {
+        cover = Buffer.from(metadata.common.picture[0].data);
+      }
+    } catch {
+      // A malformed tag should not prevent the rest of the record being scanned.
+    }
+  }
+
+  return { cover, songGenres, genres: normalizeGenres(allGenres) };
+}
+
 export function isAudioFile(filename: string): boolean {
   return AUDIO_EXTENSIONS.has(path.extname(filename).toLowerCase());
 }
@@ -132,6 +183,10 @@ export async function scanSingleAlbum(
     }
   }
 
+  // Read track tags once for automatic genre playlists and an embedded-art
+  // fallback. A bad file is skipped without losing the rest of the album.
+  const tags = await extractAlbumTags(albumPath, songs);
+
   // Resolve the source image (file-based first, embedded metadata as fallback)
   // and resize it to the square jpeg we serve. Bytes go to disk, not the DB.
   let coverJpeg: Buffer | null = null;
@@ -142,11 +197,8 @@ export async function scanSingleAlbum(
     coverJpeg = await resizeCover(imageBuffer);
   }
 
-  if (!coverJpeg && songs.length > 0) {
-    const embeddedBuffer = await extractEmbeddedCover(albumPath, songs);
-    if (embeddedBuffer) {
-      coverJpeg = await resizeCover(embeddedBuffer);
-    }
+  if (!coverJpeg && tags.cover) {
+    coverJpeg = await resizeCover(tags.cover);
   }
 
   // Upsert the row first so we have the album id to key the cover file by. This
@@ -154,12 +206,12 @@ export async function scanSingleAlbum(
   // reaches the cover-writing step below — nothing is skipped just because the
   // row already exists.
   const { rows } = await pool.query(
-    `INSERT INTO albums (artist, name, songs, scanned_at, source)
-     VALUES ($1, $2, $3, NOW(), $4)
+    `INSERT INTO albums (artist, name, songs, scanned_at, source, genres, song_genres)
+     VALUES ($1, $2, $3, NOW(), $4, $5, $6::jsonb)
      ON CONFLICT (artist, name) DO UPDATE
-     SET songs = $3, scanned_at = NOW(), source = $4
+     SET songs = $3, scanned_at = NOW(), source = $4, genres = $5, song_genres = $6::jsonb
      RETURNING id`,
-    [artist, album, songs, source]
+    [artist, album, songs, source, tags.genres, JSON.stringify(tags.songGenres)]
   );
   const albumId: number = rows[0].id;
 

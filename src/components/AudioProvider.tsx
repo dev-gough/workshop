@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
+import { buildAlbumShuffleQueue } from '@/lib/musicLibrary';
 import { cleanSongDisplay, sortedTrackIndices } from '@/lib/songUtils';
 
 // ── Types ──
@@ -11,6 +12,8 @@ export interface Album {
   artist: string;
   coverUrl?: string | null;
   songs: string[];
+  genres?: string[];
+  songGenres?: Record<string, string[]>;
   source?: string;
   addedAt?: string;
 }
@@ -47,6 +50,7 @@ interface AudioContextType {
   playPrev: () => void;
   togglePlayPause: () => void;
   shuffleAll: () => void;
+  shuffleAlbums: () => void;
   // Audio controls
   seek: (e: React.MouseEvent<HTMLDivElement>) => void;
   seekTo: (seconds: number) => void;
@@ -371,7 +375,7 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
       audio.volume = mutedRef.current ? 0 : volumeRef.current;
       audio.play();
     }
-  }, [albums]);
+  }, [albums, ensureAnalyser]);
 
   const playFromQueue = useCallback((idx: number) => {
     const q = queueRef.current;
@@ -518,6 +522,14 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
     if (allTracks.length > 0) playTrack(allTracks[0].albumIndex, allTracks[0].songIndex);
   }, [albums, playTrack]);
 
+  const shuffleAlbums = useCallback(() => {
+    const albumQueue = buildAlbumShuffleQueue(albums);
+    setQueue(albumQueue);
+    setQueueIndex(0);
+    setShuffleMode(true);
+    if (albumQueue.length > 0) playTrack(albumQueue[0].albumIndex, albumQueue[0].songIndex);
+  }, [albums, playTrack]);
+
   const togglePlayPause = useCallback(() => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -589,7 +601,7 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
       queue, queueIndex, shuffleMode,
       username, setUsername,
       playTrack, playSong, playAlbum, playPlaylist, playFromQueue,
-      playNext, playPrev, togglePlayPause, shuffleAll,
+      playNext, playPrev, togglePlayPause, shuffleAll, shuffleAlbums,
       seek, seekTo, setVolumeValue, changeVolume, handleVolumeWheel, toggleMute,
       setQueue, setQueueIndex, setShuffleMode,
       formatTime, currentAlbum, currentSongName,
