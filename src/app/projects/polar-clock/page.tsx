@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Settings, Maximize, Minimize, Download, X, Volume2 } from 'lucide-react';
+import { Settings, Maximize, Minimize, Download, X, Volume2, BatteryLow } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useHeaderConfig } from '@/components/header-config';
 import { useAudio } from '@/components/AudioProvider';
@@ -14,27 +14,12 @@ import {
   BACKGROUND_GROUPS, AUDIO_BACKGROUNDS, EXPORTABLE_BACKGROUNDS, backgroundLabel,
   type RingConfig, type CitySlot, type BackgroundKey,
 } from './_components/shared';
-import { GOLBackground } from './_components/GOLBackground';
-import {
-  JuliaBackground, MandelbrotBackground, BurningShipBackground,
-  NewtonBackground, ResonanceBackground,
-} from './_components/Fractal';
-import { AttractorBackground } from './_components/AttractorBackground';
-import { KochBackground } from './_components/KochBackground';
-import { StarfieldBackground } from './_components/StarfieldBackground';
-import { ParticleFlowBackground } from './_components/ParticleFlowBackground';
-import { MatrixRainBackground } from './_components/MatrixRainBackground';
-import { VoronoiBackground } from './_components/VoronoiBackground';
-import { RipplesBackground } from './_components/RipplesBackground';
-import { LissajousBackground } from './_components/LissajousBackground';
-import { SineWaveBackground } from './_components/SineWaveBackground';
-import { ApollonianBackground } from './_components/ApollonianBackground';
-import {
-  SpectrumBackground, OrbBackground, AuroraBackground, RadialSpectrumBackground,
-  TerrainBackground, TunnelBackground, RibbonBackground,
-} from './_components/AudioBackgrounds';
+import { BackgroundStage } from './_components/BackgroundStage';
 import { PolarClockSVG } from './_components/PolarClockSVG';
 import { SettingsSection } from './_components/SettingsSection';
+import {
+  clockTickMs, shouldRunProjector, type PowerMode,
+} from './_components/power';
 
 /** Header is h-14 + a 1px border. 57, not 56 — see /workshop-ui §4. */
 const HEADER_H = 57;
@@ -71,6 +56,10 @@ export default function PolarClockPage() {
 
   const [time, setTime] = useState(new Date());
   const [smooth, setSmooth] = useState(true);
+  const [powerMode, setPowerMode] = useState<PowerMode>(
+    () => getCookie('polarclock_power') === 'economy' ? 'economy' : 'full',
+  );
+  const [documentVisible, setDocumentVisible] = useState(true);
   const [palette, setPalette] = useState(() => getCookie('polarclock_palette') ?? 'default');
   const [background, setBackground] = useState<BackgroundKey>(() => {
     const v = getCookie('polarclock_bg');
@@ -166,16 +155,31 @@ export default function PolarClockPage() {
     return () => window.removeEventListener('resize', update);
   }, []);
 
-  // Tick
+  // Hidden tabs sleep completely. Economy mode keeps an accurate clock while
+  // waking React just once per second.
   useEffect(() => {
-    const interval = setInterval(() => setTime(new Date()), smooth ? 50 : 1000);
+    const onVisibility = () => {
+      const visible = document.visibilityState !== 'hidden';
+      setDocumentVisible(visible);
+      if (visible) setTime(new Date());
+    };
+    onVisibility();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, []);
+
+  useEffect(() => {
+    const delay = clockTickMs(powerMode, smooth, documentVisible);
+    if (delay === null) return;
+    const interval = setInterval(() => setTime(new Date()), delay);
     return () => clearInterval(interval);
-  }, [smooth]);
+  }, [documentVisible, powerMode, smooth]);
 
   // Persist settings
   useEffect(() => { setCookie('polarclock_slots', JSON.stringify(slots)); }, [slots]);
   useEffect(() => { setCookie('polarclock_palette', palette); }, [palette]);
   useEffect(() => { setCookie('polarclock_bg', background); }, [background]);
+  useEffect(() => { setCookie('polarclock_power', powerMode); }, [powerMode]);
   useEffect(() => { setCookie('polarclock_align', alignment); }, [alignment]);
   useEffect(() => { setCookie('polarclock_yearbar', String(showYearBar)); }, [showYearBar]);
   useEffect(() => { setCookie('polarclock_slots_vis', String(showSlots)); }, [showSlots]);
@@ -244,8 +248,8 @@ export default function PolarClockPage() {
     cityLabel: slots[activeSlot]?.label ?? 'New York',
   });
 
-  const bgProps = { width: viewSize.w, height: domeH };
   const ready = viewSize.w > 0;
+  const projectorRunning = ready && shouldRunProjector(background, powerMode, documentVisible);
 
   return (
     <div
@@ -255,31 +259,17 @@ export default function PolarClockPage() {
     >
       {/* ── The projector ── */}
       <div className="absolute inset-0 z-0" style={{ opacity: bgOpacity }}>
-        {ready && background === 'gol' && <GOLBackground {...bgProps} />}
-        {ready && background === 'julia' && (
-          <JuliaBackground {...bgProps} manual={juliaManual} cRe={juliaCRe} cIm={juliaCIm} dragging={juliaDragging} />
+        {projectorRunning && (
+          <BackgroundStage
+            background={background}
+            width={viewSize.w}
+            height={domeH}
+            juliaManual={juliaManual}
+            juliaCRe={juliaCRe}
+            juliaCIm={juliaCIm}
+            juliaDragging={juliaDragging}
+          />
         )}
-        {ready && background === 'mandelbrot' && <MandelbrotBackground {...bgProps} />}
-        {ready && background === 'burningship' && <BurningShipBackground {...bgProps} />}
-        {ready && background === 'newton' && <NewtonBackground {...bgProps} />}
-        {ready && background === 'attractor' && <AttractorBackground {...bgProps} />}
-        {ready && background === 'koch' && <KochBackground {...bgProps} />}
-        {ready && background === 'starfield' && <StarfieldBackground {...bgProps} />}
-        {ready && background === 'particles' && <ParticleFlowBackground {...bgProps} />}
-        {ready && background === 'matrix' && <MatrixRainBackground {...bgProps} />}
-        {ready && background === 'voronoi' && <VoronoiBackground {...bgProps} />}
-        {ready && background === 'ripples' && <RipplesBackground {...bgProps} />}
-        {ready && background === 'lissajous' && <LissajousBackground {...bgProps} />}
-        {ready && background === 'sinewaves' && <SineWaveBackground {...bgProps} />}
-        {ready && background === 'apollonian' && <ApollonianBackground {...bgProps} />}
-        {ready && background === 'resonance' && <ResonanceBackground {...bgProps} />}
-        {ready && background === 'terrain' && <TerrainBackground {...bgProps} />}
-        {ready && background === 'tunnel' && <TunnelBackground {...bgProps} />}
-        {ready && background === 'ribbon' && <RibbonBackground {...bgProps} />}
-        {ready && background === 'spectrum' && <SpectrumBackground {...bgProps} />}
-        {ready && background === 'orb' && <OrbBackground {...bgProps} />}
-        {ready && background === 'aurora' && <AuroraBackground {...bgProps} />}
-        {ready && background === 'radial' && <RadialSpectrumBackground {...bgProps} />}
       </div>
 
       {/* The dome falls off toward the rim, so the dial reads over anything. */}
@@ -299,7 +289,7 @@ export default function PolarClockPage() {
               label={currentLabel}
               time={time}
               palette={palette}
-              smooth={smooth}
+              smooth={smooth && powerMode === 'full'}
               rings={rings}
               size={clockSize}
               showCity={showCity}
@@ -319,8 +309,16 @@ export default function PolarClockPage() {
         <div className="pc-glass pointer-events-auto absolute left-4 top-4 px-3 py-2">
           <p className="pc-etch">RM 05 · Observatory</p>
           <p className="mt-1 text-[11px] text-foreground">
-            {background === 'none' ? 'Dome dark' : backgroundLabel(background)}
+            {powerMode === 'economy' && background !== 'none'
+              ? `${backgroundLabel(background)} · parked`
+              : background === 'none' ? 'Dome dark' : backgroundLabel(background)}
           </p>
+          {powerMode === 'economy' && (
+            <p className="mt-1 flex items-center gap-1.5 text-[10px] text-[var(--pc-verd)]">
+              <BatteryLow className="h-3 w-3" />
+              Economy power
+            </p>
+          )}
           {audioBg && (
             <p className="mt-1 flex items-center gap-1.5 text-[10px] text-muted-foreground">
               <Volume2 className="h-3 w-3 shrink-0" style={{ color: waitingForAudio ? undefined : 'var(--pc-verd)' }} />
@@ -647,6 +645,14 @@ export default function PolarClockPage() {
                     <Chip on={smooth} onClick={() => setSmooth(true)}>Sweep</Chip>
                     <Chip on={!smooth} onClick={() => setSmooth(false)}>Tick</Chip>
                   </div>
+                  <div className="mt-3 flex items-center gap-1.5">
+                    <Chip on={powerMode === 'full'} onClick={() => setPowerMode('full')}>Full power</Chip>
+                    <Chip on={powerMode === 'economy'} onClick={() => setPowerMode('economy')}>Economy</Chip>
+                  </div>
+                  <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+                    Economy parks the projector and updates the dial once a second.
+                    Hidden tabs sleep automatically.
+                  </p>
                 </SettingsSection>
 
                 {/* ── Dial ── */}
