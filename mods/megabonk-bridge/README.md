@@ -2,7 +2,7 @@
 
 Read-only BepInEx plugin. Five times a second it reads the player stat block and sends a snapshot to the workshop page on `ws://127.0.0.1:47315`.
 
-Turn **Upload Score to Leaderboards** off before launching with any mod loaded.
+While this plugin is loaded it forces **Upload Score to Leaderboards** off and skips `QueueLeaderboardUpload` and `UploadLeaderboardScore`, so a run cannot be submitted. That lasts for the session; quit the game before playing a run you want on the board.
 
 ## Build on Windows
 

@@ -24,6 +24,7 @@ public sealed class Plugin : BasePlugin
         var port = Config.Bind("Bridge", "Port", 47315, "WebSocket port on 127.0.0.1. The workshop page connects here.").Value;
         Server = new BridgeServer(port, Log);
         Server.Start();
+        LeaderboardBlock.Apply(Log);
         ClassInjector.RegisterTypeInIl2Cpp<BridgeTicker>();
         AddComponent<BridgeTicker>();
         Log.LogInfo($"Megabonk bridge listening on ws://127.0.0.1:{port}");
@@ -81,6 +82,7 @@ public sealed class BridgeTicker : MonoBehaviour
 
     void Update()
     {
+        LeaderboardBlock.KeepOff();
         wait += Time.unscaledDeltaTime;
         if (wait < 0.2f) return;
         wait = 0f;
