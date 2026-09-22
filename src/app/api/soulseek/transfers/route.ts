@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
+import { requireSetupToken } from '@/lib/admin-auth';
+import { slskdDelete } from '@/lib/slskd';
+import { transferCancelPath } from '@/lib/soulseek-transfers';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,12 +65,50 @@ export async function GET(request: NextRequest) {
       total = parseInt(count.rows[0].n);
     }
     return NextResponse.json({
-      transfers: rows.map(({ total_count: _t, ...r }) => r),
+      transfers: rows.map(({ total_count, ...transfer }) => {
+        void total_count;
+        return transfer;
+      }),
       total,
       page,
       pageSize,
     });
   } catch (error) {
     return NextResponse.json({ error: 'Failed to fetch transfer log', detail: String(error) }, { status: 500 });
+  }
+}
+
+/** Cancel a live transfer in slskd. */
+export async function DELETE(request: NextRequest) {
+  const authError = requireSetupToken(request);
+  if (authError) return authError;
+
+  try {
+    const body: unknown = await request.json();
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: 'Transfer details required' }, { status: 400 });
+    }
+
+    const { direction, username, id } = body as Record<string, unknown>;
+    if (
+      (direction !== 'down' && direction !== 'up')
+      || typeof username !== 'string'
+      || !username.trim()
+      || typeof id !== 'string'
+      || !id
+    ) {
+      return NextResponse.json(
+        { error: 'direction, username, and id are required' },
+        { status: 400 },
+      );
+    }
+
+    await slskdDelete(transferCancelPath(direction, username, id));
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    return NextResponse.json(
+      { error: 'Failed to cancel transfer', detail: String(error) },
+      { status: 500 },
+    );
   }
 }

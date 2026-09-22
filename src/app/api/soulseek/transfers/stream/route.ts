@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { slskdGet, flattenTransfers } from '@/lib/slskd';
+import { changedTransferFrame } from '@/lib/soulseek-transfers';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +25,14 @@ export async function GET(request: NextRequest) {
 
   const stream = new ReadableStream({
     start(controller) {
+      let stopped = false;
+      let pollTimer: ReturnType<typeof setTimeout> | undefined;
+      let previousSnapshot: string | null = null;
+
+      const enqueue = (value: string) => {
+        if (!stopped) controller.enqueue(encoder.encode(value));
+      };
+
       const poll = async () => {
         try {
           const [rawDownloads, rawUploads] = await Promise.all([
@@ -32,20 +41,29 @@ export async function GET(request: NextRequest) {
           ]);
           const downloads = flattenTransfers<SlskdTransferFile>(rawDownloads);
           const uploads = flattenTransfers<SlskdTransferFile>(rawUploads);
-          const data = `data: ${JSON.stringify({ downloads, uploads })}\n\n`;
-          controller.enqueue(encoder.encode(data));
+          const next = changedTransferFrame({ downloads, uploads }, previousSnapshot);
+          previousSnapshot = next.serialized;
+          if (next.frame) enqueue(next.frame);
         } catch {
           // skip this tick
+        } finally {
+          // Schedule after both upstream requests settle so slow slskd calls
+          // cannot create overlapping polls.
+          if (!stopped) pollTimer = setTimeout(poll, 2000);
         }
       };
 
-      poll();
-      const interval = setInterval(poll, 2000);
+      void poll();
+      // Comments keep proxies from considering a quiet, unchanged wire dead
+      // without causing EventSource message handlers or React state updates.
+      const heartbeat = setInterval(() => enqueue(': keep-alive\n\n'), 15000);
 
       request.signal.addEventListener('abort', () => {
-        clearInterval(interval);
+        stopped = true;
+        if (pollTimer) clearTimeout(pollTimer);
+        clearInterval(heartbeat);
         try { controller.close(); } catch {}
-      });
+      }, { once: true });
     },
   });
 

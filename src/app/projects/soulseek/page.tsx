@@ -11,10 +11,12 @@ import Link from 'next/link';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
 import { useAudio } from '@/components/AudioProvider';
+import { adminFetch } from '@/lib/admin-client';
 import { buildLibraryIndex, matchFolder, type FolderMatch, type LibraryIndex } from '@/lib/libraryMatch';
 import { useHeaderConfig } from '@/components/header-config';
 import { fmtBytes as fmtBytesShared, fmtSpeed, fmtTime } from '@/lib/format';
 import { ProgressBar } from '@/components/ui/ProgressBar';
+import { isActiveTransferState } from '@/lib/soulseek-transfers';
 import LedgerTab from './_components/ledger';
 
 // ── Types ──
@@ -170,7 +172,7 @@ function transferStateLabel(state: string): { label: string; color: string } {
 }
 
 function isActive(t: Transfer): boolean {
-  return !t.state.includes('Completed');
+  return isActiveTransferState(t.state);
 }
 
 function isMoving(t: Transfer): boolean {
@@ -875,17 +877,20 @@ function SectionHead({ tone, children }: { tone: 'down' | 'up' | 'hold' | 'plain
   return <div className={`flex items-center gap-2 ${EYEBROW} ${color}`}>{children}</div>;
 }
 
-function TransfersTab({ liveDownloads, liveUploads, staging, refetchStaging }: {
+function TransfersTab({ liveDownloads, liveUploads, staging, refetchStaging, onCancel }: {
   liveDownloads: Record<string, Transfer[]>;
   liveUploads: Record<string, Transfer[]>;
   staging: StagingItem[];
   refetchStaging: () => void;
+  onCancel: (direction: 'down' | 'up', transfer: Transfer) => Promise<void>;
 }) {
   const [completed, setCompleted] = useState<DownloadRecord[]>([]);
   const [uploadHistory, setUploadHistory] = useState<DownloadRecord[]>([]);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editArtist, setEditArtist] = useState('');
   const [editAlbum, setEditAlbum] = useState('');
+  const [cancellingKeys, setCancellingKeys] = useState<Set<string>>(new Set());
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   // Pagination state
   const [activePage, setActivePage] = useState(0);
@@ -935,6 +940,23 @@ function TransfersTab({ liveDownloads, liveUploads, staging, refetchStaging }: {
     } catch {}
   };
 
+  const handleCancel = async (direction: 'down' | 'up', transfer: Transfer) => {
+    const key = `${direction}:${transfer.username}:${transfer.id}`;
+    setCancelError(null);
+    setCancellingKeys(prev => new Set(prev).add(key));
+    try {
+      await onCancel(direction, transfer);
+    } catch (error) {
+      setCancelError(error instanceof Error ? error.message : 'Could not cancel transfer');
+    } finally {
+      setCancellingKeys(prev => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
+
   const activeDownloads = Object.entries(liveDownloads).flatMap(([username, transfers]) =>
     transfers.filter(isActive).map(t => ({ ...t, username }))
   );
@@ -944,6 +966,11 @@ function TransfersTab({ liveDownloads, liveUploads, staging, refetchStaging }: {
 
   return (
     <div className="space-y-8">
+      {cancelError && (
+        <div className="px-4 py-3 rounded-lg bg-destructive/10 border border-destructive/25 text-sm text-destructive">
+          {cancelError}
+        </div>
+      )}
       {/* ══ DOWN WIRE ══ */}
       <div className="space-y-5">
         {/* Active downloads */}
@@ -969,6 +996,17 @@ function TransfersTab({ liveDownloads, liveUploads, staging, refetchStaging }: {
                         <span className={stateInfo.color}>{stateInfo.label}</span>
                         <span className="text-muted-foreground font-mono tabular-nums">{fmtSpeed(t.averageSpeed)}</span>
                         <span className="text-muted-foreground font-mono tabular-nums">{fmtBytes(t.bytesTransferred)} / {fmtBytes(t.size)}</span>
+                        <button
+                          onClick={() => handleCancel('down', t)}
+                          disabled={cancellingKeys.has(`down:${t.username}:${t.id}`)}
+                          className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 disabled:opacity-50 transition-colors"
+                          title="Cancel download"
+                          aria-label={`Cancel download ${basename(t.filename)}`}
+                        >
+                          {cancellingKeys.has(`down:${t.username}:${t.id}`)
+                            ? <Loader className="h-3 w-3 animate-spin" />
+                            : <X className="h-3 w-3" />}
+                        </button>
                       </div>
                       <ProgressBar percent={t.percentComplete} color="bg-primary" />
                     </div>
@@ -1148,6 +1186,17 @@ function TransfersTab({ liveDownloads, liveUploads, staging, refetchStaging }: {
                       <span className="text-foreground font-mono truncate flex-1">{basename(t.filename)}</span>
                       <span className={stateInfo.color}>{stateInfo.label}</span>
                       <span className="text-muted-foreground font-mono tabular-nums">{fmtSpeed(t.averageSpeed)}</span>
+                      <button
+                        onClick={() => handleCancel('up', t)}
+                        disabled={cancellingKeys.has(`up:${t.username}:${t.id}`)}
+                        className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 disabled:opacity-50 transition-colors"
+                        title="Cancel upload"
+                        aria-label={`Cancel upload ${basename(t.filename)}`}
+                      >
+                        {cancellingKeys.has(`up:${t.username}:${t.id}`)
+                          ? <Loader className="h-3 w-3 animate-spin" />
+                          : <X className="h-3 w-3" />}
+                      </button>
                     </div>
                     <ProgressBar percent={t.percentComplete} color="bg-accent" />
                   </div>
@@ -1209,16 +1258,53 @@ export default function SoulseekPage() {
   // Auto-reconnect is EventSource's default.
   const [liveDownloads, setLiveDownloads] = useState<Record<string, Transfer[]>>({});
   const [liveUploads, setLiveUploads] = useState<Record<string, Transfer[]>>({});
+  const recentlyCancelledRef = useRef(new Set<string>());
   useEffect(() => {
     const es = new EventSource('/api/soulseek/transfers/stream');
     es.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.downloads) setLiveDownloads(data.downloads);
-        if (data.uploads) setLiveUploads(data.uploads);
+        const withoutCancelled = (
+          direction: 'down' | 'up',
+          groups: Record<string, Transfer[]>,
+        ) => Object.fromEntries(
+          Object.entries(groups)
+            .map(([username, transfers]) => [
+              username,
+              transfers.filter((transfer) =>
+                !recentlyCancelledRef.current.has(`${direction}:${username}:${transfer.id}`)
+              ),
+            ])
+            .filter(([, transfers]) => (transfers as Transfer[]).length > 0),
+        ) as Record<string, Transfer[]>;
+        if (data.downloads) setLiveDownloads(withoutCancelled('down', data.downloads));
+        if (data.uploads) setLiveUploads(withoutCancelled('up', data.uploads));
       } catch {}
     };
     return () => { es.close(); };
+  }, []);
+
+  const cancelTransfer = useCallback(async (direction: 'down' | 'up', transfer: Transfer) => {
+    const response = await adminFetch('/api/soulseek/transfers', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ direction, username: transfer.username, id: transfer.id }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || 'Could not cancel transfer');
+
+    const cancelledKey = `${direction}:${transfer.username}:${transfer.id}`;
+    recentlyCancelledRef.current.add(cancelledKey);
+    window.setTimeout(() => recentlyCancelledRef.current.delete(cancelledKey), 10_000);
+    const removeTransfer = (current: Record<string, Transfer[]>) => {
+      const next = { ...current };
+      const remaining = (next[transfer.username] || []).filter(item => item.id !== transfer.id);
+      if (remaining.length > 0) next[transfer.username] = remaining;
+      else delete next[transfer.username];
+      return next;
+    };
+    if (direction === 'down') setLiveDownloads(removeTransfer);
+    else setLiveUploads(removeTransfer);
   }, []);
 
   // Staging lives at page level: the Transfers tab lists it and its count
@@ -1324,6 +1410,7 @@ export default function SoulseekPage() {
                     liveUploads={liveUploads}
                     staging={staging}
                     refetchStaging={fetchStaging}
+                    onCancel={cancelTransfer}
                   />
                 )}
                 {activeTab === 'ledger' && <LedgerTab />}
