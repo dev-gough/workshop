@@ -16,6 +16,15 @@ import { copyText } from '@/lib/clipboard';
 
 const SNAP_MAX_M = 300;    // map-click waypoint snapping
 const RESNAP_MAX_M = 400;  // stored-trip waypoints get a little more slack
+const defaultExpedition = (): ExpeditionSettings => {
+  const now = new Date();
+  const startDate = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0'),
+  ].join('-');
+  return { startDate, launchMin: 8 * 60 };
+};
 
 export interface Waypoint {
   snap: Snap;
@@ -29,6 +38,11 @@ export interface DayTotals {
   timeH: number;
 }
 
+export interface ExpeditionSettings {
+  startDate: string;
+  launchMin: number;
+}
+
 export interface TripPlan {
   waypoints: Waypoint[];
   cost: CostParams;
@@ -40,6 +54,8 @@ export interface TripPlan {
   legs: Leg[];
   totals: { paddleM: number; portageM: number; trackM: number; carries: number; timeH: number; unreachable: number };
   days: DayTotals[];
+  expedition: ExpeditionSettings;
+  setExpedition: React.Dispatch<React.SetStateAction<ExpeditionSettings>>;
   routeFC: GeoJSON.FeatureCollection | null;
   /** Bounds to fly to after a trip loads; consumed via `focus` on TripMap. */
   focus: [number, number, number, number] | null;
@@ -73,6 +89,7 @@ export function useTripPlan(opts: {
   const [tripSlug, setTripSlug] = useState<string | null>(null);
   const [trips, setTrips] = useState<TripSummary[] | null>(null);
   const [focus, setFocus] = useState<[number, number, number, number] | null>(null);
+  const [expedition, setExpedition] = useState<ExpeditionSettings>(defaultExpedition);
 
   const parkRef = useRef(park);
   parkRef.current = park;
@@ -199,6 +216,25 @@ export function useTripPlan(opts: {
     setTripName(trip.name);
     setTripSlug(trip.slug);
     setCost((c) => ({ ...c, ...(trip.cost as Partial<CostParams>) }));
+    const savedExpedition = trip.cost.expedition as Partial<ExpeditionSettings> | undefined;
+    const savedDate = savedExpedition?.startDate;
+    const parsedDate = typeof savedDate === 'string'
+      ? new Date(`${savedDate}T12:00:00Z`)
+      : null;
+    const validDate = parsedDate != null
+      && /^\d{4}-\d{2}-\d{2}$/.test(savedDate!)
+      && !Number.isNaN(parsedDate.getTime())
+      && parsedDate.toISOString().slice(0, 10) === savedDate;
+    if (
+      validDate &&
+      typeof savedExpedition?.launchMin === 'number' &&
+      Number.isFinite(savedExpedition.launchMin)
+    ) {
+      setExpedition({
+        startDate: savedDate!,
+        launchMin: Math.max(0, Math.min(1439, Math.round(savedExpedition.launchMin))),
+      });
+    } else setExpedition(defaultExpedition());
     focusOnLoadRef.current = true;
     onTripOpened('loaded');
     showFlash(
@@ -248,6 +284,7 @@ export function useTripPlan(opts: {
     setWaypoints([]);
     setTripName('');
     setTripSlug(null);
+    setExpedition(defaultExpedition());
     onTripOpened('new');
   }, [onTripOpened]);
 
@@ -269,7 +306,7 @@ export function useTripPlan(opts: {
         name: tripName.trim() || 'Untitled trip',
         slug: tripSlug ?? undefined,
         waypoints: waypoints.map((w) => [w.snap.point[0], w.snap.point[1], w.dayEnd ? 1 : 0]),
-        cost,
+        cost: { ...cost, expedition },
         stats,
       }),
     })
@@ -282,7 +319,7 @@ export function useTripPlan(opts: {
     } else {
       showFlash('save failed', 'warn', 2500);
     }
-  }, [waypoints, park, tripName, tripSlug, cost, totals, days, showFlash, refreshTrips]);
+  }, [waypoints, park, tripName, tripSlug, cost, expedition, totals, days, showFlash, refreshTrips]);
 
   const deleteTrip = useCallback(
     async (slug: string, name: string) => {
@@ -328,6 +365,8 @@ export function useTripPlan(opts: {
     legs,
     totals,
     days,
+    expedition,
+    setExpedition,
     routeFC,
     focus,
     addWaypointAt,

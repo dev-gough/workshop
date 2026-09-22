@@ -53,11 +53,19 @@ interface PreparedSegment {
   lengthM: number;
 }
 
+interface IndexedEdge {
+  segIdx: number;
+  edgeIdx: number;
+}
+
+const SNAP_CELL_M = 1000;
+
 export class TripRouter {
   private net: Network;
   private segs: PreparedSegment[];
   private adj: Map<number, { segIdx: number; from: 'a' | 'b' }[]>;
   private nodePos: Map<number, [number, number]>;
+  private snapGrid = new Map<string, IndexedEdge[]>();
   private mx: number;
   private my = 110_540;
 
@@ -74,6 +82,31 @@ export class TripRouter {
         arcs.push(arcs[i - 1] + this.distM(seg.coords[i - 1], seg.coords[i]));
       }
       return { seg, arcs, lengthM: arcs[arcs.length - 1] || seg.length_m };
+    });
+
+    // Segment snapping used to scan every edge in the park for every click
+    // and every waypoint restored from the logbook. Index edge bounding
+    // boxes once; queries then inspect only cells touching the snap radius.
+    this.segs.forEach(({ seg }, segIdx) => {
+      for (let edgeIdx = 0; edgeIdx + 1 < seg.coords.length; edgeIdx++) {
+        const a = seg.coords[edgeIdx];
+        const b = seg.coords[edgeIdx + 1];
+        const ax = a[0] * this.mx;
+        const ay = a[1] * this.my;
+        const bx = b[0] * this.mx;
+        const by = b[1] * this.my;
+        const edge = { segIdx, edgeIdx };
+        const minX = Math.floor(Math.min(ax, bx) / SNAP_CELL_M);
+        const maxX = Math.floor(Math.max(ax, bx) / SNAP_CELL_M);
+        const minY = Math.floor(Math.min(ay, by) / SNAP_CELL_M);
+        const maxY = Math.floor(Math.max(ay, by) / SNAP_CELL_M);
+        for (let x = minX; x <= maxX; x++) {
+          for (let y = minY; y <= maxY; y++) {
+            const key = `${x},${y}`;
+            (this.snapGrid.get(key) ?? this.snapGrid.set(key, []).get(key)!).push(edge);
+          }
+        }
+      }
     });
 
     this.adj = new Map();
@@ -93,24 +126,34 @@ export class TripRouter {
   /** Nearest point on the network within maxM ground metres, or null. */
   snap(lngLat: [number, number], maxM = 300): Snap | null {
     let best: Snap | null = null;
-    for (let segIdx = 0; segIdx < this.segs.length; segIdx++) {
+    const qx = lngLat[0] * this.mx;
+    const qy = lngLat[1] * this.my;
+    const minX = Math.floor((qx - maxM) / SNAP_CELL_M);
+    const maxX = Math.floor((qx + maxM) / SNAP_CELL_M);
+    const minY = Math.floor((qy - maxM) / SNAP_CELL_M);
+    const maxY = Math.floor((qy + maxM) / SNAP_CELL_M);
+    const candidates = new Set<IndexedEdge>();
+    for (let x = minX; x <= maxX; x++) {
+      for (let y = minY; y <= maxY; y++) {
+        for (const edge of this.snapGrid.get(`${x},${y}`) ?? []) candidates.add(edge);
+      }
+    }
+    for (const { segIdx, edgeIdx: i } of candidates) {
       const { seg, arcs } = this.segs[segIdx];
-      for (let i = 0; i + 1 < seg.coords.length; i++) {
-        const [ax, ay] = seg.coords[i];
-        const [bx, by] = seg.coords[i + 1];
-        const vx = (bx - ax) * this.mx;
-        const vy = (by - ay) * this.my;
-        const wx = (lngLat[0] - ax) * this.mx;
-        const wy = (lngLat[1] - ay) * this.my;
-        const l2 = vx * vx + vy * vy;
-        const t = l2 ? Math.max(0, Math.min(1, (wx * vx + wy * vy) / l2)) : 0;
-        const dx = wx - t * vx;
-        const dy = wy - t * vy;
-        const d = Math.hypot(dx, dy);
-        if (d <= maxM && (!best || d < best.distM)) {
-          const point: [number, number] = [ax + (bx - ax) * t, ay + (by - ay) * t];
-          best = { segIdx, arcM: arcs[i] + Math.sqrt(l2) * t, point, distM: d };
-        }
+      const [ax, ay] = seg.coords[i];
+      const [bx, by] = seg.coords[i + 1];
+      const vx = (bx - ax) * this.mx;
+      const vy = (by - ay) * this.my;
+      const wx = (lngLat[0] - ax) * this.mx;
+      const wy = (lngLat[1] - ay) * this.my;
+      const l2 = vx * vx + vy * vy;
+      const t = l2 ? Math.max(0, Math.min(1, (wx * vx + wy * vy) / l2)) : 0;
+      const dx = wx - t * vx;
+      const dy = wy - t * vy;
+      const d = Math.hypot(dx, dy);
+      if (d <= maxM && (!best || d < best.distM)) {
+        const point: [number, number] = [ax + (bx - ax) * t, ay + (by - ay) * t];
+        best = { segIdx, arcM: arcs[i] + Math.sqrt(l2) * t, point, distM: d };
       }
     }
     return best;

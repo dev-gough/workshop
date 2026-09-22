@@ -315,7 +315,7 @@ export default function PaddlePage() {
               onDelete={(slug, name) => void plan.deleteTrip(slug, name)}
             />
           )}
-          {view === 'trip' && <TripPanel plan={plan} />}
+          {view === 'trip' && <TripPanel plan={plan} park={current} />}
           {view === 'review' && (
             <ReviewPanel
               reviews={reviews}

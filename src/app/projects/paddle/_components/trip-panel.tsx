@@ -5,12 +5,26 @@
 // buttons (underway/landed) and photo strip render alongside the ledger,
 // all fed by the use-trip-plan hook.
 
-import { fmtKm, fmtLatLon } from '../_lib/model';
+import { useMemo } from 'react';
+import { buildDaylightPlan, fmtClock } from '../_lib/expedition';
+import { fmtKm, fmtLatLon, type ParkInfo } from '../_lib/model';
 import { fmtHours } from '../_lib/route';
 import type { TripPlan } from '../_lib/use-trip-plan';
 
-export default function TripPanel({ plan }: { plan: TripPlan }) {
+function timeInput(minutes: number): string {
+  return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+}
+
+export default function TripPanel({ plan, park }: { plan: TripPlan; park: ParkInfo | null }) {
   const { waypoints, totals, days, legs, cost } = plan;
+  const daylight = useMemo(() => {
+    if (!park || !days.length || !plan.expedition.startDate) return [];
+    const location: [number, number] = [
+      (park.bbox[0] + park.bbox[2]) / 2,
+      (park.bbox[1] + park.bbox[3]) / 2,
+    ];
+    return buildDaylightPlan(days, plan.expedition.startDate, plan.expedition.launchMin, location);
+  }, [days, park, plan.expedition]);
   return (
     <>
       <div className="flex gap-1.5">
@@ -119,6 +133,51 @@ export default function TripPanel({ plan }: { plan: TripPlan }) {
           {totals.unreachable} {totals.unreachable === 1 ? 'leg has' : 'legs have'} no connecting route —
           the network is split there.
         </p>
+      )}
+
+      {days.length > 0 && (
+        <div className="mt-2.5 border-t border-border pt-2">
+          <div className="flex items-center gap-1.5">
+            <span className="pd-etch mr-auto">Daylight card</span>
+            <input
+              type="date"
+              value={plan.expedition.startDate}
+              onChange={(e) => plan.setExpedition((x) => ({ ...x, startDate: e.target.value }))}
+              className="pd-readout w-[7.2rem] rounded-sm border border-border bg-transparent px-1 py-0.5 text-[10px]"
+              aria-label="Trip start date"
+            />
+            <input
+              type="time"
+              value={timeInput(plan.expedition.launchMin)}
+              onChange={(e) => {
+                const [hour, minute] = e.target.value.split(':').map(Number);
+                if (Number.isFinite(hour) && Number.isFinite(minute)) {
+                  plan.setExpedition((x) => ({ ...x, launchMin: hour * 60 + minute }));
+                }
+              }}
+              className="pd-readout w-[4.6rem] rounded-sm border border-border bg-transparent px-1 py-0.5 text-[10px]"
+              aria-label="Daily launch time"
+            />
+          </div>
+          <div className="mt-1 space-y-0.5">
+            {daylight.map((d, i) => (
+              <p key={d.date} className="flex items-baseline justify-between gap-2 text-[10px]">
+                <span className="shrink-0 text-muted-foreground">
+                  D{i + 1} · {d.date.slice(5)} · light {fmtClock(d.sunriseMin)}–{fmtClock(d.sunsetMin)}
+                </span>
+                <span
+                  className="pd-readout text-right"
+                  style={d.reserveMin < 0 ? { color: 'var(--pd-red)' } : undefined}
+                >
+                  land {fmtClock(d.landMin)} ·{' '}
+                  {d.reserveMin < 0
+                    ? `${fmtHours(-d.reserveMin / 60)} after dark`
+                    : `${fmtHours(d.reserveMin / 60)} spare`}
+                </span>
+              </p>
+            ))}
+          </div>
+        </div>
       )}
 
       {waypoints.length > 0 && (
