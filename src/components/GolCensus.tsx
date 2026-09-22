@@ -11,7 +11,7 @@ import {
   MAX_AXIS,
 } from '@/workers/gol-census-core';
 import type { CensusResult } from '@/workers/gol-census-shared';
-import { CensusPool, poolWorkerCount } from '@/lib/census-pool';
+import { CensusPool, poolWorkerCount, type CensusProgress } from '@/lib/census-pool';
 import { usePlaneFate, type PlaneFate } from '@/lib/plane-fate-client';
 
 // ── Board sizes ───────────────────────────────────────────────────────────
@@ -45,6 +45,7 @@ function sameSize(a: Size | null, b: Size | null): boolean {
 
 const STORAGE_PREFIX = 'gol-census-v2:';
 const SAVE_THROTTLE_MS = 1500;
+const UI_UPDATE_MS = 250;
 
 function storageKey(s: Size) { return `${STORAGE_PREFIX}${sizeKey(s)}`; }
 
@@ -462,6 +463,7 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
   const [sel, setSel] = useState<Size>({ w: 5, h: 5 });
   const [runningSize, setRunningSize] = useState<Size | null>(null);
   const [rate, setRate] = useState<number | null>(null);
+  const [liveProgress, setLiveProgress] = useState<CensusProgress | null>(null);
   const [galleryBoard, setGalleryBoard] = useState('all'); // 'all' | sizeKey
   const [gallerySort, setGallerySort] = useState<GallerySort>('period');
   const [galleryAsc, setGalleryAsc] = useState(false);
@@ -470,10 +472,47 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
   const rateRef = useRef<{ t: number; classified: number } | null>(null);
   const lastSaveRef = useRef(0);
   const lastServerSaveRef = useRef(0);
+  const lastUiUpdateRef = useRef(0);
+  const uiTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingResultRef = useRef<CensusResult | null>(null);
+  const pendingProgressRef = useRef<CensusProgress | null>(null);
 
   const setResult = useCallback((r: CensusResult) => {
     setResults(prev => ({ ...prev, [sizeKey({ w: r.w, h: r.h })]: r }));
   }, []);
+
+  const flushPoolUi = useCallback(() => {
+    uiTimerRef.current = null;
+    lastUiUpdateRef.current = performance.now();
+    if (pendingResultRef.current) {
+      setResult(pendingResultRef.current);
+      pendingResultRef.current = null;
+    }
+    if (pendingProgressRef.current) {
+      setLiveProgress(pendingProgressRef.current);
+      pendingProgressRef.current = null;
+    }
+  }, [setResult]);
+
+  // Worker replies can arrive in bursts in symmetry-pruned stripes. Coalesce
+  // result + progress publication to bound React work at four renders/second;
+  // persistence remains independently throttled and completion flushes now.
+  const queuePoolUi = useCallback((
+    result: CensusResult | null,
+    progress: CensusProgress | null,
+    force = false,
+  ) => {
+    if (result) pendingResultRef.current = result;
+    if (progress) pendingProgressRef.current = progress;
+    if (force) {
+      if (uiTimerRef.current) clearTimeout(uiTimerRef.current);
+      flushPoolUi();
+      return;
+    }
+    if (uiTimerRef.current) return;
+    const delay = Math.max(0, UI_UPDATE_MS - (performance.now() - lastUiUpdateRef.current));
+    uiTimerRef.current = setTimeout(flushPoolUi, delay);
+  }, [flushPoolUi]);
 
   /** Merge a server/derived result into memory — never regresses progress. */
   const adoptResult = useCallback((r: CensusResult) => {
@@ -582,9 +621,8 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
     }
   }, []);
 
-  const trackRate = useCallback((r: CensusResult) => {
+  const trackRate = useCallback((classified: number) => {
     const now = performance.now();
-    const classified = classifiedTotal(r);
     const prev = rateRef.current;
     if (prev && now - prev.t > 400) {
       const inst = ((classified - prev.classified) / (now - prev.t)) * 1000;
@@ -598,29 +636,39 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
   const startDeep = useCallback(() => {
     if (poolRef.current) return;
     const s = sel;
+    const initialClassified = results[sizeKey(s)] ? classifiedTotal(results[sizeKey(s)]) : 0;
     rateRef.current = null;
     setRate(null);
+    setLiveProgress({
+      classified: initialClassified,
+      checkpointed: initialClassified,
+      total: totalOf(s),
+    });
     // Resume from the in-memory result — it already holds the best of
     // {localStorage, server} after the mount sync.
     const pool = new CensusPool(s.w, s.h, results[sizeKey(s)] ?? loadResult(s), {
       onUpdate: (r) => {
-        setResult(r);
-        trackRate(r);
         persistThrottled(r);
+        queuePoolUi(r, null);
+      },
+      onProgress: (progress) => {
+        trackRate(progress.classified);
+        queuePoolUi(null, progress);
       },
       onDone: (r) => {
-        setResult(r);
+        queuePoolUi(r, null, true);
         persistThrottled(r, true);
         if (r.w !== r.h) adoptEverywhere(transposeResult(r));
         setRunningSize(null);
         poolRef.current = null;
         setRate(null);
+        setLiveProgress(null);
       },
     });
     poolRef.current = pool;
     setRunningSize(s);
     pool.start();
-  }, [sel, results, persistThrottled, setResult, trackRate, adoptEverywhere]);
+  }, [sel, results, persistThrottled, queuePoolUi, trackRate, adoptEverywhere]);
 
   const pauseDeep = useCallback(() => {
     const pool = poolRef.current;
@@ -629,9 +677,10 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
     poolRef.current = null;
     setRunningSize(null);
     setRate(null);
-    setResult(snapshot);
+    queuePoolUi(snapshot, null, true);
+    setLiveProgress(null);
     persistThrottled(snapshot, true);
-  }, [persistThrottled, setResult]);
+  }, [persistThrottled, queuePoolUi]);
 
   const resetDeep = useCallback(() => {
     if (runningSize) return;
@@ -646,6 +695,7 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
 
   // Pause (checkpointing) if the page unmounts mid-run.
   useEffect(() => () => {
+    if (uiTimerRef.current) clearTimeout(uiTimerRef.current);
     const pool = poolRef.current;
     if (pool) {
       const snapshot = pool.stop();
@@ -676,9 +726,16 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
   const selResult = results[sizeKey(sel)];
   const selTotal = totalOf(sel);
   const selClassified = selResult ? classifiedTotal(selResult) : 0;
-  const selPct = (selClassified / selTotal) * 100;
   const selIsRunning = sameSize(runningSize, sel);
-  const etaSeconds = rate && rate > 0 ? Math.round((selTotal - selClassified) / rate) : 0;
+  const shownClassified = selIsRunning && liveProgress
+    ? Math.max(selClassified, liveProgress.classified)
+    : selClassified;
+  const checkpointedClassified = selIsRunning && liveProgress
+    ? Math.max(selClassified, liveProgress.checkpointed)
+    : selClassified;
+  const awaitingCheckpoint = Math.max(0, shownClassified - checkpointedClassified);
+  const selPct = (shownClassified / selTotal) * 100;
+  const etaSeconds = rate && rate > 0 ? Math.round((selTotal - shownClassified) / rate) : 0;
 
   // ── Oscillator gallery pool ──
   //
@@ -838,9 +895,9 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
               </div>
               <div className="flex flex-wrap items-center justify-between gap-x-3 text-[10px] text-muted-foreground font-mono tabular-nums">
                 <span
-                  title={`${selClassified.toLocaleString()} of ${selTotal.toLocaleString()} states classified · index cursor at ${selResult.processed.toLocaleString()}`}
+                  title={`${shownClassified.toLocaleString()} of ${selTotal.toLocaleString()} states classified · ${checkpointedClassified.toLocaleString()} safely checkpointed · index cursor at ${selResult.processed.toLocaleString()}`}
                 >
-                  {selPct.toFixed(2)}% · {fmtCount(selClassified)} / {fmtCount(selTotal)} counted
+                  {selPct.toFixed(2)}% · {fmtCount(shownClassified)} / {fmtCount(selTotal)} classified
                 </span>
                 <span className="flex items-center gap-3">
                   {selIsRunning && rate !== null && rate > 0 && (
@@ -848,6 +905,11 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
                       <span>{fmtCount(Math.round(rate))} states/s · {poolRef.current?.workerCount ?? poolWorkerCount()} workers</span>
                       <span>ETA {fmtEta(etaSeconds)}</span>
                     </>
+                  )}
+                  {selIsRunning && awaitingCheckpoint > 0 && (
+                    <span title="Completed by workers and waiting for an earlier chunk before it can join the resumable checkpoint">
+                      +{fmtCount(awaitingCheckpoint)} awaiting checkpoint
+                    </span>
                   )}
                   {selResult.done && (
                     <span className="text-chart-4">

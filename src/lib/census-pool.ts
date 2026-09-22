@@ -59,7 +59,23 @@ export function poolWorkerCount(): number {
 export interface CensusPoolCallbacks {
   /** Fired after each contiguous merge — result is a live snapshot. */
   onUpdate: (result: CensusResult) => void;
+  /** Fired after every worker reply, including chunks waiting behind a gap. */
+  onProgress?: (progress: CensusProgress) => void;
   onDone: (result: CensusResult) => void;
+}
+
+export interface CensusProgress {
+  /** Exact number of states classified by completed worker chunks. */
+  classified: number;
+  /** Classified states included in the resumable contiguous checkpoint. */
+  checkpointed: number;
+  total: number;
+}
+
+export function classifiedInAcc(acc: Pick<ChunkAcc, 'dies' | 'stillLifes' | 'unresolved' | 'periods'>): number {
+  let total = acc.dies + acc.stillLifes + acc.unresolved;
+  for (const count of Object.values(acc.periods)) total += count;
+  return total;
 }
 
 export class CensusPool {
@@ -74,6 +90,7 @@ export class CensusPool {
   private chunkSize = CHUNK_MIN;
   private lastWall = 0;
   private stopped = false;
+  private completedClassified: number;
 
   constructor(w: number, h: number, resume: CensusResult | null, private cb: CensusPoolCallbacks) {
     this.w = w;
@@ -88,6 +105,7 @@ export class CensusPool {
       this.contiguous = 0;
       this.result = freshResult(w, h);
     }
+    this.completedClassified = classifiedInAcc(this.result);
     this.cursor = this.contiguous;
   }
 
@@ -133,6 +151,11 @@ export class CensusPool {
   private onChunk(w: Worker, resp: CensusChunkResponse): void {
     if (this.stopped) return;
 
+    // Count every completed chunk immediately. Out-of-order chunks cannot be
+    // checkpointed yet, but they are real completed work and should inform
+    // progress/rate/ETA instead of disappearing behind a slow earlier chunk.
+    this.completedClassified += classifiedInAcc(resp.acc);
+
     // Steer chunk size toward ~1-2s of work (bounded both ways).
     if (resp.ms < GROW_BELOW_MS && this.chunkSize < CHUNK_MAX) this.chunkSize *= 2;
     else if (resp.ms > SHRINK_ABOVE_MS && this.chunkSize > CHUNK_MIN) this.chunkSize /= 2;
@@ -152,6 +175,12 @@ export class CensusPool {
       this.result.processed = this.contiguous;
       this.tickClock();
     }
+
+    this.cb.onProgress?.({
+      classified: this.completedClassified,
+      checkpointed: classifiedInAcc(this.result),
+      total: this.result.total,
+    });
 
     if (this.contiguous >= this.result.total) {
       this.result.done = true;
