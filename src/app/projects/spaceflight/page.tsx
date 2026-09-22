@@ -2,7 +2,7 @@
 
 // RM 03, Mission Control — a single-screen cockpit. One main display, one
 // tracking console that configures it: scope (the world / SpaceX), display
-// (cumulative / per year / replay / ledger / log), counting, accounting and
+// (cumulative / per year / replay / orbit desk / ledger / log), counting, accounting and
 // the year window. On desktop the whole room fits the viewport; the console
 // configuration persists across visits.
 
@@ -38,7 +38,7 @@ interface Payload {
 
 // The console remembers how you left it.
 const CONFIG_KEY = 'sf-console-v1';
-const DISPLAYS: Display[] = ['cumulative', 'yearly', 'replay', 'ledger', 'log'];
+const DISPLAYS: Display[] = ['cumulative', 'yearly', 'replay', 'orbit', 'ledger', 'log'];
 
 export default function SpaceflightPage() {
   useHeaderConfig({ scopeClass: 'sf-theme' });
@@ -138,7 +138,7 @@ export default function SpaceflightPage() {
 
   const ready = data !== null && now > 0;
   const maxYear = now > 0 ? new Date(now).getUTCFullYear() : 2026;
-  const effRange: YearRange = range ?? [RANGE_MIN, maxYear];
+  const effRange = useMemo<YearRange>(() => range ?? [RANGE_MIN, maxYear], [range, maxYear]);
   // The room's clock stops at the window's edge, so consoles and charts read
   // as they would have in that year.
   const rangeEnd = Math.min(now, Date.UTC(effRange[1] + 1, 0, 1));

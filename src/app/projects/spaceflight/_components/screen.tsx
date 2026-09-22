@@ -2,7 +2,7 @@
 
 // The main screen — the firing room's front wall. One display surface; the
 // tracking console dials in what it shows: cumulative curves, per-year
-// stacks, the time-machine replay, the ledger, or the per-launch log. The
+// stacks, the time-machine replay, the orbit desk, the ledger, or the per-launch log. The
 // screen measures its own body so charts fill whatever height the cockpit
 // gives them.
 
@@ -10,6 +10,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } 
 import { CumulativeChart, Legend, YearlyChart, type ChartSeries, type SeriesDef } from './charts';
 import { LaunchLog, VehicleConsole } from './console';
 import { FamilyLedger } from './ledger';
+import { OrbitDesk } from './orbit-desk';
 import { TimeMachine } from './race';
 import {
   VEHICLE_COLOR,
@@ -213,6 +214,7 @@ export function MainScreen({
     replay: `${scopeWord} · the time machine · standings, tonnes ${
       mode === 'delivered' ? 'in orbit' : 'launched'
     }`,
+    orbit: 'Orbit desk · ideal mission transfer planner',
     ledger:
       scope === 'world'
         ? `Launch families · every orbital attempt on the books · ${windowWord}`
@@ -228,7 +230,9 @@ export function MainScreen({
 
   // ── Body ──
   let body: ReactNode;
-  if (scope === 'world' && families.length === 0) {
+  if (display === 'orbit') {
+    body = <OrbitDesk />;
+  } else if (scope === 'world' && families.length === 0) {
     body = (
       <Empty>
         The world range is offline — the GCAT mirror didn&apos;t answer. The SpaceX range still

@@ -183,6 +183,11 @@ const DISPLAYS: Array<{ key: Display; label: string; tip: string }> = [
     tip: 'The time machine — scrub or play the standings year by year from Sputnik to now.',
   },
   {
+    key: 'orbit',
+    label: 'Orbit desk',
+    tip: 'Plan an ideal two-burn transfer from low Earth parking orbit to a mission target.',
+  },
+  {
     key: 'ledger',
     label: 'Ledger',
     tip: 'The full accounting: every family or vehicle in the window, ranked and totalled.',

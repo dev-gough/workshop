@@ -50,7 +50,7 @@ export type Mode = 'delivered' | 'launched';
 export type Scope = 'world' | 'spacex';
 
 /** What the main screen displays. */
-export type Display = 'cumulative' | 'yearly' | 'replay' | 'ledger' | 'log';
+export type Display = 'cumulative' | 'yearly' | 'replay' | 'orbit' | 'ledger' | 'log';
 
 /**
  * The accounting basis — what counts as "mass in orbit":
