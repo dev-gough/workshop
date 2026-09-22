@@ -138,6 +138,41 @@ export function fitsInRoom(item: FurnitureItem, room: RoomSpec): boolean {
   return !room.cutouts.some(c => rectsOverlap(r, cutoutRect(c, room)));
 }
 
+/**
+ * Find the closest whole-inch position where a piece fits without colliding
+ * with another piece or a usable door swing. Stable tie-breaking keeps the
+ * result predictable for undo/redo and repeated clicks.
+ */
+export function findNearestFreePosition(
+  item: FurnitureItem,
+  items: FurnitureItem[],
+  room: RoomSpec,
+  doors: DoorItem[] = [],
+): { x: number; y: number } | null {
+  const { w, h } = effectiveDims(item);
+  const maxX = Math.floor(room.w - w);
+  const maxY = Math.floor(room.h - h);
+  if (maxX < 0 || maxY < 0) return null;
+
+  const others = items.filter(other => other.id !== item.id).map(itemRect);
+  let best: { x: number; y: number; distance: number } | null = null;
+
+  for (let y = 0; y <= maxY; y += SNAP_INCREMENT) {
+    for (let x = 0; x <= maxX; x += SNAP_INCREMENT) {
+      const candidate = { ...item, x, y };
+      const rect = itemRect(candidate);
+      if (!fitsInRoom(candidate, room)) continue;
+      if (others.some(other => rectsOverlap(rect, other))) continue;
+      if (doors.some(door => doorOnFloor(door, room) && rectInSwing(rect, door, room))) continue;
+
+      const distance = (x - item.x) ** 2 + (y - item.y) ** 2;
+      if (!best || distance < best.distance) best = { x, y, distance };
+    }
+  }
+
+  return best ? { x: best.x, y: best.y } : null;
+}
+
 /** Floor area in square inches (bounding rect minus notches). */
 export function floorArea(room: RoomSpec): number {
   return room.cutouts.reduce((area, c) => {

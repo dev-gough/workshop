@@ -8,7 +8,7 @@ import { useTheme } from '@/components/ThemeProvider';
 import { Input } from '@/components/ui/input';
 import {
   RotateCw, Lock, Unlock, Copy, Trash2, Undo2, Redo2, Save,
-  FolderOpen, X, Scissors, AlertTriangle, DoorOpen, ArrowLeftRight,
+  FolderOpen, X, Scissors, AlertTriangle, DoorOpen, ArrowLeftRight, ScanSearch,
 } from 'lucide-react';
 import {
   type FurnitureItem, type SavedLayout, type DisplayUnit, type RoomSpec,
@@ -17,7 +17,7 @@ import {
   wallFreeSpan, wallFrame, allWallFrames, clampDoorPos, tidyDoors,
   UNIT_ABBR, toBase, fromBase, formatDim, gridMajorInterval, SNAP_INCREMENT,
   effectiveDims, itemRect, cutoutRect, rectsOverlap, fitsInRoom, floorArea,
-  wallPolygon, loadLayouts, persistLayouts, loadCatalogue, persistCatalogue,
+  findNearestFreePosition, wallPolygon, loadLayouts, persistLayouts, loadCatalogue, persistCatalogue,
   loadSession, persistSession,
 } from './model';
 import { getIcon } from './icons';
@@ -71,9 +71,11 @@ export default function RoomPlanner() {
   const [layoutName, setLayoutName] = useState('');
   const [popover, setPopover] = useState<'layouts' | 'shape' | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  const [spaceHint, setSpaceHint] = useState<string | null>(null);
 
   // ── Refs ──
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const staticCanvasRef = useRef<{ key: string; canvas: HTMLCanvasElement } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const draggingRef = useRef<{ id: number; offsetX: number; offsetY: number } | null>(null);
@@ -217,13 +219,15 @@ export default function RoomPlanner() {
     if (!canvas || !container || !view) return;
 
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = containerSize.width * dpr;
-    canvas.height = containerSize.height * dpr;
+    const pixelWidth = Math.round(containerSize.width * dpr);
+    const pixelHeight = Math.round(containerSize.height * dpr);
+    if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+    if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
     canvas.style.width = `${containerSize.width}px`;
     canvas.style.height = `${containerSize.height}px`;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.scale(dpr, dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, containerSize.width, containerSize.height);
 
     const css = getComputedStyle(container);
@@ -239,66 +243,80 @@ export default function RoomPlanner() {
 
     const { ppi, ox, oy } = view;
     const W = room.w * ppi, H = room.h * ppi;
-    const poly = wallPolygon(room).map(([x, y]) => [ox + x * ppi, oy + y * ppi] as [number, number]);
-    const tracePoly = () => {
-      ctx.beginPath();
-      poly.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
-      ctx.closePath();
-    };
-
-    // Graph-paper grid, clipped to the floor.
-    ctx.save();
-    tracePoly();
-    ctx.clip();
-    const major = gridMajorInterval(unit);
-    const minor = unit === 'cm' || unit === 'm' ? 10 / 2.54 : 1;
-    const drawLines = (pitch: number, style: string, width: number, skipMajor: boolean) => {
-      ctx.strokeStyle = style;
-      ctx.lineWidth = width;
-      for (let i = 0; i <= room.w + 0.001; i += pitch) {
-        if (skipMajor && Math.abs((i / major) - Math.round(i / major)) < 0.001) continue;
-        const x = ox + i * ppi;
-        ctx.beginPath(); ctx.moveTo(x, oy); ctx.lineTo(x, oy + H); ctx.stroke();
-      }
-      for (let i = 0; i <= room.h + 0.001; i += pitch) {
-        if (skipMajor && Math.abs((i / major) - Math.round(i / major)) < 0.001) continue;
-        const y = oy + i * ppi;
-        ctx.beginPath(); ctx.moveTo(ox, y); ctx.lineTo(ox + W, y); ctx.stroke();
-      }
-    };
-    if (minor * ppi > 4) drawLines(minor, cGrid, 0.5, true);
-    drawLines(major, cGridMajor, 1, false);
-    ctx.restore();
-
-    // Notches: poché hatch — this is not floor.
-    for (const c of room.cutouts) {
-      const r = cutoutRect(c, room);
-      const rx = ox + r.x * ppi, ry = oy + r.y * ppi, rw = r.w * ppi, rh = r.h * ppi;
-      ctx.save();
-      ctx.beginPath(); ctx.rect(rx, ry, rw, rh); ctx.clip();
-      ctx.strokeStyle = cFaint;
-      ctx.globalAlpha = 0.45;
-      ctx.lineWidth = 0.75;
-      for (let d = -rh; d < rw; d += 7) {
+    const staticKey = JSON.stringify({
+      pixelWidth, pixelHeight, ppi, ox, oy, room, unit, theme,
+    });
+    const cached = staticCanvasRef.current;
+    if (cached?.key === staticKey) {
+      ctx.drawImage(cached.canvas, 0, 0, containerSize.width, containerSize.height);
+    } else {
+      const poly = wallPolygon(room).map(([x, y]) => [ox + x * ppi, oy + y * ppi] as [number, number]);
+      const tracePoly = () => {
         ctx.beginPath();
-        ctx.moveTo(rx + d, ry + rh);
-        ctx.lineTo(rx + d + rh, ry);
-        ctx.stroke();
-      }
-      ctx.restore();
-      // Notch size, pencilled in the void.
-      if (rw > 40 && rh > 22) {
-        ctx.font = `500 9px ${mono}`;
-        ctx.fillStyle = cFaint;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(`${formatDim(r.w, unit)} × ${formatDim(r.h, unit)}`, rx + rw / 2, ry + rh / 2);
-      }
-    }
+        poly.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+        ctx.closePath();
+      };
 
-    // Walls: double-line poché (heavy stroke with a sheet-colored core).
-    tracePoly(); ctx.strokeStyle = cWall; ctx.lineWidth = 5; ctx.lineJoin = 'miter'; ctx.stroke();
-    tracePoly(); ctx.strokeStyle = cSheet; ctx.lineWidth = 2.5; ctx.stroke();
+      // Graph-paper grid, clipped to the floor.
+      ctx.save();
+      tracePoly();
+      ctx.clip();
+      const major = gridMajorInterval(unit);
+      const minor = unit === 'cm' || unit === 'm' ? 10 / 2.54 : 1;
+      const drawLines = (pitch: number, style: string, width: number, skipMajor: boolean) => {
+        ctx.strokeStyle = style;
+        ctx.lineWidth = width;
+        for (let i = 0; i <= room.w + 0.001; i += pitch) {
+          if (skipMajor && Math.abs((i / major) - Math.round(i / major)) < 0.001) continue;
+          const x = ox + i * ppi;
+          ctx.beginPath(); ctx.moveTo(x, oy); ctx.lineTo(x, oy + H); ctx.stroke();
+        }
+        for (let i = 0; i <= room.h + 0.001; i += pitch) {
+          if (skipMajor && Math.abs((i / major) - Math.round(i / major)) < 0.001) continue;
+          const y = oy + i * ppi;
+          ctx.beginPath(); ctx.moveTo(ox, y); ctx.lineTo(ox + W, y); ctx.stroke();
+        }
+      };
+      if (minor * ppi > 4) drawLines(minor, cGrid, 0.5, true);
+      drawLines(major, cGridMajor, 1, false);
+      ctx.restore();
+
+      // Notches: poché hatch — this is not floor.
+      for (const c of room.cutouts) {
+        const r = cutoutRect(c, room);
+        const rx = ox + r.x * ppi, ry = oy + r.y * ppi, rw = r.w * ppi, rh = r.h * ppi;
+        ctx.save();
+        ctx.beginPath(); ctx.rect(rx, ry, rw, rh); ctx.clip();
+        ctx.strokeStyle = cFaint;
+        ctx.globalAlpha = 0.45;
+        ctx.lineWidth = 0.75;
+        for (let d = -rh; d < rw; d += 7) {
+          ctx.beginPath();
+          ctx.moveTo(rx + d, ry + rh);
+          ctx.lineTo(rx + d + rh, ry);
+          ctx.stroke();
+        }
+        ctx.restore();
+        // Notch size, pencilled in the void.
+        if (rw > 40 && rh > 22) {
+          ctx.font = `500 9px ${mono}`;
+          ctx.fillStyle = cFaint;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(`${formatDim(r.w, unit)} × ${formatDim(r.h, unit)}`, rx + rw / 2, ry + rh / 2);
+        }
+      }
+
+      // Walls: double-line poché (heavy stroke with a sheet-colored core).
+      tracePoly(); ctx.strokeStyle = cWall; ctx.lineWidth = 5; ctx.lineJoin = 'miter'; ctx.stroke();
+      tracePoly(); ctx.strokeStyle = cSheet; ctx.lineWidth = 2.5; ctx.stroke();
+
+      const snapshot = document.createElement('canvas');
+      snapshot.width = pixelWidth;
+      snapshot.height = pixelHeight;
+      snapshot.getContext('2d')?.drawImage(canvas, 0, 0);
+      staticCanvasRef.current = { key: staticKey, canvas: snapshot };
+    }
 
     // Accent label with a paper-colored halo so it reads over linework.
     const halo = (text: string, x: number, y: number) => {
@@ -563,6 +581,24 @@ export default function RoomPlanner() {
     updateItems(items.map(i => i.id === id ? { ...i, label: label.trim() } : i));
   }, [items, updateItems]);
 
+  const findSpace = useCallback((id: number) => {
+    const item = items.find(candidate => candidate.id === id);
+    if (!item || item.locked) return;
+    const position = findNearestFreePosition(item, items, room, doors);
+    if (!position) {
+      setSpaceHint('No clear spot on this floor');
+      return;
+    }
+    if (position.x === item.x && position.y === item.y) {
+      setSpaceHint('Already in the nearest clear spot');
+      return;
+    }
+    updateItems(items.map(candidate => candidate.id === id
+      ? { ...candidate, ...position }
+      : candidate));
+    setSpaceHint(`Moved to ${formatDim(position.x, unit)}, ${formatDim(position.y, unit)}`);
+  }, [items, room, doors, unit, updateItems]);
+
   // ── Door actions ──
 
   const addDoor = useCallback(() => {
@@ -656,6 +692,7 @@ export default function RoomPlanner() {
 
   const handlePointerDown = useCallback((e: React.PointerEvent, item: FurnitureItem) => {
     setSelectedDoorId(null);
+    setSpaceHint(null);
     if (item.locked || !view) { setSelectedId(item.id); return; }
     e.preventDefault();
     e.stopPropagation();
@@ -1250,6 +1287,18 @@ export default function RoomPlanner() {
             {selectedItem.rotation !== 0 && (
               <span className="bp-readout text-[11px] text-muted-foreground">{selectedItem.rotation}°</span>
             )}
+            <button
+              className="bp-chip flex items-center gap-1.5 px-2 py-1 text-[11px] font-medium"
+              onClick={() => findSpace(selectedItem.id)}
+              disabled={selectedItem.locked}
+              title={selectedItem.locked ? 'Unlock this piece to move it' : 'Move to the nearest clear floor space'}
+            >
+              <ScanSearch className="h-3 w-3" />
+              Find space
+            </button>
+            {spaceHint && (
+              <span className="text-[11px] text-muted-foreground" role="status">{spaceHint}</span>
+            )}
             {misfitIds.has(selectedItem.id) && (
               <span className="text-[11px] font-medium" style={{ color: 'var(--bp-accent)' }}>
                 doesn&apos;t fit here
@@ -1336,7 +1385,7 @@ export default function RoomPlanner() {
               Click a piece on the sheet to see its clearances.
             </span>
             <span className="bp-readout ml-auto hidden text-[10px] text-muted-foreground md:inline">
-              R rotate · L lock · arrows nudge · ⇧ = 1' · ⌫ delete · ⌘Z undo
+              R rotate · L lock · arrows nudge · ⇧ = 1&apos; · ⌫ delete · ⌘Z undo
             </span>
           </div>
         )}
