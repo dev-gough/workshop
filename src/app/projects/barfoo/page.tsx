@@ -412,6 +412,7 @@ export default function BarFooPage() {
             onCloseDetail={() => setSelectedAlbum(null)}
             onCloseQueue={() => setQueueOpen(false)}
             onOpenArtist={openArtist}
+            onOpenQueue={() => setQueueOpen(true)}
           />
         </div>
 

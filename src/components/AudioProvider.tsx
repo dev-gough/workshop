@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
-import { buildAlbumShuffleQueue } from '@/lib/musicLibrary';
+import { buildAlbumShuffleQueue, resolvePlaylistTracks } from '@/lib/musicLibrary';
 import { cleanSongDisplay, sortedTrackIndices } from '@/lib/songUtils';
 
 // ── Types ──
@@ -489,11 +489,7 @@ export default function AudioProvider({ children }: { children: ReactNode }) {
   }, [albums, playSong]);
 
   const playPlaylist = useCallback((songs: { artist: string; album: string; song: string }[], shuffle = false) => {
-    const resolved = songs.map(s => {
-      const albumIndex = albums.findIndex(a => a.artist === s.artist && a.name === s.album);
-      const songIndex = albumIndex >= 0 ? albums[albumIndex].songs.indexOf(s.song) : -1;
-      return { albumIndex, songIndex };
-    }).filter(t => t.albumIndex >= 0 && t.songIndex >= 0);
+    const resolved = resolvePlaylistTracks(albums, songs);
 
     if (shuffle) {
       for (let i = resolved.length - 1; i > 0; i--) {

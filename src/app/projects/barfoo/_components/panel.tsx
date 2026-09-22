@@ -5,10 +5,11 @@
 // they dock as columns; on smaller screens they slide over the wall.
 
 import { type ReactNode } from 'react';
-import { Music, Play, X } from 'lucide-react';
+import { Music, Play, Radio, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Button } from '@/components/ui/button';
 import { useAudio } from '@/components/AudioProvider';
+import { buildAlbumRadioQueue } from '@/lib/musicLibrary';
 import { cleanSongDisplay, extractTrackNumber, sortedTrackIndices } from '@/lib/songUtils';
 import { AlbumContextMenu, EqBars, SongContextMenu } from './shared';
 
@@ -82,14 +83,25 @@ function AlbumTrackList({ albumIdx }: { albumIdx: number }) {
   );
 }
 
-export function AlbumDetail({ albumIndex, onClose, onOpenArtist }: {
+export function AlbumDetail({ albumIndex, onClose, onOpenArtist, onOpenQueue }: {
   albumIndex: number;
   onClose: () => void;
   onOpenArtist: (artist: string) => void;
+  onOpenQueue: () => void;
 }) {
-  const { albums, playAlbum } = useAudio();
+  const { albums, playAlbum, playPlaylist } = useAudio();
   const album = albums[albumIndex];
   if (!album) return null;
+  const startRadio = () => {
+    const songs = buildAlbumRadioQueue(albums, albumIndex).map(({ albumIndex: ai, songIndex }) => ({
+      artist: albums[ai].artist,
+      album: albums[ai].name,
+      song: albums[ai].songs[songIndex],
+    }));
+    playPlaylist(songs);
+    onClose();
+    onOpenQueue();
+  };
   return (
     // min-w-0 matters: without it, flex min-width:auto lets the header
     // row push the panel wider than its docked column.
@@ -116,9 +128,20 @@ export function AlbumDetail({ albumIndex, onClose, onOpenArtist }: {
               {album.artist}
             </button>
             <p className="bar-etch mt-1.5">{album.songs.length} tracks</p>
-            <Button size="sm" className="mt-2 h-7 text-xs" onClick={() => playAlbum(albumIndex)}>
-              <Play className="mr-1 h-3 w-3" />Play album
-            </Button>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              <Button size="sm" className="h-7 text-xs" onClick={() => playAlbum(albumIndex)}>
+                <Play className="mr-1 h-3 w-3" />Play
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                onClick={startRadio}
+                title="Mix this record with closely tagged records"
+              >
+                <Radio className="mr-1 h-3 w-3" />Radio
+              </Button>
+            </div>
           </div>
           <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={onClose} aria-label="Close album">
             <X className="h-3.5 w-3.5" />
@@ -194,18 +217,24 @@ export function QueuePanel({ onClose }: { onClose: () => void }) {
 
 /** Docked columns on lg+, a slide-over sheet below. `detailOpen` wins
     the sheet when both are open. */
-export function SidePanel({ detailIndex, queueOpen, onCloseDetail, onCloseQueue, onOpenArtist }: {
+export function SidePanel({ detailIndex, queueOpen, onCloseDetail, onCloseQueue, onOpenArtist, onOpenQueue }: {
   detailIndex: number | null;
   queueOpen: boolean;
   onCloseDetail: () => void;
   onCloseQueue: () => void;
   onOpenArtist: (artist: string) => void;
+  onOpenQueue: () => void;
 }) {
   const detailOpen = detailIndex !== null;
   const anyOpen = detailOpen || queueOpen;
 
   const detail: ReactNode = detailOpen && (
-    <AlbumDetail albumIndex={detailIndex} onClose={onCloseDetail} onOpenArtist={onOpenArtist} />
+    <AlbumDetail
+      albumIndex={detailIndex}
+      onClose={onCloseDetail}
+      onOpenArtist={onOpenArtist}
+      onOpenQueue={onOpenQueue}
+    />
   );
   const queuePanel: ReactNode = queueOpen && <QueuePanel onClose={onCloseQueue} />;
 
