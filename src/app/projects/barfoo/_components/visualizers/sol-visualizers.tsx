@@ -263,51 +263,108 @@ export function SleeveEcho({ width, height }: SceneProps) {
     }
     const cx = w / 2;
     const cy = h / 2;
-    const wedges = reduced ? 6 : 10;
+    const baseSize = Math.min(w, h) * (w < 560 ? 0.62 : 0.50);
+    const echoes: { scale: number; alpha: number }[] = [];
+    let bassFloor = 0;
+    let lastBass = 0;
+    let beatCooldown = 0;
+
+    const drawSleeve = (size: number, alpha: number, rotation = 0) => {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(rotation);
+      ctx.globalAlpha = alpha;
+      ctx.beginPath();
+      ctx.roundRect(-size / 2, -size / 2, size, size, Math.max(3, size * 0.018));
+      ctx.clip();
+      ctx.drawImage(image, -size / 2, -size / 2, size, size);
+      ctx.restore();
+    };
 
     return {
       draw(time) {
         const bands = read();
-        ctx.fillStyle = 'rgba(5,4,8,0.22)';
+        ctx.fillStyle = 'rgb(5,4,7)';
         ctx.fillRect(0, 0, w, h);
-        const radius = Math.hypot(w, h) * (0.54 + bands.bass * 0.05);
-        const rotation = time * 0.000025 + bands.mid * 0.08;
 
         if (loaded) {
-          const source = Math.min(image.naturalWidth, image.naturalHeight);
-          const sx = (image.naturalWidth - source) / 2;
-          const sy = (image.naturalHeight - source) / 2;
-          for (let i = 0; i < wedges; i++) {
-            const angle = (i / wedges) * Math.PI * 2 + rotation;
+          // Let the sleeve tint the room without sacrificing its identity.
+          const roomSize = Math.max(w, h) * 1.08;
+          ctx.save();
+          ctx.globalAlpha = 0.14 + bands.energy * 0.12;
+          ctx.filter = `blur(${Math.round(Math.min(w, h) * 0.055)}px) saturate(1.35) brightness(0.7)`;
+          ctx.drawImage(image, cx - roomSize / 2, cy - roomSize / 2, roomSize, roomSize);
+          ctx.restore();
+
+          bassFloor += (bands.bass - bassFloor) * 0.018;
+          if (beatCooldown > 0) beatCooldown--;
+          const beat = bands.kick || (
+            beatCooldown === 0 &&
+            bands.bass > 0.12 &&
+            bands.bass > bassFloor + 0.035 &&
+            bands.bass - lastBass > 0.014
+          );
+          lastBass = bands.bass;
+          if (beat && !reduced) {
+            echoes.push({ scale: 1.03, alpha: 0.34 });
+            beatCooldown = 7;
+            if (echoes.length > 7) echoes.shift();
+          }
+
+          // A hit leaves a full, recognizable sleeve behind as it expands.
+          for (const echo of echoes) {
+            echo.scale += 0.009 + bands.bass * 0.012;
+            echo.alpha *= 0.964;
+            drawSleeve(baseSize * echo.scale, echo.alpha, (echo.scale - 1) * 0.028);
+          }
+          while (echoes.length && echoes[0].alpha < 0.012) echoes.shift();
+
+          // Two quiet mirrored ghosts make the room wider without cutting the
+          // artwork into pieces. Their drift follows mids, not a fixed spin.
+          const drift = 0.10 + bands.mid * 0.08;
+          const ghostSize = baseSize * 0.72;
+          for (const side of [-1, 1]) {
             ctx.save();
-            ctx.translate(cx, cy);
-            ctx.rotate(angle);
-            ctx.beginPath();
-            ctx.moveTo(0, 0);
-            ctx.arc(0, 0, radius, -Math.PI / wedges, Math.PI / wedges);
-            ctx.closePath();
-            ctx.clip();
-            if (i % 2) ctx.scale(-1, 1);
-            const size = radius * (1.12 + bands.energy * 0.22);
-            ctx.globalAlpha = 0.32 + bands.energy * 0.38;
-            ctx.drawImage(image, sx, sy, source, source, -size * 0.12, -size * 0.5, size, size);
+            ctx.translate(cx + side * baseSize * 0.76, cy + baseSize * 0.04);
+            ctx.scale(side, 1);
+            ctx.rotate(side * drift);
+            ctx.globalAlpha = 0.075 + bands.energy * 0.08;
+            ctx.filter = 'blur(1px) saturate(1.2)';
+            ctx.drawImage(image, -ghostSize / 2, -ghostSize / 2, ghostSize, ghostSize);
             ctx.restore();
           }
+
+          const breath = reduced ? 1 : 1 + bands.bass * 0.055;
+          const sleeveSize = baseSize * breath;
+          drawSleeve(sleeveSize, 0.90 + bands.energy * 0.08, Math.sin(time * 0.00018) * 0.006);
+
+          // Treble separates two hairline colour channels around the sleeve.
+          const edgeAlpha = 0.14 + bands.treble * 0.44;
+          for (const [offset, color] of [[-1.5, 'hsl(350 82% 64%)'], [1.5, 'hsl(178 72% 58%)']] as const) {
+            ctx.strokeStyle = color;
+            ctx.globalAlpha = edgeAlpha;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(
+              cx - sleeveSize / 2 + offset,
+              cy - sleeveSize / 2,
+              sleeveSize,
+              sleeveSize,
+            );
+          }
+          ctx.globalAlpha = 1;
         } else {
-          for (let i = 0; i < wedges; i++) {
-            const angle = (i / wedges) * Math.PI * 2 + rotation;
-            ctx.beginPath();
-            ctx.moveTo(cx, cy);
-            ctx.arc(cx, cy, radius, angle, angle + Math.PI * 2 / wedges);
-            ctx.fillStyle = `hsla(${270 + i * 13 + bands.treble * 50},62%,46%,${0.08 + bands.energy * 0.18})`;
-            ctx.fill();
+          for (let i = 4; i >= 0; i--) {
+            const size = baseSize * (1 + i * 0.16 + bands.bass * 0.05);
+            ctx.strokeStyle = `hsla(${277 + i * 12},65%,62%,${0.08 + (4 - i) * 0.07})`;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(cx - size / 2, cy - size / 2, size, size);
           }
         }
 
-        const shade = ctx.createRadialGradient(cx, cy, radius * 0.06, cx, cy, radius);
-        shade.addColorStop(0, `rgba(240,174,68,${0.12 + bands.energy * 0.16})`);
-        shade.addColorStop(0.42, 'rgba(8,4,10,0.02)');
-        shade.addColorStop(1, 'rgba(5,3,7,0.72)');
+        const shade = ctx.createRadialGradient(cx, cy, baseSize * 0.25, cx, cy, Math.hypot(w, h) * 0.58);
+        shade.addColorStop(0, 'rgba(5,3,7,0)');
+        shade.addColorStop(0.58, 'rgba(5,3,7,0.08)');
+        shade.addColorStop(1, 'rgba(5,3,7,0.78)');
         ctx.fillStyle = shade;
         ctx.fillRect(0, 0, w, h);
       },
