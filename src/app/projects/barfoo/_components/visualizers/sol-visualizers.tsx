@@ -66,6 +66,9 @@ export function LacquerBloom({ width, height }: SceneProps) {
     const cy = h / 2;
     const base = Math.min(w, h) * 0.13;
     const pulses: { radius: number; alpha: number; hue: number }[] = [];
+    let bassFloor = 0;
+    let lastBass = 0;
+    let beatCooldown = 0;
 
     return {
       draw(time) {
@@ -74,9 +77,23 @@ export function LacquerBloom({ width, height }: SceneProps) {
         ctx.fillStyle = 'rgba(8,4,7,0.20)';
         ctx.fillRect(0, 0, w, h);
 
-        if (bands.kick && !reduced) {
+        // The shared detector deliberately waits for a pronounced kick. Vinyl
+        // wants to feel more tactile, so also catch quick rises above a slow
+        // local bass floor; the cooldown prevents one drum hit becoming a fan.
+        bassFloor += (bands.bass - bassFloor) * 0.018;
+        if (beatCooldown > 0) beatCooldown--;
+        const bassRise = bands.bass - lastBass;
+        const beat = bands.kick || (
+          beatCooldown === 0 &&
+          bands.bass > 0.12 &&
+          bands.bass > bassFloor + 0.035 &&
+          bassRise > 0.014
+        );
+        lastBass = bands.bass;
+        if (beat && !reduced) {
           pulses.push({ radius: base * 0.7, alpha: 0.85, hue: 346 + bands.treble * 34 });
-          if (pulses.length > 10) pulses.shift();
+          beatCooldown = 6;
+          if (pulses.length > 14) pulses.shift();
         }
         for (const pulse of pulses) {
           pulse.radius += 2.5 + bands.bass * 7;

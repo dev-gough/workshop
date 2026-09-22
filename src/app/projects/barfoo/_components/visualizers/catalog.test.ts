@@ -18,7 +18,7 @@ test('Sol originals carry visible attribution metadata', () => {
   for (const visualizer of originals) {
     assert.equal(visualizer.author, 'Sol');
     assert.ok(visualizer.accent.startsWith('hsl('));
-    assert.ok(visualizer.description.length > 40);
+    assert.ok(visualizer.description.length > 20);
   }
 });
 

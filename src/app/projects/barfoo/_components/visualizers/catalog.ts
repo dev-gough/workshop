@@ -23,7 +23,7 @@ export const VISUALIZERS: readonly VisualizerDefinition[] = [
     label: 'Lacquer Bloom',
     author: 'Sol',
     origin: 'barfoo',
-    description: 'A record groove seen from inside the wax, with every kick pressing a new ring.',
+    description: 'Each kick presses a new ring into the wax.',
     accent: 'hsl(350 76% 63%)',
   },
   {
@@ -31,7 +31,7 @@ export const VISUALIZERS: readonly VisualizerDefinition[] = [
     label: 'Needle Garden',
     author: 'Sol',
     origin: 'barfoo',
-    description: 'Equalizer needles imagined as nocturnal stems bending in a bass-heavy wind.',
+    description: 'Equalizer needles growing in bass-heavy wind.',
     accent: 'hsl(39 91% 59%)',
   },
   {
@@ -39,7 +39,7 @@ export const VISUALIZERS: readonly VisualizerDefinition[] = [
     label: 'Chladni Dust',
     author: 'Sol',
     origin: 'barfoo',
-    description: 'Cymatic sand figures that rewrite their geometry as the frequency balance shifts.',
+    description: 'Cymatic dust redrawn by the frequency balance.',
     accent: 'hsl(174 66% 53%)',
   },
   {
@@ -47,7 +47,7 @@ export const VISUALIZERS: readonly VisualizerDefinition[] = [
     label: 'Sleeve Echo',
     author: 'Sol',
     origin: 'barfoo',
-    description: 'The playing sleeve becomes a mirrored light box breathing in time with the room.',
+    description: 'The playing sleeve, mirrored and breathing.',
     accent: 'hsl(277 72% 68%)',
   },
   {
@@ -55,7 +55,7 @@ export const VISUALIZERS: readonly VisualizerDefinition[] = [
     label: 'Spectral Terrain',
     author: 'Polar Clock',
     origin: 'polar-clock',
-    description: 'Recent FFT frames travel into the distance as a topographic memory of the track.',
+    description: 'Recent spectra become a receding landscape.',
     accent: 'hsl(202 65% 60%)',
   },
   {
@@ -63,7 +63,7 @@ export const VISUALIZERS: readonly VisualizerDefinition[] = [
     label: 'Frequency Tunnel',
     author: 'Polar Clock',
     origin: 'polar-clock',
-    description: 'Spectrum rings freeze, spin, and fly toward the listener when the low end lands.',
+    description: 'Spectrum rings fly outward on the low end.',
     accent: 'hsl(221 65% 64%)',
   },
   {
@@ -71,7 +71,7 @@ export const VISUALIZERS: readonly VisualizerDefinition[] = [
     label: 'Waveform Ribbon',
     author: 'Polar Clock',
     origin: 'polar-clock',
-    description: 'Oscilloscope sweeps drift upward into a fading ribbon of the last few seconds.',
+    description: 'Old oscilloscope sweeps become a fading ribbon.',
     accent: 'hsl(193 58% 62%)',
   },
   {
@@ -79,7 +79,7 @@ export const VISUALIZERS: readonly VisualizerDefinition[] = [
     label: 'Resonant Julia',
     author: 'Polar Clock',
     origin: 'polar-clock',
-    description: 'Bass and treble steer the constant that decides the fractal’s entire shape.',
+    description: 'Bass and treble reshape a Julia fractal.',
     accent: 'hsl(229 62% 67%)',
   },
 ] as const;

@@ -303,7 +303,7 @@ export function VisualizerStage({
                         <span className="truncate text-xs font-semibold">{visualizer.label}</span>
                       </span>
                       <span className="bar-etch mt-1 block text-[8px]">
-                        {own ? 'SOL · ORIGINAL' : 'POLAR CLOCK'}
+                        {own ? 'BARFOO · ORIGINAL' : 'POLAR CLOCK'}
                       </span>
                       <span className="bar-viz-card-info pointer-events-none absolute inset-0 flex translate-y-2 flex-col justify-end px-3 py-2 opacity-0 transition-all group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100">
                         <strong className="text-[10px]" style={{ color: visualizer.accent }}>{visualizer.author}</strong>
