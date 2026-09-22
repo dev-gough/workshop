@@ -7,6 +7,13 @@ import { useHeaderConfig } from '@/components/header-config';
 import MatchHistory from './_components/match-history';
 import { CategoryGlyph, CategoryRail, CrystalDial, LEGACY_ID, RAIL } from './_components/rail';
 import { CapstoneRow, GroupRow, ChallengeCard, SectionHeading } from './_components/rows';
+import { ClosestGoals } from './_components/closest-goals';
+import {
+  closestGoals,
+  indexSortedChildren,
+  sortNodes,
+  type SortKey,
+} from './_components/challenge-logic';
 import { ChallengeHoverCard, ChallengeDetailSheet } from './_components/hover-card';
 import { ChallengesSkeleton } from './_components/skeleton';
 import TierUpHerald from './_components/tier-up';
@@ -23,46 +30,12 @@ const SUBTITLE: Record<number, string> = {
 const subtitleFor = (label: string, id: number) =>
   SUBTITLE[id] ?? `Earn progress from ${label} Capstone Challenges.`;
 
-type SortKey = 'name' | 'closest' | 'rarest' | 'tier';
-
 const SORTS: { key: SortKey; label: string }[] = [
   { key: 'name', label: 'Name' },
   { key: 'closest', label: 'Closest' },
   { key: 'rarest', label: 'Rarest' },
   { key: 'tier', label: 'Tier' },
 ];
-
-/**
- * Orderings the client doesn't offer but the data supports. "Closest" is the
- * useful one — it surfaces the nearly-closed rings, i.e. what's actually
- * achievable next. Maxed nodes sink rather than pinning the top at 100%.
- */
-function sortNodes(nodes: ChallengeNode[], key: SortKey): ChallengeNode[] {
-  const out = [...nodes];
-  switch (key) {
-    case 'closest':
-      return out.sort((a, b) => {
-        const fa = a.nextThreshold === null ? -1 : progressFraction(a);
-        const fb = b.nextThreshold === null ? -1 : progressFraction(b);
-        return fb - fa || a.name.localeCompare(b.name);
-      });
-    case 'rarest':
-      // Rarity is the share of players who reached the tier you're on; the
-      // rarest achievements are the ones fewest players share.
-      return out.sort((a, b) => {
-        const ra = a.percentiles[a.level] ?? 1;
-        const rb = b.percentiles[b.level] ?? 1;
-        return ra - rb || a.name.localeCompare(b.name);
-      });
-    case 'tier':
-      return out.sort((a, b) =>
-        ALL_TIERS.indexOf(b.level as (typeof ALL_TIERS)[number]) -
-        ALL_TIERS.indexOf(a.level as (typeof ALL_TIERS)[number]) ||
-        a.name.localeCompare(b.name));
-    default:
-      return out.sort((a, b) => a.name.localeCompare(b.name));
-  }
-}
 
 export default function ChallengesPage() {
   useHeaderConfig({ scopeClass: 'lol-theme' });
@@ -155,14 +128,6 @@ export default function ChallengesPage() {
     return m;
   }, [data]);
 
-  const kids = useCallback(
-    (n: ChallengeNode) => sortNodes(
-      n.childIds.map((id) => byId.get(id)).filter((c): c is ChallengeNode => !!c),
-      sort
-    ),
-    [byId, sort]
-  );
-
   /** Everything in the active rail bucket, minus the category node itself. */
   const inCategory = useMemo(
     () => (data?.challenges ?? []).filter(
@@ -189,6 +154,14 @@ export default function ChallengesPage() {
   );
 
   const leaves = useMemo(() => inCategory.filter((c) => c.kind === 'challenge'), [inCategory]);
+  const goals = useMemo(() => closestGoals(leaves), [leaves]);
+
+  // Hovering and opening details both render the page. Indexing sorted
+  // children here keeps those transient renders from re-sorting every row.
+  const sortedChildren = useMemo(
+    () => indexSortedChildren(inCategory, sort),
+    [inCategory, sort]
+  );
 
   const tierCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -318,6 +291,8 @@ export default function ChallengesPage() {
               </div>
             )}
 
+            <ClosestGoals goals={goals} onHover={onHover} onSelect={setSelected} />
+
             {/* ── Toolbar: search + tier tally ───────────────────── */}
             <div className="mb-6 flex flex-wrap items-center gap-3 border-b border-border pb-4">
               <div className="relative">
@@ -410,7 +385,7 @@ export default function ChallengesPage() {
                         <CapstoneRow
                           key={c.challengeId}
                           node={c}
-                          items={kids(c)}
+                          items={sortedChildren.get(c.challengeId) ?? []}
                           onHover={onHover}
                           onJump={jump}
                           onSelect={setSelected}
@@ -425,7 +400,13 @@ export default function ChallengesPage() {
                     <SectionHeading label="Groups" kind="group" />
                     <div className="space-y-3">
                       {groups.map((g) => (
-                        <GroupRow key={g.challengeId} node={g} items={kids(g)} onHover={onHover} onSelect={setSelected} />
+                        <GroupRow
+                          key={g.challengeId}
+                          node={g}
+                          items={sortedChildren.get(g.challengeId) ?? []}
+                          onHover={onHover}
+                          onSelect={setSelected}
+                        />
                       ))}
                     </div>
                   </section>
