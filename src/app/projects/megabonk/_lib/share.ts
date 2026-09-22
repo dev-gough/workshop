@@ -65,6 +65,7 @@ export function decodeBuild(encoded: string): Build | null {
       bigBonkOn: bool(parsed.bigBonkOn, base.bigBonkOn),
       includeAttackSpeed: bool(parsed.includeAttackSpeed, base.includeAttackSpeed),
       targetElite: bool(parsed.targetElite, base.targetElite),
+      eliteDamage: finite(parsed.eliteDamage, base.eliteDamage),
     };
   } catch {
     return null;

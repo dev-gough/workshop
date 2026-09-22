@@ -89,7 +89,6 @@ const ITEM_GROUPS: { bracket: BracketId; title: string }[] = [
   { bracket: 'main', title: 'Damage % items' },
   { bracket: 'flat', title: 'Base damage items' },
   { bracket: 'speedboi', title: 'Speed Boi' },
-  { bracket: 'elite', title: 'Elite items' },
 ];
 
 export function ItemRoster({ build, set }: { build: Build; set: Setter }) {
@@ -207,6 +206,16 @@ export function StatControls({ build, set }: { build: Build; set: Setter }) {
 
         <div className="my-1 border-t border-border/70" />
 
+        <div className="rounded-lg border border-border bg-muted/20 p-2.5">
+          <div className="mb-1.5 flex items-center gap-2">
+            <span className="text-base leading-none">💥</span>
+            <span className="flex-1 text-xs font-semibold text-foreground">Elite damage</span>
+            <span className="text-[10px] text-muted-foreground">when the target is an elite</span>
+          </div>
+          <LabeledSlider label="Bonus" value={build.eliteDamage} min={0} max={300} step={5} unit="%"
+            accent={BRACKETS.elite.color} onChange={v => set({ eliteDamage: v })} />
+        </div>
+
         <StatRow
           on={build.megacritOn} onToggle={v => set({ megacritOn: v })}
           emoji="🍴" name="Megacrit (Giant Fork)" color={BRACKETS.megacrit.color}
@@ -225,7 +234,7 @@ export function StatControls({ build, set }: { build: Build; set: Setter }) {
 
         <StatRow
           on={build.poisonOn} onToggle={v => set({ poisonOn: v })}
-          emoji="☠️" name="Amog Poison" color={BRACKETS.poison.color}
+          emoji="☠️" name="Poison damage" color={BRACKETS.poison.color}
         >
           <LabeledSlider label="Bonus" value={build.poison} min={0} max={300} step={5} unit="%"
             accent={BRACKETS.poison.color} onChange={v => set({ poison: v })} />
@@ -233,7 +242,7 @@ export function StatControls({ build, set }: { build: Build; set: Setter }) {
 
         <StatRow
           on={build.bigBonkOn} onToggle={v => set({ bigBonkOn: v })}
-          emoji="🔨" name="Big Bonk" color={BRACKETS.bigbonk.color}
+          emoji="🔨" name="Bonker" color={BRACKETS.bigbonk.color}
         >
           <LabeledSlider label="Proc %" value={build.bigBonkChance} min={0} max={20} step={0.5} unit="%"
             accent={BRACKETS.bigbonk.color} onChange={v => set({ bigBonkChance: v })} />

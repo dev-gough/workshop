@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Share2 } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
@@ -9,14 +9,46 @@ import { type Build, defaultBuild, analyze } from './_lib/model';
 import { decodeBuild, encodeBuild } from './_lib/share';
 import { ImpactHero, DamageBar, ContributionList, BracketLadder } from './_components/viz';
 import { CharacterPicker, ItemRoster, StatControls, Switch } from './_components/controls';
+import { applyLiveSnapshot, type LiveSnapshot } from './_lib/live';
+import { useMegabonkLive, type LiveStatus } from './_lib/use-live';
+
+function LiveLink({ status, httpsPage }: { status: LiveStatus; httpsPage: boolean }) {
+  const label = status === 'live' ? 'Game linked' : status === 'connecting' ? 'Looking for the game' : 'Game offline';
+  const dot = status === 'live' ? 'bg-primary' : status === 'connecting' ? 'bg-primary/50' : 'bg-border';
+  return (
+    <div className="mt-0.5">
+      <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+        <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+        {label}
+      </p>
+      {httpsPage && status !== 'live' && (
+        <p className="mt-1 text-[10px] leading-snug text-muted-foreground">
+          This page is https, so the browser blocks the local game socket. Open the workshop over http, or run it on this PC.
+        </p>
+      )}
+    </div>
+  );
+}
 
 export default function MegabonkPage() {
   useHeaderConfig({ scopeClass: 'megabonk-theme' });
 
   const [build, setBuild] = useState<Build>(defaultBuild);
   const [shared, setShared] = useState(false);
+  const [followGame, setFollowGame] = useState(true);
+  const [liveDamage, setLiveDamage] = useState<number | null>(null);
+  const followRef = useRef(true);
+  followRef.current = followGame;
   const set = (patch: Partial<Build>) => setBuild(b => ({ ...b, ...patch }));
   const a = useMemo(() => analyze(build), [build]);
+
+  const onSnapshot = useCallback((snap: LiveSnapshot) => {
+    const damage = snap.inRun ? snap.stats?.damageMultiplier : undefined;
+    setLiveDamage(typeof damage === 'number' && Number.isFinite(damage) ? damage : null);
+    if (!followRef.current || !snap.inRun) return;
+    setBuild(current => applyLiveSnapshot(current, snap));
+  }, []);
+  const live = useMegabonkLive(onSnapshot);
 
   useEffect(() => {
     const encoded = new URLSearchParams(window.location.search).get('build');
@@ -68,6 +100,11 @@ export default function MegabonkPage() {
                   <span className="text-muted-foreground">Target is an Elite</span>
                   <Switch on={build.targetElite} onChange={v => set({ targetElite: v })} label="Target is an Elite" />
                 </label>
+                <label className="flex items-center justify-between gap-4">
+                  <span className="text-muted-foreground">Follow the game</span>
+                  <Switch on={followGame} onChange={setFollowGame} label="Follow the game" />
+                </label>
+                <LiveLink status={live.status} httpsPage={live.httpsPage} />
                 <div className="mt-0.5 grid grid-cols-2 gap-1.5">
                   <button
                     onClick={() => void share()}
@@ -93,7 +130,7 @@ export default function MegabonkPage() {
             {/* Left — the visualization */}
             <FadeIn delay={0.05}>
               <div className="space-y-4">
-                <ImpactHero a={a} />
+                <ImpactHero a={a} liveDamage={liveDamage} />
                 <DamageBar a={a} />
                 <BracketLadder a={a} />
                 <ContributionList a={a} />
@@ -107,9 +144,12 @@ export default function MegabonkPage() {
                 <ItemRoster build={build} set={set} />
                 <StatControls build={build} set={set} />
                 <p className="px-1 text-[10px] leading-relaxed text-muted-foreground">
-                  Values model the community-documented 8-bracket system
-                  (megabonkinfo.org, amiibodoctor.com, megabonk.wiki). They&apos;re a
-                  teaching model, not datamined constants — tune the sliders to your run.
+                  Item percents and the crit curve are from the IL2CPP item constructors
+                  and the verified crit function (lukeod/megabonk_research, 2026-01-28).
+                  Character passives and Demonic Soul&apos;s per-kill number were not in
+                  that dump. Conditional items are counted as if their condition is true
+                  right now. With the bridge mod running, Follow the game copies the
+                  live stats in at 5 Hz.
                 </p>
               </div>
             </FadeIn>

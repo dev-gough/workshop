@@ -40,7 +40,7 @@ export function Ring({ percent, color, emoji, size = 46 }: {
 }
 
 // ── The hero: the molten impact multiplier. ───────────────────────────────
-export function ImpactHero({ a }: { a: Analysis }) {
+export function ImpactHero({ a, liveDamage }: { a: Analysis; liveDamage?: number | null }) {
   return (
     <div className="mb-plate relative overflow-hidden px-5 py-5 sm:px-7 sm:py-6">
       {/* faint radial heat behind the number */}
@@ -63,6 +63,7 @@ export function ImpactHero({ a }: { a: Analysis }) {
           value={a.mode === 'dps' ? fmtMult(a.total) : '—'} muted={a.mode !== 'dps'} />
         <Stat label="Active brackets" value={String(a.brackets.filter(b => b.factor > 1).length)} />
         <Stat label="Contributors" value={String(a.leaves.length)} />
+        {liveDamage != null && <Stat label="In-game damage" value={fmtMult(liveDamage)} />}
       </div>
     </div>
   );

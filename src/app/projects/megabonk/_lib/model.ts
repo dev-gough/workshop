@@ -7,9 +7,11 @@
 // fresh multiplier. This file encodes that model and a fair way to attribute a
 // share of the final multiplier back to each contributing thing.
 //
-// Numbers here are a community-researched *model*, not datamined constants —
-// every value is editable in the UI. Sources: megabonkinfo.org (damage
-// brackets), amiibodoctor.com (stat calcs), megabonk.wiki (stats).
+// Item constants and the crit curve come from lukeod/megabonk_research
+// (IL2CPP constructors + IDA, validated 2026-01-28). A few character passives
+// and the per-kill Demonic Soul coefficient were not in that dump — those
+// stay editable and are marked unverified. Conditional items (airborne,
+// evade, time-slow) are modeled as if the condition is currently true.
 // ─────────────────────────────────────────────────────────────────────────
 
 export type BracketId =
@@ -161,28 +163,25 @@ export type ItemDef = {
 };
 
 export const ITEMS: ItemDef[] = [
-  // Main Damage % bracket
-  { id: 'beer', name: 'Beer', emoji: '🍺', bracket: 'main', value: 20, stackable: true, maxStacks: 5, note: '+20% damage, −5% max HP.' },
-  { id: 'beefy-ring', name: 'Beefy Ring', emoji: '💍', bracket: 'main', value: 20, stackable: true, maxStacks: 5, note: '+20% damage per 100 max HP.' },
-  { id: 'gamer-goggles', name: 'Gamer Goggles', emoji: '🥽', bracket: 'main', value: 15, stackable: true, maxStacks: 5, note: 'Flat Damage % boost.' },
-  { id: 'red-card', name: 'Red Credit Card', emoji: '💳', bracket: 'main', value: 25, stackable: true, maxStacks: 3, note: 'Big Damage % at a cost.' },
-  { id: 'phantom-shroud', name: 'Phantom Shroud', emoji: '👻', bracket: 'main', value: 15, stackable: true, maxStacks: 5, note: 'Damage % while cloaked.' },
-  { id: 'demonic-soul', name: 'Demonic Soul', emoji: '😈', bracket: 'main', value: 100, note: '+0.1% per kill, up to +100%.' },
-  { id: 'joes-dagger', name: "Joe's Dagger", emoji: '🗡️', bracket: 'main', value: 20, note: '+1% Damage per execute.' },
-  { id: 'scarf', name: 'Scarf', emoji: '🧣', bracket: 'main', value: 33, note: '+33% damage while airborne.' },
-  { id: 'eagle-claw', name: 'Eagle Claw', emoji: '🦅', bracket: 'main', value: 66, note: '+66% damage vs airborne enemies.' },
-  { id: 'tactical-glasses', name: 'Tactical Glasses', emoji: '🕶️', bracket: 'main', value: 20, stackable: true, maxStacks: 5, note: '+20% vs enemies above 90% HP.' },
+  // EStat 12 (DamageMultiplier), stored as a fraction. 0.2 = +20%.
+  { id: 'beer', name: 'Beer', emoji: '🍺', bracket: 'main', value: 20, stackable: true, maxStacks: 5, note: '+20% damage per stack, −5% max HP per stack.' },
+  { id: 'beefy-ring', name: 'Beefy Ring', emoji: '💍', bracket: 'main', value: 20, stackable: true, maxStacks: 5, note: '+0.2% damage per current HP per stack (+10 max HP). 20 assumes 100 HP.' },
+  { id: 'gamer-goggles', name: 'Gamer Goggles', emoji: '🥽', bracket: 'main', value: 50, stackable: true, maxStacks: 5, note: 'Only under half HP, up to +100% per stack at 1 HP. 50 is the bonus at 25% HP.' },
+  { id: 'red-card', name: 'Red Credit Card', emoji: '💳', bracket: 'main', value: 2.5, stackable: true, maxStacks: 40, note: '+2.5% per chest per copy. Count stacks as chests × copies (10 chests on 1 copy = ×10).' },
+  { id: 'phantom-shroud', name: 'Phantom Shroud', emoji: '👻', bracket: 'main', value: 100, note: 'The hit after an evade deals ×2. Extra copies add ×0.5 each; this chip is the one-copy case.' },
+  { id: 'demonic-soul', name: 'Demonic Soul', emoji: '😈', bracket: 'main', value: 100, note: 'Kills add damage. The per-kill coefficient was not in the constructor dump, so this chip is the +100% cap people report.' },
+  { id: 'joes-dagger', name: "Joe's Dagger", emoji: '🗡️', bracket: 'main', value: 1, stackable: true, maxStacks: 40, note: '+1% per execution, per copy. Each stack is one proc. 1% execute chance, 0.3s between rolls.' },
+  { id: 'scarf', name: 'Scarf', emoji: '🧣', bracket: 'main', value: 50, stackable: true, maxStacks: 5, note: '+50% damage per stack while you are airborne. Zero on the ground.' },
+  { id: 'eagle-claw', name: 'Eagle Claw', emoji: '🦅', bracket: 'main', value: 66, stackable: true, maxStacks: 5, note: '+66% per stack vs airborne enemies, added on the hit itself.' },
+  { id: 'tactical-glasses', name: 'Tactical Glasses', emoji: '🕶️', bracket: 'main', value: 20, stackable: true, maxStacks: 5, note: '+20% per stack vs enemies at 90% HP or higher, added on the hit.' },
 
-  // Base Damage % (flat) bracket
-  { id: 'gym-sauce', name: 'Gym Sauce', emoji: '🧴', bracket: 'flat', value: 10, stackable: true, maxStacks: 5, note: 'Flat +10% base damage.' },
-  { id: 'brass-knuckles', name: 'Brass Knuckles', emoji: '🥊', bracket: 'flat', value: 15, stackable: true, maxStacks: 5, note: 'Base damage to nearby enemies.' },
-  { id: 'idle-juice', name: 'Idle Juice', emoji: '🧃', bracket: 'flat', value: 12, stackable: true, maxStacks: 5, note: 'Base damage while standing still.' },
+  // Flat / base component of the attack modifier (EStatModifyType.Flat).
+  { id: 'gym-sauce', name: 'Gym Sauce', emoji: '🧴', bracket: 'flat', value: 10, stackable: true, maxStacks: 5, note: '+10% damage per stack on the damage stat. No health penalty.' },
+  { id: 'brass-knuckles', name: 'Brass Knuckles', emoji: '🥊', bracket: 'flat', value: 25, stackable: true, maxStacks: 5, note: '+0.25 on the attack\'s base component per stack, only while the enemy is in melee range.' },
+  { id: 'idle-juice', name: 'Idle Juice', emoji: '🧃', bracket: 'flat', value: 100, stackable: true, maxStacks: 5, note: 'Standing still fills +4% damage per second, capped at +100% per stack.' },
 
-  // Speed Boi (own bracket)
-  { id: 'speed-boi', name: 'Speed Boi', emoji: '👟', bracket: 'speedboi', value: 30, stackable: true, maxStacks: 5, note: 'Damage in an isolated bracket.' },
-
-  // Elite bracket
-  { id: 'boss-buster', name: 'Boss Buster', emoji: '💥', bracket: 'elite', value: 15, stackable: true, maxStacks: 5, note: '+15% vs Elites & Bosses.' },
+  // Multiplies the hit directly (dc.damage *= 2) during its time-slow.
+  { id: 'speed-boi', name: 'Speed Boi', emoji: '👟', bracket: 'speedboi', value: 100, note: '×2 damage during the time-slow. Triggers below 50% HP, then a 10s cooldown. The ×2 does not grow with stacks.' },
 ];
 
 /** Pre-group once rather than allocating four filtered arrays per render. */
@@ -218,6 +217,8 @@ export type Build = {
   bigBonkOn: boolean;
   includeAttackSpeed: boolean; // DPS view vs per-hit view
   targetElite: boolean;
+  /** Bonus above ×1 from EStat EliteDamageMultiplier, e.g. 15 = ×1.15. Applied only when targetElite. */
+  eliteDamage: number;
 };
 
 export function defaultBuild(): Build {
@@ -226,7 +227,6 @@ export function defaultBuild(): Build {
   // A friendly starting loadout so the page shows something alive.
   items['beer'] = { on: true, value: 20, stacks: 2 };
   items['gym-sauce'] = { on: true, value: 10, stacks: 1 };
-  items['boss-buster'] = { on: true, value: 15, stacks: 1 };
   return {
     characterId: 'robinette',
     items,
@@ -237,7 +237,7 @@ export function defaultBuild(): Build {
     attackSpeedOn: true,
     tomeDamage: 16,
     tomeOn: true,
-    megacrit: 0,
+    megacrit: 42,
     megacritOn: false,
     corrupted: 0,
     corruptedOn: false,
@@ -248,19 +248,32 @@ export function defaultBuild(): Build {
     bigBonkOn: false,
     includeAttackSpeed: true,
     targetElite: true,
+    eliteDamage: 0,
   };
 }
 
-// ── Crit expected multiplier (with overcrit past 100%) ────────────────────
+// ── Crit expected multiplier ──────────────────────────────────────────────
+// DamageUtility.GetCritDamageMultiplier, verified in IDA:
+//   0 crits → ×1 (not a crit)
+//   1 crit  → ×2
+//   n ≥ 2   → (n × 0.5)² + (n + 1)    so 2 → ×4, 3 → ×6.25, 4 → ×9
+// The in-game crit-damage stat is displayed as raw × 2 (default raw 1 → ×2).
+// The curve above is that default. Other displayed values scale the crit
+// multiplier in proportion, and a non-crit stays ×1.
+
+function critLevelMultiplier(level: number, displayedCrit: number): number {
+  if (level <= 0) return 1;
+  const verified = level === 1 ? 2 : (level * 0.5) ** 2 + (level + 1);
+  return verified * (Math.max(0, displayedCrit) / 2);
+}
 
 export function critFactor(chancePct: number, dmgMult: number): number {
   const c = Math.max(0, chancePct) / 100;
-  const d = Math.max(1, dmgMult);
   const whole = Math.floor(c);
   const frac = c - whole;
-  // Each guaranteed crit level multiplies by d; the fractional level lands
-  // with probability `frac`, contributing (1 + frac·(d−1)) on average.
-  return Math.pow(d, whole) * (1 + frac * (d - 1));
+  const low = critLevelMultiplier(whole, dmgMult);
+  const high = critLevelMultiplier(whole + 1, dmgMult);
+  return (1 - frac) * low + frac * high;
 }
 
 // ── The core: fold the build into brackets, then attribute a share ────────
@@ -375,20 +388,22 @@ export function analyze(build: Build): Analysis {
 
   const cf = critFactor(build.critChance, build.critDamage);
   addSingle(build.critOn, 'crit', cf, 'Crit', '🎯',
-    `${build.critChance}% chance · ×${build.critDamage} crit dmg → ×${cf.toFixed(2)} average.`);
+    `${build.critChance}% chance · ×${build.critDamage} crit damage → ×${cf.toFixed(2)} average. 100% is ×2, 200% is ×4, 300% is ×6.25, at the default ×2.`);
   addSingle(build.tomeOn, 'tome', 1 + build.tomeDamage / 100, 'Damage Tome', '📕',
     `+${build.tomeDamage}% tome damage (own multiplier).`);
   addSingle(build.megacritOn, 'megacrit', 1 + build.megacrit / 100, 'Megacrit', '🍴',
-    `+${build.megacrit}% megacrit bracket.`);
+    `Giant Fork: +15% crit chance per stack, and 14% of those crits deal ×4 (+0.15× per extra stack). +${build.megacrit}% is the average you are applying to every hit.`);
   addSingle(build.corruptedOn, 'corrupted', 1 + build.corrupted / 100, 'Corrupted Sword', '⚔️',
     `+${build.corrupted}% in the sword's own bracket.`);
-  addSingle(build.poisonOn, 'poison', 1 + build.poison / 100, 'Amog Poison', '☠️',
-    `+${build.poison}% poison-only bracket.`);
+  addSingle(build.poisonOn, 'poison', 1 + build.poison / 100, 'Poison damage', '☠️',
+    `EStat PoisonDamageMultiplier. +${build.poison}% on poison damage only.`);
   if (build.bigBonkOn) {
     const avg = 1 + (build.bigBonkChance / 100) * build.bigBonkMult;
-    addSingle(true, 'bigbonk', avg, 'Big Bonk', '🔨',
-      `${build.bigBonkChance}% chance of ×${build.bigBonkMult} → ×${avg.toFixed(2)} average.`);
+    addSingle(true, 'bigbonk', avg, 'Bonker', '🔨',
+      `One stack is 2% for an extra ×20 hit. Each extra stack adds 1.5% chance and ×10. ${build.bigBonkChance}% × ${build.bigBonkMult} → ×${avg.toFixed(2)} average.`);
   }
+  addSingle(build.targetElite, 'elite', 1 + build.eliteDamage / 100, 'Elite damage', '💥',
+    `EStat EliteDamageMultiplier. +${build.eliteDamage}% above ×1, only while the target is an elite.`);
   addSingle(build.attackSpeedOn && build.includeAttackSpeed, 'attackspeed',
     1 + build.attackSpeed / 100, 'Attack Speed', '⚡',
     `+${build.attackSpeed}% attack speed (DPS only).`, true);
