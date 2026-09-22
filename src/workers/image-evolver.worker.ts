@@ -1,15 +1,26 @@
 /// <reference lib="webworker" />
 
+import {
+  IMAGE_SIZE,
+  evaluationSize,
+  normalizedRgbError,
+  resizeRgbaNearest,
+  type Candidate,
+  type EvolutionQuality,
+  type Polygon,
+} from '../app/projects/image-evolver/evolution';
+
 // ── Image Evolver engine — Web Worker edition ─────────────────────────────
 //
-// This is a self-contained copy of the genetic-algorithm engine that lives in
-// `src/components/ImageEvolver.tsx`. It runs off the main thread and uses an
+// This mirrors the canvas-specific genetic-algorithm engine in
+// `src/components/ImageEvolver.tsx`, sharing fitness helpers and constants. It
+// runs off the main thread and uses an
 // OffscreenCanvas for the fitness readbacks (`getImageData`), which is the
 // speed cap on the main thread. The component keeps its own copy of the engine
 // as a fallback for environments without OffscreenCanvas support.
 //
 // Protocol (main ⇄ worker):
-//   → { type: 'start', targetData, width, height, popSize, mutationRate, maxPolygons, seedPolygons? }
+//   → { type: 'start', targetData, quality, popSize, mutationRate, maxPolygons, seedPolygons? }
 //   → { type: 'run' }                       resume stepping
 //   → { type: 'pause' }                     stop stepping (engine kept alive)
 //   → { type: 'reset' }                     rebuild population from current target
@@ -20,18 +31,6 @@
 // `fitness` is the raw engine fitness (0 = perfect, 1 = worst); the main thread
 // converts it for display. `bestPolygons` is a plain array the main thread
 // renders into its persistent best-canvas.
-
-interface Polygon {
-  vertices: [number, number][];
-  r: number; g: number; b: number; a: number;
-}
-
-interface Candidate {
-  polygons: Polygon[];
-  fitness: number;
-}
-
-const WORK_SIZE = 100;
 
 function randomPolygon(): Polygon {
   const cx = Math.random(), cy = Math.random();
@@ -88,15 +87,7 @@ function computeFitness(
 ): number {
   renderCandidate(ctx, candidate, w, h);
   const candidateData = ctx.getImageData(0, 0, w, h).data;
-  let diff = 0;
-  for (let i = 0; i < candidateData.length; i += 4) {
-    const dr = candidateData[i] - targetData[i];
-    const dg = candidateData[i + 1] - targetData[i + 1];
-    const db = candidateData[i + 2] - targetData[i + 2];
-    diff += dr * dr + dg * dg + db * db;
-  }
-  const maxDiff = w * h * 3 * 255 * 255;
-  return diff / maxDiff;
+  return normalizedRgbError(candidateData, targetData);
 }
 
 function gaussRand(): number {
@@ -114,26 +105,35 @@ class ImageEvolverEngine {
   population: Candidate[];
   best: Candidate;
   generation: number;
+  fullTargetData: Uint8ClampedArray;
   targetData: Uint8ClampedArray;
   offscreen: OffscreenCanvasRenderingContext2D;
   popSize: number;
   mutationRate: number;
   maxPolygons: number;
+  evaluationSize: number;
+  quality: EvolutionQuality;
 
   constructor(
     targetData: Uint8ClampedArray,
     popSize: number,
     mutationRate: number,
     maxPolygons: number,
+    quality: EvolutionQuality,
     seedPolygons?: Polygon[],
   ) {
-    this.targetData = targetData;
+    this.fullTargetData = targetData;
+    this.quality = quality;
+    this.evaluationSize = evaluationSize(quality);
+    this.targetData = resizeRgbaNearest(
+      targetData, IMAGE_SIZE, IMAGE_SIZE, this.evaluationSize, this.evaluationSize,
+    );
     this.popSize = popSize;
     this.mutationRate = mutationRate;
     this.maxPolygons = maxPolygons;
     this.generation = 0;
 
-    const offCanvas = new OffscreenCanvas(WORK_SIZE, WORK_SIZE);
+    const offCanvas = new OffscreenCanvas(this.evaluationSize, this.evaluationSize);
     this.offscreen = offCanvas.getContext('2d', { willReadFrequently: true })!;
 
     this.population = [];
@@ -141,7 +141,9 @@ class ImageEvolverEngine {
       const c: Candidate = { polygons: [], fitness: 1 };
       const nPolys = Math.floor(Math.random() * 3) + 1;
       for (let j = 0; j < nPolys; j++) c.polygons.push(randomPolygon());
-      c.fitness = computeFitness(this.offscreen, c, this.targetData, WORK_SIZE, WORK_SIZE);
+      c.fitness = computeFitness(
+        this.offscreen, c, this.targetData, this.evaluationSize, this.evaluationSize,
+      );
       this.population.push(c);
     }
 
@@ -152,7 +154,9 @@ class ImageEvolverEngine {
         vertices: p.vertices.map(v => [v[0], v[1]] as [number, number]),
         r: p.r, g: p.g, b: p.b, a: p.a,
       })), fitness: 1 };
-      seeded.fitness = computeFitness(this.offscreen, seeded, this.targetData, WORK_SIZE, WORK_SIZE);
+      seeded.fitness = computeFitness(
+        this.offscreen, seeded, this.targetData, this.evaluationSize, this.evaluationSize,
+      );
       this.population[0] = seeded;
     }
 
@@ -243,7 +247,9 @@ class ImageEvolverEngine {
       const b = this.tournamentSelect();
       const child = this.crossover(a, b);
       this.mutate(child);
-      child.fitness = computeFitness(this.offscreen, child, this.targetData, WORK_SIZE, WORK_SIZE);
+      child.fitness = computeFitness(
+        this.offscreen, child, this.targetData, this.evaluationSize, this.evaluationSize,
+      );
       next.push(child);
     }
 
@@ -259,7 +265,7 @@ class ImageEvolverEngine {
 // ── Message plumbing ──────────────────────────────────────────────────────
 
 type InMessage =
-  | { type: 'start'; targetData: Uint8ClampedArray; width: number; height: number; popSize: number; mutationRate: number; maxPolygons: number; speed: number; seedPolygons?: Polygon[] }
+  | { type: 'start'; targetData: Uint8ClampedArray; popSize: number; mutationRate: number; maxPolygons: number; quality: EvolutionQuality; speed: number; seedPolygons?: Polygon[] }
   | { type: 'run' }
   | { type: 'pause' }
   | { type: 'reset' }
@@ -314,7 +320,8 @@ self.onmessage = (e: MessageEvent<InMessage>) => {
   switch (msg.type) {
     case 'start': {
       engine = new ImageEvolverEngine(
-        msg.targetData, msg.popSize, msg.mutationRate, msg.maxPolygons, msg.seedPolygons,
+        msg.targetData, msg.popSize, msg.mutationRate, msg.maxPolygons, msg.quality,
+        msg.seedPolygons,
       );
       speed = msg.speed;
       running = false;
@@ -340,7 +347,11 @@ self.onmessage = (e: MessageEvent<InMessage>) => {
       running = false;
       if (timer !== null) { clearTimeout(timer); timer = null; }
       engine = new ImageEvolverEngine(
-        engine.targetData, engine.popSize, engine.mutationRate, engine.maxPolygons,
+        engine.fullTargetData,
+        engine.popSize,
+        engine.mutationRate,
+        engine.maxPolygons,
+        engine.quality,
       );
       postProgress(true);
       break;

@@ -4,23 +4,18 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useTheme } from './ThemeProvider';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
-import {
-  Play, Pause, RotateCcw, Upload, Gauge, Image as ImageIcon,
-  Triangle,
-} from 'lucide-react';
+import { Play, Pause, RotateCcw, Upload, Gauge, Triangle } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
-
-// ── Types ────────────────────────────────────────────────────────────────
-
-interface Polygon {
-  vertices: [number, number][];
-  r: number; g: number; b: number; a: number;
-}
-
-interface Candidate {
-  polygons: Polygon[];
-  fitness: number;
-}
+import {
+  IMAGE_SIZE,
+  QUALITY_OPTIONS,
+  evaluationSize,
+  normalizedRgbError,
+  resizeRgbaNearest,
+  type Candidate,
+  type EvolutionQuality,
+  type Polygon,
+} from '@/app/projects/image-evolver/evolution';
 
 // ── Preset images (drawn procedurally) ───────────────────────────────────
 
@@ -87,8 +82,6 @@ const PRESETS = [
 
 // ── Engine ────────────────────────────────────────────────────────────────
 
-const WORK_SIZE = 100;
-
 function randomPolygon(): Polygon {
   const cx = Math.random(), cy = Math.random();
   const verts: [number, number][] = [];
@@ -140,16 +133,7 @@ function computeFitness(
 ): number {
   renderCandidate(ctx, candidate, w, h);
   const candidateData = ctx.getImageData(0, 0, w, h).data;
-  let diff = 0;
-  for (let i = 0; i < candidateData.length; i += 4) {
-    const dr = candidateData[i] - targetData[i];
-    const dg = candidateData[i + 1] - targetData[i + 1];
-    const db = candidateData[i + 2] - targetData[i + 2];
-    diff += dr * dr + dg * dg + db * db;
-  }
-  // Normalize: 0 = perfect, 1 = worst
-  const maxDiff = w * h * 3 * 255 * 255;
-  return diff / maxDiff;
+  return normalizedRgbError(candidateData, targetData);
 }
 
 function gaussRand(): number {
@@ -173,16 +157,28 @@ class ImageEvolverEngine {
   popSize: number;
   mutationRate: number;
   maxPolygons: number;
+  evaluationSize: number;
 
-  constructor(targetData: Uint8ClampedArray, popSize: number, mutationRate: number, maxPolygons: number) {
-    this.targetData = targetData;
+  constructor(
+    targetData: Uint8ClampedArray,
+    popSize: number,
+    mutationRate: number,
+    maxPolygons: number,
+    quality: EvolutionQuality,
+    seedPolygons?: Polygon[],
+  ) {
+    this.evaluationSize = evaluationSize(quality);
+    this.targetData = resizeRgbaNearest(
+      targetData, IMAGE_SIZE, IMAGE_SIZE, this.evaluationSize, this.evaluationSize,
+    );
     this.popSize = popSize;
     this.mutationRate = mutationRate;
     this.maxPolygons = maxPolygons;
     this.generation = 0;
 
     const offCanvas = document.createElement('canvas');
-    offCanvas.width = WORK_SIZE; offCanvas.height = WORK_SIZE;
+    offCanvas.width = this.evaluationSize;
+    offCanvas.height = this.evaluationSize;
     this.offscreen = offCanvas.getContext('2d', { willReadFrequently: true })!;
 
     this.population = [];
@@ -190,8 +186,21 @@ class ImageEvolverEngine {
       const c: Candidate = { polygons: [], fitness: 1 };
       const nPolys = Math.floor(Math.random() * 3) + 1;
       for (let j = 0; j < nPolys; j++) c.polygons.push(randomPolygon());
-      c.fitness = computeFitness(this.offscreen, c, this.targetData, WORK_SIZE, WORK_SIZE);
+      c.fitness = computeFitness(this.offscreen, c, this.targetData, this.evaluationSize, this.evaluationSize);
       this.population.push(c);
+    }
+    if (seedPolygons?.length) {
+      const seeded: Candidate = {
+        polygons: seedPolygons.map(p => ({
+          ...p,
+          vertices: p.vertices.map(v => [...v] as [number, number]),
+        })),
+        fitness: 1,
+      };
+      seeded.fitness = computeFitness(
+        this.offscreen, seeded, this.targetData, this.evaluationSize, this.evaluationSize,
+      );
+      this.population[0] = seeded;
     }
     this.population.sort((a, b) => a.fitness - b.fitness);
     this.best = cloneCandidate(this.population[0]);
@@ -287,7 +296,9 @@ class ImageEvolverEngine {
       const b = this.tournamentSelect();
       const child = this.crossover(a, b);
       this.mutate(child);
-      child.fitness = computeFitness(this.offscreen, child, this.targetData, WORK_SIZE, WORK_SIZE);
+      child.fitness = computeFitness(
+        this.offscreen, child, this.targetData, this.evaluationSize, this.evaluationSize,
+      );
       next.push(child);
     }
 
@@ -364,9 +375,10 @@ const ImageEvolver = () => {
   const [fitness, setFitness] = useState(0);
   const [polyCount, setPolyCount] = useState(0);
   const [speed, setSpeed] = useState(10);
-  const [popSize, setPopSize] = useState(50);
+  const [popSize] = useState(50);
   const [mutationRate, setMutationRate] = useState(0.08);
   const [maxPolygons, setMaxPolygons] = useState(75);
+  const [quality, setQuality] = useState<EvolutionQuality>('balanced');
   const [targetLoaded, setTargetLoaded] = useState(false);
   const [presetName, setPresetName] = useState('sunset');
 
@@ -409,14 +421,14 @@ const ImageEvolver = () => {
       workerRef.current = null;
       useWorkerRef.current = false;
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // Load target image and initialize engine (worker or main-thread).
   const initWithTarget = useCallback((targetCanvas: HTMLCanvasElement, persistKey: string) => {
     targetCanvasRef.current = targetCanvas;
     persistKeyRef.current = persistKey;
     const ctx = targetCanvas.getContext('2d', { willReadFrequently: true })!;
-    const targetData = ctx.getImageData(0, 0, WORK_SIZE, WORK_SIZE).data;
+    const targetData = ctx.getImageData(0, 0, IMAGE_SIZE, IMAGE_SIZE).data;
     const seed = loadPersistedPolygons(persistKey);
     bestPolygonsRef.current = seed ?? [];
 
@@ -425,16 +437,17 @@ const ImageEvolver = () => {
       workerRef.current.postMessage({
         type: 'start',
         targetData,
-        width: WORK_SIZE,
-        height: WORK_SIZE,
         popSize,
         mutationRate,
         maxPolygons,
+        quality,
         speed: speedRef.current,
         seedPolygons: seed,
       });
     } else {
-      engineRef.current = new ImageEvolverEngine(targetData, popSize, mutationRate, maxPolygons);
+      engineRef.current = new ImageEvolverEngine(
+        targetData, popSize, mutationRate, maxPolygons, quality, seed,
+      );
       bestPolygonsRef.current = engineRef.current.best.polygons;
     }
 
@@ -442,7 +455,7 @@ const ImageEvolver = () => {
     setFitness(0);
     setPolyCount(bestPolygonsRef.current.length);
     setTargetLoaded(true);
-  }, [popSize, mutationRate, maxPolygons]);
+  }, [popSize, mutationRate, maxPolygons, quality]);
 
   // Load preset on mount. Defer to a microtask so the worker-init effect (which
   // runs after this one on mount) has a chance to set up first.
@@ -471,9 +484,9 @@ const ImageEvolver = () => {
     const url = URL.createObjectURL(file);
     img.onload = () => {
       const c = document.createElement('canvas');
-      c.width = WORK_SIZE; c.height = WORK_SIZE;
+      c.width = IMAGE_SIZE; c.height = IMAGE_SIZE;
       const ctx = c.getContext('2d')!;
-      ctx.drawImage(img, 0, 0, WORK_SIZE, WORK_SIZE);
+      ctx.drawImage(img, 0, 0, IMAGE_SIZE, IMAGE_SIZE);
       setPresetName('');
       initWithTarget(c, ''); // uploads are transient — don't persist
       URL.revokeObjectURL(url);
@@ -495,14 +508,51 @@ const ImageEvolver = () => {
       workerRef.current.postMessage({ type: 'reset' });
     } else {
       const ctx = targetCanvasRef.current.getContext('2d', { willReadFrequently: true })!;
-      const targetData = ctx.getImageData(0, 0, WORK_SIZE, WORK_SIZE).data;
-      engineRef.current = new ImageEvolverEngine(targetData, popSize, mutationRate, maxPolygons);
+      const targetData = ctx.getImageData(0, 0, IMAGE_SIZE, IMAGE_SIZE).data;
+      engineRef.current = new ImageEvolverEngine(
+        targetData, popSize, mutationRate, maxPolygons, quality,
+      );
       bestPolygonsRef.current = engineRef.current.best.polygons;
     }
     setGeneration(0);
     setFitness(0);
     setPolyCount(0);
-  }, [popSize, mutationRate, maxPolygons]);
+  }, [popSize, mutationRate, maxPolygons, quality]);
+
+  const changeQuality = useCallback((nextQuality: EvolutionQuality) => {
+    if (nextQuality === quality || !targetCanvasRef.current) return;
+    setRunning(false);
+    setQuality(nextQuality);
+    const target = targetCanvasRef.current;
+    const key = persistKeyRef.current;
+    queueMicrotask(() => {
+      const ctx = target.getContext('2d', { willReadFrequently: true })!;
+      const targetData = ctx.getImageData(0, 0, IMAGE_SIZE, IMAGE_SIZE).data;
+      const seed = bestPolygonsRef.current;
+      if (useWorkerRef.current && workerRef.current) {
+        workerRef.current.postMessage({
+          type: 'start',
+          targetData,
+          popSize,
+          mutationRate,
+          maxPolygons,
+          quality: nextQuality,
+          speed: speedRef.current,
+          seedPolygons: seed,
+        });
+      } else {
+        engineRef.current = new ImageEvolverEngine(
+          targetData, popSize, mutationRate, maxPolygons, nextQuality, seed,
+        );
+        bestPolygonsRef.current = engineRef.current.best.polygons;
+        setFitness(Math.round((1 - engineRef.current.best.fitness) * 10000) / 100);
+        setPolyCount(engineRef.current.best.polygons.length);
+        redrawRef.current();
+      }
+      persistKeyRef.current = key;
+      setGeneration(0);
+    });
+  }, [quality, popSize, mutationRate, maxPolygons]);
 
   // Keep the live speed ref in sync for worker start messages / main-thread loop.
   useEffect(() => { speedRef.current = speed; }, [speed]);
@@ -567,13 +617,15 @@ const ImageEvolver = () => {
       offCanvas = document.createElement('canvas');
       bestCanvasRef.current = offCanvas;
     }
-    if (offCanvas.width !== WORK_SIZE || offCanvas.height !== WORK_SIZE) {
-      offCanvas.width = WORK_SIZE; offCanvas.height = WORK_SIZE;
+    if (offCanvas.width !== IMAGE_SIZE || offCanvas.height !== IMAGE_SIZE) {
+      offCanvas.width = IMAGE_SIZE; offCanvas.height = IMAGE_SIZE;
     }
     const offCtx = offCanvas.getContext('2d')!;
     // Preview always renders from the latest best polygons — supplied by the
     // worker's progress messages, or the main-thread engine in fallback mode.
-    renderCandidate(offCtx, { polygons: bestPolygonsRef.current, fitness: 0 }, WORK_SIZE, WORK_SIZE);
+    renderCandidate(
+      offCtx, { polygons: bestPolygonsRef.current, fitness: 0 }, IMAGE_SIZE, IMAGE_SIZE,
+    );
     ctx.drawImage(offCanvas, startX + imgSize + gap, startY, imgSize, imgSize);
 
     // Borders
@@ -700,6 +752,31 @@ const ImageEvolver = () => {
             </div>
           </TooltipTrigger>
           <TooltipContent>Generations per second &mdash; how fast the algorithm evolves</TooltipContent>
+        </Tooltip>
+
+        <div className="w-px h-5 bg-border" />
+
+        {/* Fitness fidelity */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] text-muted-foreground mr-1">Quality</span>
+              {QUALITY_OPTIONS.map(option => (
+                <Button
+                  key={option.value}
+                  variant={quality === option.value ? 'secondary' : 'ghost'}
+                  size="sm"
+                  className="h-7 text-[10px] px-2"
+                  onClick={() => changeQuality(option.value)}
+                >
+                  {option.label}
+                </Button>
+              ))}
+            </div>
+          </TooltipTrigger>
+          <TooltipContent>
+            Fitness resolution: Draft evolves fastest; Fine compares every display pixel
+          </TooltipContent>
         </Tooltip>
 
         <div className="w-px h-5 bg-border" />
