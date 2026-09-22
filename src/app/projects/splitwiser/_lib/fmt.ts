@@ -1,9 +1,16 @@
 // Shared formatting helpers for SplitWiser pages.
 
-export function fmtMoney(cents: number | string): string {
-  const n = typeof cents === 'string' ? parseInt(cents, 10) : cents;
-  const sign = n < 0 ? '-' : '';
-  return `${sign}$${(Math.abs(n) / 100).toFixed(2)}`;
+export function fmtMoney(cents: number | string | bigint): string {
+  const value = BigInt(cents);
+  const absolute = value < 0n ? -value : value;
+  const sign = value < 0n ? '-' : '';
+  return `${sign}$${absolute / 100n}.${String(absolute % 100n).padStart(2, '0')}`;
+}
+
+export function fmtCentsInput(cents: string | bigint): string {
+  const value = BigInt(cents);
+  const absolute = value < 0n ? -value : value;
+  return `${absolute / 100n}.${String(absolute % 100n).padStart(2, '0')}`;
 }
 
 export function todayISO(): string {

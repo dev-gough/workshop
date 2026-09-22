@@ -25,13 +25,6 @@ interface Group {
   invite_enabled: boolean;
   created_at: string;
   archived_at: string | null;
-}
-
-interface Balance {
-  id: number;
-  name: string;
-  color: string;
-  is_ghost: boolean;
   balance_cents: string;
 }
 
@@ -150,9 +143,8 @@ function SignupLanding({ isBootstrap }: { isBootstrap: boolean }) {
 
 // ── Group card with overall balance ──
 
-function GroupCard({ group, balance }: { group: Group; balance: number | null }) {
-  const positive = balance !== null && balance > 0;
-  const negative = balance !== null && balance < 0;
+function GroupCard({ group, balance }: { group: Group; balance: bigint }) {
+  const positive = balance > 0n;
   return (
     <Link href={`/projects/splitwiser/groups/${group.id}`} className="block group">
       <motion.div
@@ -167,13 +159,11 @@ function GroupCard({ group, balance }: { group: Group; balance: number | null })
             </div>
             <div className="min-w-0">
               <div className="text-sm font-medium text-foreground truncate">{group.name}</div>
-              {balance === null ? (
-                <div className="text-xs text-muted-foreground">tap to view</div>
-              ) : balance === 0 ? (
+              {balance === 0n ? (
                 <div className="text-xs text-muted-foreground">all settled up</div>
               ) : (
                 <div className={`text-xs ${positive ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {positive ? "you're owed" : 'you owe'} {fmtMoney(Math.abs(balance))}
+                  {positive ? "you're owed" : 'you owe'} {fmtMoney(positive ? balance : -balance)}
                 </div>
               )}
             </div>
@@ -301,7 +291,6 @@ export default function SplitwiserHomePage() {
   const [loading, setLoading] = useState(true);
   const [needsBootstrap, setNeedsBootstrap] = useState(false);
   const [groups, setGroups] = useState<Group[]>([]);
-  const [balances, setBalances] = useState<Map<number, number>>(new Map());
 
   const refresh = useCallback(async () => {
     try {
@@ -311,20 +300,6 @@ export default function SplitwiserHomePage() {
         setMe(meData.user);
         const g = await fetch('/api/splitwiser/groups').then((r) => r.json());
         setGroups(g.groups || []);
-        // Pull balances per group in parallel
-        const meId = meData.user.id;
-        const balancesEntries = await Promise.all(
-          (g.groups || []).map(async (grp: Group) => {
-            try {
-              const b = await fetch(`/api/splitwiser/groups/${grp.id}/balances`).then((r) => r.json());
-              const mine = b.balances?.find((x: Balance) => x.id === meId);
-              return [grp.id, mine ? parseInt(mine.balance_cents, 10) : 0] as const;
-            } catch {
-              return [grp.id, 0] as const;
-            }
-          }),
-        );
-        setBalances(new Map(balancesEntries));
       } else {
         setMe(null);
         const status = await fetch('/api/splitwiser/status').then((r) => r.json());
@@ -337,7 +312,10 @@ export default function SplitwiserHomePage() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  const overallBalance = Array.from(balances.values()).reduce((a, b) => a + b, 0);
+  const overallBalance = groups.reduce(
+    (total, group) => total + BigInt(group.balance_cents),
+    0n,
+  );
 
   return (
     <PageTransition>
@@ -382,18 +360,18 @@ export default function SplitwiserHomePage() {
                 <div className="rounded-2xl border border-border/60 bg-gradient-to-br from-amber-950/40 to-card/60 p-5">
                   <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-1">Overall</div>
                   <div className="text-3xl font-bold tabular-nums">
-                    {overallBalance === 0 ? (
+                    {overallBalance === 0n ? (
                       <span className="text-muted-foreground">$0.00</span>
-                    ) : overallBalance > 0 ? (
+                    ) : overallBalance > 0n ? (
                       <span className="text-emerald-400">+{fmtMoney(overallBalance)}</span>
                     ) : (
                       <span className="text-red-400">{fmtMoney(overallBalance)}</span>
                     )}
                   </div>
                   <div className="text-xs text-muted-foreground mt-1">
-                    {overallBalance === 0
+                    {overallBalance === 0n
                       ? 'all settled up'
-                      : overallBalance > 0
+                      : overallBalance > 0n
                         ? "you're owed across all groups"
                         : 'you owe across all groups'}
                   </div>
@@ -424,7 +402,7 @@ export default function SplitwiserHomePage() {
                           initial={{ opacity: 0, y: 4 }}
                           animate={{ opacity: 1, y: 0 }}
                         >
-                          <GroupCard group={g} balance={balances.get(g.id) ?? null} />
+                          <GroupCard group={g} balance={BigInt(g.balance_cents)} />
                         </motion.div>
                       ))}
                     </AnimatePresence>

@@ -14,7 +14,8 @@ import FadeIn from '@/components/motion/FadeIn';
 import {
   Sheet, SheetContent, SheetTitle, SheetDescription, SheetHeader,
 } from '@/components/ui/sheet';
-import { fmtMoney, todayISO } from '../../_lib/fmt';
+import { minimalSettlements, type Settlement } from '@/lib/splitwiser';
+import { fmtCentsInput, fmtMoney, todayISO } from '../../_lib/fmt';
 
 // ── Types ──
 
@@ -38,6 +39,10 @@ interface Expense {
   occurred_on: string; note: string | null;
   created_by: number; created_at: string; deleted_at: string | null;
   shares: { user_id: number; share_cents: string }[];
+}
+interface SelectedSettlement extends Settlement {
+  otherId: number;
+  direction: 'i_pay' | 'they_pay';
 }
 
 // ── Helpers ──
@@ -272,7 +277,7 @@ function AddExpenseSheet({
 // ── Settle-up Sheet ──
 
 function SettleUpSheet({
-  open, onOpenChange, groupId, members, me, defaultOtherId, balanceOf, onSaved,
+  open, onOpenChange, groupId, members, me, defaultOtherId, suggestion, balanceOf, onSaved,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
@@ -280,7 +285,8 @@ function SettleUpSheet({
   members: Member[];
   me: Me;
   defaultOtherId: number | null;
-  balanceOf: (id: number) => number;
+  suggestion: SelectedSettlement | null;
+  balanceOf: (id: number) => bigint;
   onSaved: () => void;
 }) {
   const activeMembers = useMemo(() => members.filter((m) => !m.removed_at && m.id !== me.id), [members, me.id]);
@@ -298,25 +304,30 @@ function SettleUpSheet({
   // the counterparty changes.
   useEffect(() => {
     if (!open) return;
-    const startId = defaultOtherId ?? activeMembers[0]?.id;
+    const startId = suggestion?.otherId ?? defaultOtherId ?? activeMembers[0]?.id;
     if (!startId) return;
     setOtherId(startId);
     setOccurredOn(todayISO());
     setNote('');
     setError(null);
     // Pick direction based on signs: if I owe (negative) and they're owed (positive) → i_pay
+    if (suggestion) {
+      setDirection(suggestion.direction);
+      setAmount(fmtCentsInput(suggestion.amountCents));
+      return;
+    }
     const otherBalance = balanceOf(startId);
-    if (myBalance < 0 && otherBalance > 0) {
+    if (myBalance < 0n && otherBalance > 0n) {
       setDirection('i_pay');
-      setAmount((Math.min(Math.abs(myBalance), otherBalance) / 100).toFixed(2));
-    } else if (myBalance > 0 && otherBalance < 0) {
+      setAmount(fmtCentsInput(-myBalance < otherBalance ? -myBalance : otherBalance));
+    } else if (myBalance > 0n && otherBalance < 0n) {
       setDirection('they_pay');
-      setAmount((Math.min(myBalance, Math.abs(otherBalance)) / 100).toFixed(2));
+      setAmount(fmtCentsInput(myBalance < -otherBalance ? myBalance : -otherBalance));
     } else {
-      setDirection(myBalance < 0 ? 'i_pay' : 'they_pay');
+      setDirection(myBalance < 0n ? 'i_pay' : 'they_pay');
       setAmount('');
     }
-  }, [open, defaultOtherId, activeMembers, myBalance, balanceOf]);
+  }, [open, defaultOtherId, suggestion, activeMembers, myBalance, balanceOf]);
 
   const totalCents = (() => {
     const f = parseFloat(amount);
@@ -555,6 +566,7 @@ export default function GroupPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [settleOpen, setSettleOpen] = useState(false);
   const [settleWithId, setSettleWithId] = useState<number | null>(null);
+  const [selectedSettlement, setSelectedSettlement] = useState<SelectedSettlement | null>(null);
   const [showInvite, setShowInvite] = useState(false);
   const [addingGhost, setAddingGhost] = useState(false);
   const [ghostName, setGhostName] = useState('');
@@ -592,17 +604,24 @@ export default function GroupPage() {
   useEffect(() => { refresh(); }, [refresh]);
 
   const myBalance = useMemo(() => {
-    if (!me) return 0;
+    if (!me) return 0n;
     const b = balances.find((x) => x.id === me.id);
-    return b ? parseInt(b.balance_cents, 10) : 0;
+    return b ? BigInt(b.balance_cents) : 0n;
   }, [me, balances]);
 
-  const balanceFor = (userId: number) => {
+  const balanceFor = useCallback((userId: number) => {
     const b = balances.find((x) => x.id === userId);
-    return b ? parseInt(b.balance_cents, 10) : 0;
-  };
+    return b ? BigInt(b.balance_cents) : 0n;
+  }, [balances]);
 
   const memberById = (id: number) => members.find((m) => m.id === id);
+  const settlements = useMemo(
+    () => minimalSettlements(balances.map((balance) => ({
+      id: balance.id,
+      balanceCents: balance.balance_cents,
+    }))),
+    [balances],
+  );
 
   const inviteUrl = group
     ? `${typeof window !== 'undefined' ? window.location.origin : ''}/projects/splitwiser/join/${group.invite_token}`
@@ -688,12 +707,12 @@ export default function GroupPage() {
 
           <FadeIn delay={0.05}>
             <div className="rounded-2xl border border-border/60 bg-gradient-to-br from-amber-950/40 to-card/60 p-4 text-center">
-              {myBalance === 0 ? (
+              {myBalance === 0n ? (
                 <>
                   <div className="text-2xl font-bold text-muted-foreground">all settled up</div>
                   <div className="text-xs text-muted-foreground/70 mt-1">$0.00</div>
                 </>
-              ) : myBalance > 0 ? (
+              ) : myBalance > 0n ? (
                 <>
                   <div className="text-2xl font-bold text-emerald-400 tabular-nums">+{fmtMoney(myBalance)}</div>
                   <div className="text-xs text-muted-foreground mt-1">you&#39;re owed in this group</div>
@@ -706,6 +725,73 @@ export default function GroupPage() {
               )}
             </div>
           </FadeIn>
+
+          {settlements.length > 0 && (
+            <FadeIn delay={0.08}>
+              <div className="rounded-xl border border-amber-400/25 bg-amber-400/[0.04] overflow-hidden">
+                <div className="flex items-center gap-2 px-4 py-3 border-b border-border/40">
+                  <HandCoins className="h-4 w-4 text-amber-400" />
+                  <div>
+                    <h2 className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-400/90">
+                      Simplest settle-up
+                    </h2>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      {settlements.length} {settlements.length === 1 ? 'payment' : 'payments'} clears every balance
+                    </p>
+                  </div>
+                </div>
+                <div className="divide-y divide-border/40">
+                  {settlements.map((settlement) => {
+                    const from = memberById(settlement.fromUserId);
+                    const to = memberById(settlement.toUserId);
+                    const involvesMe = settlement.fromUserId === me.id || settlement.toUserId === me.id;
+                    const content = (
+                      <>
+                        <span className="flex-1 min-w-0 text-left text-sm truncate">
+                          <span className="font-medium">{from?.name ?? 'Unknown'}</span>
+                          <span className="text-muted-foreground"> pays </span>
+                          <span className="font-medium">{to?.name ?? 'Unknown'}</span>
+                        </span>
+                        <span className="text-sm font-semibold tabular-nums text-amber-300">
+                          {fmtMoney(settlement.amountCents)}
+                        </span>
+                        {involvesMe && <ArrowRightLeft className="h-3.5 w-3.5 text-muted-foreground" />}
+                      </>
+                    );
+
+                    if (!involvesMe) {
+                      return (
+                        <div
+                          key={`${settlement.fromUserId}-${settlement.toUserId}`}
+                          className="flex items-center gap-3 px-4 py-3"
+                        >
+                          {content}
+                        </div>
+                      );
+                    }
+
+                    const otherId = settlement.fromUserId === me.id
+                      ? settlement.toUserId
+                      : settlement.fromUserId;
+                    const direction = settlement.fromUserId === me.id ? 'i_pay' : 'they_pay';
+                    return (
+                      <button
+                        key={`${settlement.fromUserId}-${settlement.toUserId}`}
+                        onClick={() => {
+                          setSettleWithId(otherId);
+                          setSelectedSettlement({ ...settlement, otherId, direction });
+                          setSettleOpen(true);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-amber-400/[0.06] transition-colors"
+                      >
+                        {content}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </FadeIn>
+          )}
 
           {/* Invite link panel */}
           <AnimatePresence>
@@ -753,11 +839,15 @@ export default function GroupPage() {
                 {members.filter((m) => !m.removed_at).map((m) => {
                   const bal = balanceFor(m.id);
                   const canPromote = m.is_ghost && m.created_by === me.id;
-                  const canSettle = m.id !== me.id && (myBalance !== 0 || bal !== 0);
+                  const canSettle = m.id !== me.id && (myBalance !== 0n || bal !== 0n);
                   return (
                     <div
                       key={m.id}
-                      onClick={canSettle ? () => { setSettleWithId(m.id); setSettleOpen(true); } : undefined}
+                      onClick={canSettle ? () => {
+                        setSettleWithId(m.id);
+                        setSelectedSettlement(null);
+                        setSettleOpen(true);
+                      } : undefined}
                       className={`flex items-center gap-3 px-4 py-3 ${canSettle ? 'cursor-pointer hover:bg-muted/30 transition-colors' : ''}`}>
                       <span
                         className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold text-background shrink-0"
@@ -773,10 +863,10 @@ export default function GroupPage() {
                         </div>
                       </div>
                       <div className={`text-sm tabular-nums shrink-0 ${
-                        bal === 0 ? 'text-muted-foreground' :
-                        bal > 0 ? 'text-emerald-400' : 'text-red-400'
+                        bal === 0n ? 'text-muted-foreground' :
+                        bal > 0n ? 'text-emerald-400' : 'text-red-400'
                       }`}>
-                        {bal === 0 ? '–' : (bal > 0 ? '+' : '') + fmtMoney(bal)}
+                        {bal === 0n ? '–' : (bal > 0n ? '+' : '') + fmtMoney(bal)}
                       </div>
                       {canPromote && (
                         <button
@@ -841,9 +931,9 @@ export default function GroupPage() {
                   {expenses.map((e) => {
                     const payer = memberById(e.paid_by);
                     const myShare = e.shares.find((s) => s.user_id === me.id);
-                    const myShareCents = myShare ? parseInt(myShare.share_cents, 10) : 0;
+                    const myShareCents = myShare ? BigInt(myShare.share_cents) : 0n;
                     const iPaid = e.paid_by === me.id;
-                    const total = parseInt(e.total_cents, 10);
+                    const total = BigInt(e.total_cents);
                     return (
                       <div key={e.id} className="flex items-center gap-3 px-4 py-3">
                         <div className="flex flex-col items-center justify-center w-10 shrink-0 text-[10px] text-muted-foreground uppercase tabular-nums">
@@ -862,14 +952,14 @@ export default function GroupPage() {
                         </div>
                         <div className="text-right shrink-0">
                           <div className={`text-sm tabular-nums ${
-                            iPaid ? 'text-emerald-400' : myShareCents > 0 ? 'text-red-400' : 'text-muted-foreground'
+                            iPaid ? 'text-emerald-400' : myShareCents > 0n ? 'text-red-400' : 'text-muted-foreground'
                           }`}>
                             {iPaid
                               ? `+${fmtMoney(total - myShareCents)}`
-                              : myShareCents > 0 ? `-${fmtMoney(myShareCents)}` : '—'}
+                              : myShareCents > 0n ? `-${fmtMoney(myShareCents)}` : '—'}
                           </div>
                           <div className="text-[10px] text-muted-foreground">
-                            {iPaid ? 'lent' : myShareCents > 0 ? 'your share' : 'not in split'}
+                            {iPaid ? 'lent' : myShareCents > 0n ? 'your share' : 'not in split'}
                           </div>
                         </div>
                         {e.created_by === me.id && (
@@ -891,9 +981,13 @@ export default function GroupPage() {
 
           {/* FABs */}
           <div className="fixed bottom-6 right-6 sm:right-1/2 sm:translate-x-[19rem] z-30 flex flex-col gap-3">
-            {myBalance !== 0 && members.filter((m) => !m.removed_at).length > 1 && (
+            {myBalance !== 0n && members.filter((m) => !m.removed_at).length > 1 && (
               <button
-                onClick={() => { setSettleWithId(null); setSettleOpen(true); }}
+                onClick={() => {
+                  setSettleWithId(null);
+                  setSelectedSettlement(null);
+                  setSettleOpen(true);
+                }}
                 className="h-12 w-12 rounded-full bg-card border border-amber-400/40 text-amber-400 shadow-lg hover:bg-amber-400/10 transition-all flex items-center justify-center"
                 aria-label="Settle up"
                 title="Settle up"
@@ -928,6 +1022,7 @@ export default function GroupPage() {
         members={members}
         me={me}
         defaultOtherId={settleWithId}
+        suggestion={selectedSettlement}
         balanceOf={balanceFor}
         onSaved={refresh}
       />
