@@ -9,7 +9,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Check, Eraser, FastForward, Maximize2, Minimize2, Pause, PenLine, Play, RotateCcw, Route, SkipForward, X,
+  Check, ClipboardCopy, Eraser, FastForward, Maximize2, Minimize2, Pause, PenLine, Play,
+  RotateCcw, Route, Share2, SkipForward, Upload, X,
 } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import { useHeaderConfig } from '@/components/header-config';
@@ -22,6 +23,7 @@ import {
   type Point,
   type Retirement,
 } from './_lib/engine';
+import { decodeReplay, encodeReplay, replayCard, type ReplayCard } from './_lib/replay';
 import Circuit, {
   DEFAULT_OVERLAYS,
   type CamMode,
@@ -98,6 +100,9 @@ export default function DrivingSchoolPage() {
   const [focus, setFocus] = useState(false);
   const [drawMode, setDrawMode] = useState(false);
   const [draftMsg, setDraftMsg] = useState<string | null>(null);
+  const [replayOpen, setReplayOpen] = useState(false);
+  const [replayText, setReplayText] = useState('');
+  const [replayMsg, setReplayMsg] = useState<string | null>(null);
 
   const sessionRef = useRef<Session | null>(null);
   if (!sessionRef.current) sessionRef.current = new Session(defaultParams());
@@ -112,6 +117,7 @@ export default function DrivingSchoolPage() {
   const benchRef = useRef<DrawHandle>(null);
   const brainRef = useRef<DrawHandle>(null);
   const rafRef = useRef(0);
+  const replayLoadedRef = useRef(false);
   const rateRef = useRef(rate);
   rateRef.current = rate;
 
@@ -298,6 +304,87 @@ export default function DrivingSchoolPage() {
     refreshReadouts();
   }, [paint, refreshReadouts]);
 
+  const applyReplay = useCallback((card: ReplayCard) => {
+    const next = new Session(card.params);
+    if (card.customCircuit) {
+      next.replayCircuit(card.customCircuit.centerline, card.customCircuit.width);
+    }
+    sessionRef.current = next;
+    builtRef.current = structuredClone(card.params);
+    setParams(structuredClone(card.params));
+    setSetup(null);
+    setSelectedId(null);
+    setDrawMode(false);
+    setDraftMsg(null);
+    setRegridPending(false);
+    setRunning(true);
+    setSnap(makeSnap());
+    paint();
+  }, [makeSnap, paint]);
+
+  const makeReplayUrl = useCallback(() => {
+    const session = sessionRef.current;
+    if (!session || typeof window === 'undefined') return '';
+    const url = new URL(window.location.href);
+    url.search = '';
+    url.searchParams.set('replay', encodeReplay(replayCard(session)));
+    return url.toString();
+  }, []);
+
+  const openReplay = useCallback(() => {
+    setReplayOpen(open => {
+      const next = !open;
+      if (next) {
+        setReplayText(makeReplayUrl());
+        setReplayMsg(null);
+      }
+      return next;
+    });
+  }, [makeReplayUrl]);
+
+  const copyReplay = useCallback(async () => {
+    const url = makeReplayUrl();
+    setReplayText(url);
+    try {
+      await navigator.clipboard.writeText(url);
+      setReplayMsg('Replay link copied — this season will restart from tick zero.');
+    } catch {
+      setReplayMsg('Copy was blocked; select the replay link above.');
+    }
+  }, [makeReplayUrl]);
+
+  const loadReplay = useCallback(() => {
+    const card = decodeReplay(replayText);
+    if (!card) {
+      setReplayMsg('That replay card is damaged or from an unknown version.');
+      return;
+    }
+    applyReplay(card);
+    setReplayMsg(card.customCircuit
+      ? 'Hand-drawn circuit and seeded grid loaded at tick zero.'
+      : 'Circuit, dials, and seeded grid loaded at tick zero.');
+  }, [applyReplay, replayText]);
+
+  // Shared links are self-opening replay cards. Strict decoding makes an
+  // unrelated or malformed query harmless.
+  useEffect(() => {
+    if (replayLoadedRef.current) return;
+    replayLoadedRef.current = true;
+    const code = new URL(window.location.href).searchParams.get('replay');
+    if (!code) return;
+    const card = decodeReplay(code);
+    setReplayOpen(true);
+    setReplayText(window.location.href);
+    if (!card) {
+      setReplayMsg('This replay link is damaged or from an unknown version.');
+      return;
+    }
+    applyReplay(card);
+    setReplayMsg(card.customCircuit
+      ? 'Hand-drawn replay loaded at tick zero.'
+      : 'Seeded replay loaded at tick zero.');
+  }, [applyReplay]);
+
   // Focus mode quiets the room down to the circuit. It also asks for real
   // fullscreen so the header goes too; if the browser refuses, the in-page
   // version still stands on its own.
@@ -475,6 +562,22 @@ export default function DrivingSchoolPage() {
                 <TooltipTrigger asChild>
                   <button
                     type="button"
+                    onClick={openReplay}
+                    data-on={replayOpen}
+                    className="drs-chip flex h-7 items-center gap-1.5 px-2 text-[10px] font-semibold uppercase tracking-[0.14em]"
+                  >
+                    <Share2 className="h-3 w-3" />
+                    Replay
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-64">
+                  Share this circuit, every dial, and both seeds as a season that restarts at tick zero.
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
                     onClick={() => regrid()}
                     data-on={regridPending}
                     className="drs-chip flex h-7 items-center gap-1.5 px-2.5 text-[10px] font-semibold uppercase tracking-[0.14em]"
@@ -544,6 +647,56 @@ export default function DrivingSchoolPage() {
             </div>
 
             <RateControl rate={rate} onChange={setRate} compact={focus} />
+
+            {replayOpen && (
+              <div className="flex w-full flex-col gap-1.5 border-t border-border pt-1.5">
+                <label
+                  htmlFor="drs-replay-card"
+                  className="text-[9px] font-semibold uppercase tracking-[0.18em] text-primary"
+                >
+                  Season replay card
+                </label>
+                <textarea
+                  id="drs-replay-card"
+                  value={replayText}
+                  onChange={e => { setReplayText(e.target.value); setReplayMsg(null); }}
+                  onFocus={e => e.currentTarget.select()}
+                  rows={2}
+                  spellCheck={false}
+                  className="drs-readout min-h-12 w-full resize-none border border-border bg-background/70 px-2 py-1 text-[8px] leading-relaxed text-foreground outline-none focus:border-primary"
+                  aria-label="Replay link or replay code"
+                />
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={copyReplay}
+                    className="drs-chip flex h-6 items-center gap-1 px-2 text-[9px] font-semibold uppercase tracking-[0.14em]"
+                  >
+                    <ClipboardCopy className="h-3 w-3" /> Copy link
+                  </button>
+                  <button
+                    type="button"
+                    onClick={loadReplay}
+                    className="drs-chip flex h-6 items-center gap-1 px-2 text-[9px] font-semibold uppercase tracking-[0.14em]"
+                  >
+                    <Upload className="h-3 w-3" /> Load
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReplayOpen(false)}
+                    className="drs-chip ml-auto flex h-6 w-6 items-center justify-center"
+                    aria-label="Close replay card"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+                {replayMsg && (
+                  <p className="text-[9px] leading-relaxed text-muted-foreground" role="status">
+                    {replayMsg}
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* The drafting table's own controls ride with the pen. */}
             {drawMode && (

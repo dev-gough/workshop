@@ -334,6 +334,9 @@ export interface WallGrid {
   rows: number;
   bins: number[][];
   walls: Segment[];
+  /** Reused visitation stamps keep ray and proximity queries allocation-free. */
+  visitMarks: Uint32Array;
+  visitToken: number;
 }
 
 export function buildWallGrid(walls: Segment[], cell: number = GRID_CELL): WallGrid {
@@ -368,7 +371,20 @@ export function buildWallGrid(walls: Segment[], cell: number = GRID_CELL): WallG
     }
   }
 
-  return { cell, minX, minY, cols, rows, bins, walls };
+  return {
+    cell, minX, minY, cols, rows, bins, walls,
+    visitMarks: new Uint32Array(walls.length),
+    visitToken: 0,
+  };
+}
+
+function nextVisitToken(grid: WallGrid): number {
+  grid.visitToken = (grid.visitToken + 1) >>> 0;
+  if (grid.visitToken === 0) {
+    grid.visitMarks.fill(0);
+    grid.visitToken = 1;
+  }
+  return grid.visitToken;
 }
 
 /** DDA walk along the ray, testing only segments binned in the cells it crosses. */
@@ -390,7 +406,8 @@ function castRayGrid(ox: number, oy: number, angle: number, grid: WallGrid, maxD
   let tMaxY = dy !== 0 ? (nextBoundY - oy) / dy : Infinity;
 
   let minHit = Infinity;
-  const seen = new Set<number>();
+  const token = nextVisitToken(grid);
+  const seen = grid.visitMarks;
 
   while (true) {
     if (cx >= 0 && cy >= 0 && cx < cols && cy < rows) {
@@ -398,8 +415,8 @@ function castRayGrid(ox: number, oy: number, angle: number, grid: WallGrid, maxD
       if (bin) {
         for (let k = 0; k < bin.length; k++) {
           const s = bin[k];
-          if (seen.has(s)) continue;
-          seen.add(s);
+          if (seen[s] === token) continue;
+          seen[s] = token;
           const [x1, y1, x2, y2] = walls[s];
           const d = raySegmentIntersect(ox, oy, dx, dy, x1, y1, x2, y2);
           if (d < minHit) minHit = d;
@@ -423,7 +440,8 @@ function nearestWallDist(px: number, py: number, grid: WallGrid): number {
   const bx = Math.floor((px - minX) / cell);
   const by = Math.floor((py - minY) / cell);
   let minDist = Infinity;
-  const seen = new Set<number>();
+  const token = nextVisitToken(grid);
+  const seen = grid.visitMarks;
   for (let oy = -1; oy <= 1; oy++) {
     for (let ox = -1; ox <= 1; ox++) {
       const cx = bx + ox, cy = by + oy;
@@ -432,8 +450,8 @@ function nearestWallDist(px: number, py: number, grid: WallGrid): number {
       if (!bin) continue;
       for (let k = 0; k < bin.length; k++) {
         const s = bin[k];
-        if (seen.has(s)) continue;
-        seen.add(s);
+        if (seen[s] === token) continue;
+        seen[s] = token;
         const [x1, y1, x2, y2] = walls[s];
         const dx = x2 - x1, dy = y2 - y1;
         const len2 = dx * dx + dy * dy || 1;
@@ -468,34 +486,32 @@ export function brainShape(p: DriveParams): BrainShape {
 }
 
 export interface Thought {
-  inputs: number[];
-  hidden: number[];
+  inputs: Float64Array;
+  hidden: Float64Array;
   /** [steer, throttle], both in [-1, 1]. */
-  out: [number, number];
+  out: Float64Array;
 }
 
-function feedForward(genome: Float64Array, shape: BrainShape, inputs: number[], keep?: Thought): [number, number] {
+function feedForward(
+  genome: Float64Array,
+  shape: BrainShape,
+  inputs: Float64Array,
+  hidden: Float64Array,
+  out: Float64Array,
+): void {
   let idx = 0;
-  const hidden: number[] = new Array(shape.hidden);
   for (let h = 0; h < shape.hidden; h++) {
     let sum = 0;
     for (let i = 0; i < shape.inputs; i++) sum += inputs[i] * genome[idx++];
     sum += genome[idx++];
     hidden[h] = sum > 0 ? sum : 0;
   }
-  const out: [number, number] = [0, 0];
   for (let o = 0; o < 2; o++) {
     let sum = 0;
     for (let h = 0; h < shape.hidden; h++) sum += hidden[h] * genome[idx++];
     sum += genome[idx++];
     out[o] = Math.tanh(sum);
   }
-  if (keep) {
-    keep.inputs = inputs.slice();
-    keep.hidden = hidden;
-    keep.out = out;
-  }
-  return out;
 }
 
 // ── Cars ─────────────────────────────────────────────────────────────────
@@ -515,6 +531,10 @@ export interface Car {
   progress: number;
   genome: Float64Array;
   sensors: number[];
+  /** Neural workspaces are allocated once with the car, then reused per tick. */
+  brainInputs: Float64Array;
+  brainHidden: Float64Array;
+  brainOut: Float64Array;
   steer: number;
   throttle: number;
   stuckTimer: number;
@@ -527,7 +547,13 @@ function createGenome(rng: () => number, size: number, spread: number): Float64A
   return g;
 }
 
-function createCar(id: number, track: Track, genome: Float64Array, sensorCount: number): Car {
+function createCar(
+  id: number,
+  track: Track,
+  genome: Float64Array,
+  sensorCount: number,
+  hiddenCount: number,
+): Car {
   return {
     id,
     x: track.startPos.x,
@@ -539,6 +565,9 @@ function createCar(id: number, track: Track, genome: Float64Array, sensorCount: 
     progress: 0,
     genome,
     sensors: new Array(sensorCount).fill(1),
+    brainInputs: new Float64Array(sensorCount + 1),
+    brainHidden: new Float64Array(hiddenCount),
+    brainOut: new Float64Array(2),
     steer: 0,
     throttle: 0,
     stuckTimer: 0,
@@ -628,7 +657,7 @@ export class Session {
       const genome = genomes && i < genomes.length
         ? genomes[i]
         : createGenome(this.rng, this.shape.size, p.brain.initSpread);
-      cars.push(createCar(i, this.track, genome, p.sensors.count));
+      cars.push(createCar(i, this.track, genome, p.sensors.count, this.shape.hidden));
     }
     this.cars = cars;
     this.tick = 0;
@@ -654,6 +683,16 @@ export class Session {
     this.installTrack(finishTrack(centerline, width));
     this.customTrack = true;
     return null;
+  }
+
+  /** Install an already-faired loop from a replay card without reshaping it. */
+  replayCircuit(centerline: Point[], width: number) {
+    this.track = finishTrack(centerline.map(p => ({ x: p.x, y: p.y })), width);
+    this.grid = buildWallGrid([...this.track.innerWalls, ...this.track.outerWalls]);
+    this.customTrack = true;
+    this.carriedGrid = false;
+    this.pendingNewCircuit = false;
+    this.spawnGrid(this.cars.map(c => c.genome));
   }
 
   private installTrack(track: Track) {
@@ -711,10 +750,11 @@ export class Session {
 
   /** Re-run a car's brain on its latest readings, keeping the activations. */
   think(car: Car): Thought {
-    const t: Thought = { inputs: [], hidden: [], out: [0, 0] };
     const p = this.params;
-    feedForward(car.genome, this.shape, [...car.sensors, car.speed / p.car.topSpeed], t);
-    return t;
+    for (let i = 0; i < car.sensors.length; i++) car.brainInputs[i] = car.sensors[i];
+    car.brainInputs[this.shape.inputs - 1] = car.speed / p.car.topSpeed;
+    feedForward(car.genome, this.shape, car.brainInputs, car.brainHidden, car.brainOut);
+    return { inputs: car.brainInputs, hidden: car.brainHidden, out: car.brainOut };
   }
 
   aliveCount(): number {
@@ -779,9 +819,11 @@ export class Session {
     }
 
     // The brain decides; the tarmac disposes.
-    const [steer, throttle] = feedForward(
-      car.genome, this.shape, [...car.sensors, car.speed / p.car.topSpeed],
-    );
+    for (let i = 0; i < count; i++) car.brainInputs[i] = car.sensors[i];
+    car.brainInputs[this.shape.inputs - 1] = car.speed / p.car.topSpeed;
+    feedForward(car.genome, this.shape, car.brainInputs, car.brainHidden, car.brainOut);
+    const steer = car.brainOut[0];
+    const throttle = car.brainOut[1];
     car.steer = steer;
     car.throttle = throttle;
 
