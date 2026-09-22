@@ -10,6 +10,11 @@ import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
 import { useHeaderConfig } from '@/components/header-config';
 import { fmtBytes, fmtSpeed, fmtEta, fmtDuration, fmtTime } from '@/lib/format';
+import {
+  jellyfinPollInterval,
+  reuseEqualSnapshot,
+  sharingProjection,
+} from '@/lib/jellyfin-dashboard';
 
 // ── Types ──
 
@@ -148,6 +153,48 @@ function ratioColor(r: number): string {
   return 'text-muted-foreground';
 }
 
+function useAdaptivePoll(task: () => Promise<void>, intervalMs: number) {
+  const taskRef = useRef(task);
+  const intervalRef = useRef(intervalMs);
+  taskRef.current = task;
+  intervalRef.current = intervalMs;
+
+  useEffect(() => {
+    let stopped = false;
+    let running = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const schedule = () => {
+      if (!stopped && document.visibilityState === 'visible') {
+        timer = setTimeout(run, intervalRef.current);
+      }
+    };
+    const run = async () => {
+      if (stopped || running || document.visibilityState !== 'visible') return;
+      running = true;
+      try {
+        await taskRef.current();
+      } finally {
+        running = false;
+        schedule();
+      }
+    };
+    const onVisibilityChange = () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      if (document.visibilityState === 'visible') void run();
+    };
+
+    void run();
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, []);
+}
+
 function Eyebrow({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return (
     <h2 className={`cine-title text-[10px] font-semibold tracking-[0.22em] text-muted-foreground ${className}`}>
@@ -175,6 +222,11 @@ function StatRow({ label, value, valueClass, sub }: {
 function BoxOffice({ stats }: { stats: SeedStats }) {
   const { session, ratio, seedingNow, topSeeded } = stats;
   const cum = session.cumulative;
+  const projection = sharingProjection(
+    cum.uploadedBytes,
+    cum.downloadedBytes,
+    session.uploadSpeed,
+  );
   return (
     <div className="space-y-6">
       <section className="rounded-md border border-border bg-card p-4">
@@ -207,6 +259,30 @@ function BoxOffice({ stats }: { stats: SeedStats }) {
             sub={`${session.pausedTorrentCount} paused`}
           />
         </div>
+        {projection && (
+          <div className="mt-4 border-t border-border/60 pt-3">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="cine-title text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
+                Road to ×10
+              </span>
+              <span className="cine-readout text-xs text-accent">
+                {Math.round(projection.progress * 100)}%
+              </span>
+            </div>
+            <div className="cine-gauge mt-2" aria-label={`${Math.round(projection.progress * 100)}% of sharing target`}>
+              <span data-done={projection.reached} style={{ width: `${projection.progress * 100}%` }} />
+            </div>
+            <p className="mt-2 text-[10px] text-muted-foreground">
+              {projection.reached
+                ? 'Target reached — the house has given ten reels back.'
+                : `${fmtBytes(projection.remainingBytes)} left${
+                    projection.secondsAtCurrentRate
+                      ? ` · about ${fmtEta(projection.secondsAtCurrentRate)} at the current pace`
+                      : ' · waiting for an audience'
+                  }`}
+            </p>
+          </div>
+        )}
       </section>
 
       {topSeeded.length > 0 && (
@@ -754,7 +830,7 @@ export default function JellyfinPage() {
     try {
       const res = await fetch('/api/jellyfin/transfers');
       const data = await res.json();
-      setTransfers(data.transfers || []);
+      setTransfers((previous) => reuseEqualSnapshot(previous, data.transfers || []));
       setDaemonOk(!data.error);
     } catch {
       setDaemonOk(false);
@@ -765,7 +841,7 @@ export default function JellyfinPage() {
     try {
       const res = await fetch('/api/jellyfin/history?limit=30');
       const data = await res.json();
-      setHistory(data.history || []);
+      setHistory((previous) => reuseEqualSnapshot(previous, data.history || []));
     } catch { /* ignore */ }
   }, []);
 
@@ -773,19 +849,26 @@ export default function JellyfinPage() {
     try {
       const res = await fetch('/api/jellyfin/stats');
       const data = await res.json();
-      if (!data.error) setStats(data);
+      if (!data.error) setStats((previous) => reuseEqualSnapshot(previous, data));
     } catch { /* ignore */ }
   }, []);
 
-  useEffect(() => {
-    refreshTransfers();
-    refreshHistory();
-    refreshStats();
-    const t = setInterval(refreshTransfers, 2000);
-    const h = setInterval(refreshHistory, 6000);
-    const s = setInterval(refreshStats, 5000);
-    return () => { clearInterval(t); clearInterval(h); clearInterval(s); };
-  }, [refreshTransfers, refreshHistory, refreshStats]);
+  const hasActiveTransfer = transfers.some((t) => {
+    const group = groupOf(t);
+    return group === 'downloading' || group === 'verifying' || group === 'seeding';
+  });
+  useAdaptivePoll(
+    refreshTransfers,
+    jellyfinPollInterval('transfers', hasActiveTransfer),
+  );
+  useAdaptivePoll(
+    refreshHistory,
+    jellyfinPollInterval('history', hasActiveTransfer),
+  );
+  useAdaptivePoll(
+    refreshStats,
+    jellyfinPollInterval('stats', hasActiveTransfer),
+  );
 
   const handleRemove = useCallback(async (t: Transfer, deleteData: boolean) => {
     try {
