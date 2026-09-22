@@ -1,10 +1,12 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { Check, Share2 } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
 import { useHeaderConfig } from '@/components/header-config';
 import { type Build, defaultBuild, analyze } from './_lib/model';
+import { decodeBuild, encodeBuild } from './_lib/share';
 import { ImpactHero, DamageBar, ContributionList, BracketLadder } from './_components/viz';
 import { CharacterPicker, ItemRoster, StatControls, Switch } from './_components/controls';
 
@@ -12,8 +14,28 @@ export default function MegabonkPage() {
   useHeaderConfig({ scopeClass: 'megabonk-theme' });
 
   const [build, setBuild] = useState<Build>(defaultBuild);
+  const [shared, setShared] = useState(false);
   const set = (patch: Partial<Build>) => setBuild(b => ({ ...b, ...patch }));
   const a = useMemo(() => analyze(build), [build]);
+
+  useEffect(() => {
+    const encoded = new URLSearchParams(window.location.search).get('build');
+    const restored = encoded ? decodeBuild(encoded) : null;
+    if (restored) setBuild(restored);
+  }, []);
+
+  const share = async () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('build', encodeBuild(build));
+    window.history.replaceState(null, '', url);
+    try {
+      await navigator.clipboard.writeText(url.toString());
+      setShared(true);
+      window.setTimeout(() => setShared(false), 1800);
+    } catch {
+      setShared(false);
+    }
+  };
 
   return (
     <PageTransition>
@@ -46,12 +68,21 @@ export default function MegabonkPage() {
                   <span className="text-muted-foreground">Target is an Elite</span>
                   <Switch on={build.targetElite} onChange={v => set({ targetElite: v })} label="Target is an Elite" />
                 </label>
-                <button
-                  onClick={() => setBuild(defaultBuild())}
-                  className="mt-0.5 rounded-md border border-border py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:border-primary hover:text-primary"
-                >
-                  Reset build
-                </button>
+                <div className="mt-0.5 grid grid-cols-2 gap-1.5">
+                  <button
+                    onClick={() => void share()}
+                    className="flex items-center justify-center gap-1 rounded-md border border-border py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:border-primary hover:text-primary"
+                  >
+                    {shared ? <Check className="h-3 w-3" /> : <Share2 className="h-3 w-3" />}
+                    {shared ? 'Copied' : 'Share'}
+                  </button>
+                  <button
+                    onClick={() => setBuild(defaultBuild())}
+                    className="rounded-md border border-border py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:border-primary hover:text-primary"
+                  >
+                    Reset
+                  </button>
+                </div>
               </div>
             </div>
           </FadeIn>

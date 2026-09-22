@@ -143,6 +143,9 @@ export const CHARACTERS: Character[] = [
   { id: 'amog', name: 'Amog', emoji: '🛸', passive: '+50% Poison damage.', bracket: 'poison', value: 50 },
 ];
 
+/** Stable lookup used on every slider update; avoids rescanning the roster. */
+export const CHARACTER_BY_ID = new Map(CHARACTERS.map(character => [character.id, character]));
+
 // ── Items — the icons the player toggles on ───────────────────────────────
 
 export type ItemDef = {
@@ -181,6 +184,14 @@ export const ITEMS: ItemDef[] = [
   // Elite bracket
   { id: 'boss-buster', name: 'Boss Buster', emoji: '💥', bracket: 'elite', value: 15, stackable: true, maxStacks: 5, note: '+15% vs Elites & Bosses.' },
 ];
+
+/** Pre-group once rather than allocating four filtered arrays per render. */
+export const ITEMS_BY_BRACKET = new Map<BracketId, ItemDef[]>();
+for (const item of ITEMS) {
+  const group = ITEMS_BY_BRACKET.get(item.bracket);
+  if (group) group.push(item);
+  else ITEMS_BY_BRACKET.set(item.bracket, [item]);
+}
 
 // ── The build the player is assembling ────────────────────────────────────
 
@@ -287,7 +298,7 @@ export type Analysis = {
 };
 
 export function analyze(build: Build): Analysis {
-  const char = CHARACTERS.find(c => c.id === build.characterId);
+  const char = CHARACTER_BY_ID.get(build.characterId);
 
   // Accumulate additive brackets as { sum, members:[{leaf-seed}] }.
   type Additive = { sum: number; parts: { id: string; label: string; emoji: string; detail: string; amount: number }[] };

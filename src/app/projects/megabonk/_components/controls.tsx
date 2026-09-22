@@ -1,6 +1,8 @@
 'use client';
 
-import { type Build, type BracketId, ITEMS, CHARACTERS, BRACKETS } from '../_lib/model';
+import {
+  type Build, type BracketId, CHARACTERS, CHARACTER_BY_ID, BRACKETS, ITEMS_BY_BRACKET,
+} from '../_lib/model';
 
 type Setter = (patch: Partial<Build>) => void;
 
@@ -75,7 +77,7 @@ export function CharacterPicker({ build, set }: { build: Build; set: Setter }) {
         })}
       </div>
       <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
-        {CHARACTERS.find(c => c.id === build.characterId)?.passive}
+        {CHARACTER_BY_ID.get(build.characterId)?.passive}
       </p>
     </div>
   );
@@ -107,7 +109,7 @@ export function ItemRoster({ build, set }: { build: Build; set: Setter }) {
               </span>
             </div>
             <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-5 lg:grid-cols-3 xl:grid-cols-5">
-              {ITEMS.filter(i => i.bracket === g.bracket).map(def => {
+              {(ITEMS_BY_BRACKET.get(g.bracket) ?? []).map(def => {
                 const st = build.items[def.id];
                 const color = BRACKETS[def.bracket].color;
                 return (
