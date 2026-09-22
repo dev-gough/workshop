@@ -37,6 +37,10 @@ export class BFInterpreter {
   readonly source: string;
   readonly memory: Int8Array;
   readonly calcCap: number;
+  // Matching brackets are compiled once. Runtime jumps remain O(1), while
+  // step() still charges the same per-character scan cost as the Java
+  // reference interpreter (important because that cost affects fitness).
+  private readonly bracketPairs: Int32Array;
   ip = 0;
   dataPtr = 0;
   output = '';
@@ -59,6 +63,7 @@ export class BFInterpreter {
     this.source = source;
     this.memory = new Int8Array(MEMORY_SIZE);
     this.calcCap = calcCap;
+    this.bracketPairs = compileBracketPairs(source);
   }
 
   reset(): void {
@@ -148,6 +153,12 @@ export class BFInterpreter {
         this.calcs++;
         if (this.bumpCalc()) { truncatedHere = true; break; }
         if (this.memory[this.dataPtr] === 0) {
+          const match = this.bracketPairs[this.ip];
+          if (match >= 0) {
+            if (this.chargeScan(match - this.ip - 1)) { truncatedHere = true; break; }
+            this.ip = match;
+            break;
+          }
           // Scan forward to the matching ']', counting calcs per char (Java parity).
           let i = this.ip + 1;
           let depth = 0;
@@ -173,6 +184,12 @@ export class BFInterpreter {
         this.calcs++;
         if (this.bumpCalc()) { truncatedHere = true; break; }
         if (this.memory[this.dataPtr] !== 0) {
+          const match = this.bracketPairs[this.ip];
+          if (match >= 0) {
+            if (this.chargeScan(this.ip - match - 1)) { truncatedHere = true; break; }
+            this.ip = match;
+            break;
+          }
           let i = this.ip - 1;
           let depth = 0;
           while (i >= 0 && (depth > 0 || this.source[i] !== '[')) {
@@ -247,6 +264,16 @@ export class BFInterpreter {
     return false;
   }
 
+  private chargeScan(amount: number): boolean {
+    if (amount <= 0) return false;
+    if (this.calcs + amount >= this.calcCap) {
+      this.calcs = this.calcCap;
+      return this.bumpCalc();
+    }
+    this.calcs += amount;
+    return false;
+  }
+
   snapshot(): BFSnapshot {
     return {
       ip: this.ip,
@@ -263,6 +290,22 @@ export class BFInterpreter {
     let n = 0;
     while (this.step() && n < maxSteps) n++;
   }
+}
+
+function compileBracketPairs(source: string): Int32Array {
+  const pairs = new Int32Array(source.length);
+  pairs.fill(-1);
+  const stack: number[] = [];
+  for (let i = 0; i < source.length; i++) {
+    if (source[i] === '[') {
+      stack.push(i);
+    } else if (source[i] === ']' && stack.length > 0) {
+      const open = stack.pop()!;
+      pairs[open] = i;
+      pairs[i] = open;
+    }
+  }
+  return pairs;
 }
 
 // Pre-compute per-instruction execution counts for heatmap rendering.

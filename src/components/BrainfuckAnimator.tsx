@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Play, Pause, FastForward, RotateCcw, Maximize, Minimize } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
+import { Play, Pause, FastForward, RotateCcw, Maximize, Minimize, Circle } from 'lucide-react';
 import { BFInterpreter, executionCounts, MEMORY_SIZE } from '@/lib/brainfuck-interpreter';
 
 // ── The tape transport ────────────────────────────────────────────────────────
@@ -108,9 +108,12 @@ export default function BrainfuckAnimator({
   const lastFrameTimeRef = useRef<number | null>(null);
   const prevGeneRef = useRef<string>('');
   const spliceRef = useRef<Splice | null>(null);
+  const breakpointRef = useRef<number | null>(null);
+  const lastBreakpointHitRef = useRef<number | null>(null);
   const [speedIdx, setSpeedIdx] = useState(DEFAULT_SPEED_IDX);
   const [playing, setPlaying] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [breakpoint, setBreakpoint] = useState<number | null>(null);
   const [, setTick] = useState(0); // force re-render on gene-swap so UI labels update
 
   // (Re)initialize interpreter when gene changes (debounced — caller passes finalized gene).
@@ -129,6 +132,9 @@ export default function BrainfuckAnimator({
     flashesRef.current.clear();
     viewCenterRef.current = 0;
     haltedAtRef.current = null;
+    breakpointRef.current = null;
+    lastBreakpointHitRef.current = null;
+    setBreakpoint(null);
     // Splice: a swap from an existing tape gets the full tear-off + stamp;
     // the very first tape just feeds in quietly.
     spliceRef.current = {
@@ -165,7 +171,19 @@ export default function BrainfuckAnimator({
           let stepsToTake = Math.floor(stepAccumRef.current);
           if (stepsToTake > 0) stepAccumRef.current -= stepsToTake;
           while (stepsToTake-- > 0) {
+            if (
+              breakpointRef.current === interp.ip &&
+              lastBreakpointHitRef.current !== interp.ip
+            ) {
+              lastBreakpointHitRef.current = interp.ip;
+              stepAccumRef.current = 0;
+              setPlaying(false);
+              break;
+            }
             const moreToGo = interp.step();
+            if (interp.ip !== lastBreakpointHitRef.current) {
+              lastBreakpointHitRef.current = null;
+            }
             if (interp.lastWritten >= 0) {
               flashesRef.current.set(interp.lastWritten, now);
             }
@@ -205,6 +223,7 @@ export default function BrainfuckAnimator({
           fitnessTrail,
           targetFitness,
           pendingLabel: pendingGene && pendingGene !== gene ? pendingLabel ?? 'next' : null,
+          breakpoint: breakpointRef.current,
           compact,
           splice: spliceRef.current,
         });
@@ -322,6 +341,33 @@ export default function BrainfuckAnimator({
     interpreterRef.current?.reset();
     flashesRef.current.clear();
     haltedAtRef.current = null;
+    lastBreakpointHitRef.current = null;
+  };
+
+  const handleCanvasClick = (e: MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    const interp = interpreterRef.current;
+    const splice = spliceRef.current;
+    if (!canvas || !interp || (splice && performance.now() - splice.start < SPLICE_FEED_MS)) return;
+    const idx = tapeInstructionAt(
+      e.clientX - canvas.getBoundingClientRect().left,
+      e.clientY - canvas.getBoundingClientRect().top,
+      canvas.clientWidth,
+      canvas.clientHeight,
+      interp.source.length,
+      compact,
+    );
+    if (idx == null) return;
+    const next = breakpointRef.current === idx ? null : idx;
+    breakpointRef.current = next;
+    lastBreakpointHitRef.current = null;
+    setBreakpoint(next);
+  };
+
+  const clearBreakpoint = () => {
+    breakpointRef.current = null;
+    lastBreakpointHitRef.current = null;
+    setBreakpoint(null);
   };
 
   return (
@@ -336,7 +382,18 @@ export default function BrainfuckAnimator({
         boxShadow: 'inset 0 1px 0 rgba(234,223,196,0.05), inset 0 -14px 24px rgba(0,0,0,0.35)',
       }}
     >
-      <canvas ref={canvasRef} className="block" />
+      <canvas
+        ref={canvasRef}
+        className="block cursor-crosshair"
+        onClick={handleCanvasClick}
+        aria-label="Brainfuck punched-tape interpreter. Click an instruction on the tape to toggle a breakpoint."
+      />
+      <div
+        className="pointer-events-none absolute right-2 top-2 rounded px-2 py-1 font-mono text-[9px] uppercase tracking-[0.12em]"
+        style={{ color: C.controlDim, background: 'rgba(18,13,8,0.72)' }}
+      >
+        click tape · {breakpoint == null ? 'set break' : `break @ ${breakpoint}`}
+      </div>
       <div
         className="absolute bottom-2 right-2 flex items-center gap-1 rounded-md px-1 py-0.5 backdrop-blur"
         style={{ background: 'rgba(18,13,8,0.82)', border: `1px solid ${C.winEdge}` }}
@@ -373,6 +430,17 @@ export default function BrainfuckAnimator({
           <FastForward className="h-3 w-3" />
           {SPEEDS[speedIdx].label}
         </button>
+        <button
+          onClick={clearBreakpoint}
+          disabled={breakpoint == null}
+          className="flex h-7 items-center gap-1 px-2 font-mono text-[10px] tabular-nums transition-colors disabled:opacity-40"
+          style={{ color: breakpoint == null ? C.controlDim : C.fault }}
+          aria-label={breakpoint == null ? 'No breakpoint set' : `Clear breakpoint at instruction ${breakpoint}`}
+          title={breakpoint == null ? 'Click the punched tape to set a breakpoint' : 'Clear breakpoint'}
+        >
+          <Circle className="h-2.5 w-2.5" fill={breakpoint == null ? 'none' : 'currentColor'} />
+          {breakpoint == null ? 'BP' : breakpoint}
+        </button>
         {fullscreenable && (
           <button
             onClick={toggleFullscreen}
@@ -398,6 +466,7 @@ interface DrawOpts {
   fitnessTrail?: { gen: number; fitness: number }[];
   targetFitness?: number;
   pendingLabel?: string | null;
+  breakpoint?: number | null;
   compact?: boolean;
   splice?: Splice | null;
 }
@@ -483,7 +552,10 @@ function draw(
 
   let y = padY;
 
-  drawTapeTransport(ctx, interp, counts, padX, y, w - padX * 2, tapeRowH, scale, opts.splice ?? null);
+  drawTapeTransport(
+    ctx, interp, counts, padX, y, w - padX * 2, tapeRowH, scale,
+    opts.splice ?? null, opts.breakpoint ?? null,
+  );
   y += tapeRowH + Math.round((opts.compact ? 8 : 14) * scale);
 
   drawCounterBank(ctx, interp, flashes, viewCenter, padX, y, w - padX * 2, memRowH, scale);
@@ -539,6 +611,31 @@ function tapeGeometry(w: number, len: number) {
   return { cellW, tapeW: cellW * len };
 }
 
+export function tapeInstructionAt(
+  px: number,
+  py: number,
+  canvasW: number,
+  canvasH: number,
+  sourceLength: number,
+  compact = false,
+): number | null {
+  if (sourceLength <= 0) return null;
+  const baseRowsTotal = 232;
+  const scale = canvasH >= 600
+    ? Math.min(4, (canvasH * 2) / 3 / baseRowsTotal)
+    : Math.min(2.5, Math.max(1, canvasH / 360));
+  const padX = Math.round(16 * scale);
+  const tapeY = Math.round((compact ? 8 : 12) * scale);
+  const tapeH = Math.round((compact ? 36 : 48) * scale);
+  if (py < tapeY || py > tapeY + tapeH) return null;
+
+  const availableW = canvasW - padX * 2;
+  const { cellW, tapeW } = tapeGeometry(availableW, sourceLength);
+  const startX = padX + (availableW - tapeW) / 2;
+  if (px < startX || px >= startX + tapeW) return null;
+  return Math.min(sourceLength - 1, Math.floor((px - startX) / cellW));
+}
+
 /** One strip of tape with punch holes, sprocket row and printed glyphs. */
 function drawTapeStrip(
   ctx: CanvasRenderingContext2D,
@@ -548,6 +645,7 @@ function drawTapeStrip(
   x: number, y: number, w: number, h: number,
   scale: number,
   alpha: number,
+  breakpointIndex: number | null,
 ) {
   if (!src) return;
   const { cellW, tapeW } = tapeGeometry(w, src.length);
@@ -638,6 +736,21 @@ function drawTapeStrip(
     ctx.fillRect(hx + (cellW - jawW) / 2, y + h + pad, jawW, 2 * scale);
   }
 
+  // Breakpoint pin — a red grease-pencil mark on the physical tape.
+  if (breakpointIndex != null && breakpointIndex >= 0 && breakpointIndex < src.length) {
+    const bx = startX + (breakpointIndex + 0.5) * cellW;
+    ctx.fillStyle = C.fault;
+    ctx.beginPath();
+    ctx.arc(bx, y - 5 * scale, 3 * scale, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = C.fault;
+    ctx.lineWidth = Math.max(1, scale);
+    ctx.beginPath();
+    ctx.moveTo(bx, y - 2 * scale);
+    ctx.lineTo(bx, y + h);
+    ctx.stroke();
+  }
+
   ctx.restore();
 }
 
@@ -648,6 +761,7 @@ function drawTapeTransport(
   x: number, y: number, w: number, h: number,
   scale: number,
   splice: Splice | null,
+  breakpointIndex: number | null,
 ) {
   const showHead = !interp.done && !interp.truncated;
 
@@ -668,14 +782,23 @@ function drawTapeTransport(
     // Old tape tears off leftward, dimming as it goes.
     if (splice.prevSource) {
       const exitDx = -easeInCubic(t) * (w + 80);
-      drawTapeStrip(ctx, splice.prevSource, null, null, x + exitDx, y, w, h, scale, 0.7 * (1 - t));
+      drawTapeStrip(
+        ctx, splice.prevSource, null, null, x + exitDx, y, w, h, scale,
+        0.7 * (1 - t), null,
+      );
     }
     // New tape feeds in from the right sprockets and settles.
     const feedDx = (1 - easeOutCubic(t)) * (w * 0.95);
-    drawTapeStrip(ctx, interp.source, counts, showHead ? interp.ip : null, x + feedDx, y, w, h, scale, 1);
+    drawTapeStrip(
+      ctx, interp.source, counts, showHead ? interp.ip : null, x + feedDx, y, w, h, scale,
+      1, breakpointIndex,
+    );
     ctx.restore();
   } else {
-    drawTapeStrip(ctx, interp.source, counts, showHead ? interp.ip : null, x, y, w, h, scale, 1);
+    drawTapeStrip(
+      ctx, interp.source, counts, showHead ? interp.ip : null, x, y, w, h, scale,
+      1, breakpointIndex,
+    );
   }
 }
 
