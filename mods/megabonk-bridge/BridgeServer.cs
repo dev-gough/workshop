@@ -22,7 +22,7 @@ public sealed class BridgeServer
     readonly ManualLogSource log;
     readonly object gate = new();
     readonly List<TcpClient> clients = new();
-    TcpListener? listener;
+    TcpListener listener;
     volatile string latest = "{\"v\":1,\"t\":0,\"inRun\":false}";
     int failures;
 
@@ -57,7 +57,7 @@ public sealed class BridgeServer
             TcpClient client;
             try
             {
-                client = listener!.AcceptTcpClient();
+                client = listener.AcceptTcpClient();
             }
             catch (Exception ex)
             {
@@ -208,7 +208,7 @@ public sealed class BridgeServer
         return true;
     }
 
-    static string? Header(string request, string name)
+    static string Header(string request, string name)
     {
         foreach (var line in request.Split(new[] { "\r\n" }, StringSplitOptions.None))
         {

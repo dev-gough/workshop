@@ -17,7 +17,7 @@ public sealed class Plugin : BasePlugin
     public const string Name = "Megabonk Bridge";
     public const string Version = "0.1.0";
 
-    internal static BridgeServer Server = null!;
+    internal static BridgeServer Server;
 
     public override void Load()
     {
