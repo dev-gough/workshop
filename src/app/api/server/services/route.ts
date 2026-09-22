@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { getConfig } from '@/lib/config';
 import { requireSetupToken } from '@/lib/admin-auth';
 import { sendRconCommand } from '@/lib/rcon';
-import { TRACKED_SERVICES } from '@/lib/server-services';
+import {
+  TRACKED_SERVICES,
+  createServiceSnapshotCache,
+  parseSystemctlSnapshot,
+  type SystemdServiceState,
+} from '@/lib/server-services';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,64 +55,47 @@ interface ServiceInfo {
   endpoints: ServiceEndpoint[] | null;
 }
 
-function getServiceInfo(name: string): ServiceInfo {
+const SYSTEMCTL_PROPERTIES = [
+  'Id',
+  'ActiveState',
+  'SubState',
+  'Description',
+  'MainPID',
+  'MemoryCurrent',
+  'ActiveEnterTimestamp',
+  'UnitFileState',
+  'ExecMainStatus',
+].join(',');
+
+function readSystemdServices(names: readonly string[]): SystemdServiceState[] {
   try {
-    const output = execSync(
-      `systemctl show ${name}.service --no-pager --property=ActiveState,SubState,Description,MainPID,MemoryCurrent,ActiveEnterTimestamp,UnitFileState,ExecMainStatus 2>/dev/null`,
-      { timeout: 5000 }
-    ).toString();
-
-    const props: Record<string, string> = {};
-    for (const line of output.split('\n')) {
-      const eq = line.indexOf('=');
-      if (eq > 0) {
-        props[line.substring(0, eq)] = line.substring(eq + 1);
-      }
-    }
-
-    const activeState = props['ActiveState'] || 'unknown';
-    const pid = parseInt(props['MainPID'] || '0');
-    const memBytes = parseInt(props['MemoryCurrent'] || '0');
-    const startedAt = props['ActiveEnterTimestamp'] || null;
-
-    const exitCode = parseInt(props['ExecMainStatus'] || '0');
-
-    let status: ServiceInfo['status'] = 'unknown';
-    if (activeState === 'active') status = 'running';
-    else if (activeState === 'inactive' || activeState === 'deactivating') status = 'stopped';
-    else if (activeState === 'failed' && exitCode === 143) status = 'stopped';
-    else if (activeState === 'failed') status = 'failed';
-
-    return {
-      name,
-      displayName: props['Description'] || name,
-      status,
-      enabled: props['UnitFileState'] === 'enabled',
-      description: props['Description'] || '',
-      activeState,
-      subState: props['SubState'] || '',
-      pid: pid > 0 ? pid : null,
-      memory: memBytes > 0 && !isNaN(memBytes) ? formatBytes(memBytes) : null,
-      uptime: startedAt && status === 'running' ? startedAt : null,
-      startedAt,
-      endpoints: SERVICE_ENDPOINTS[name] || null,
-    };
+    const output = execFileSync(
+      'systemctl',
+      ['show', ...names.map((name) => `${name}.service`), '--no-pager', `--property=${SYSTEMCTL_PROPERTIES}`],
+      { timeout: 5000, encoding: 'utf8' },
+    );
+    return parseSystemctlSnapshot(output, names);
   } catch {
-    return {
-      name,
-      displayName: name,
-      status: 'unknown',
-      enabled: false,
-      description: '',
-      activeState: 'unknown',
-      subState: '',
-      pid: null,
-      memory: null,
-      uptime: null,
-      startedAt: null,
-      endpoints: SERVICE_ENDPOINTS[name] || null,
-    };
+    return parseSystemctlSnapshot('', names);
   }
+}
+
+const snapshotCache = createServiceSnapshotCache({
+  load: () => readSystemdServices(TRACKED_SERVICES),
+});
+
+function toServiceInfo(service: SystemdServiceState): ServiceInfo {
+  const { memoryBytes, ...base } = service;
+  return {
+    ...base,
+    memory: memoryBytes ? formatBytes(memoryBytes) : null,
+    uptime: service.startedAt && service.status === 'running' ? service.startedAt : null,
+    endpoints: SERVICE_ENDPOINTS[service.name] || null,
+  };
+}
+
+function getServiceInfo(name: string): ServiceInfo {
+  return toServiceInfo(readSystemdServices([name])[0]);
 }
 
 async function gracefulMinecraftStop(service: string): Promise<void> {
@@ -140,8 +128,15 @@ function formatBytes(bytes: number): string {
 
 export async function GET() {
   try {
-    const services = TRACKED_SERVICES.map(getServiceInfo);
-    return NextResponse.json({ services });
+    const snapshot = snapshotCache.get();
+    return NextResponse.json({
+      services: snapshot.services.map(toServiceInfo),
+      snapshot: {
+        capturedAt: snapshot.capturedAt,
+        cacheHit: snapshot.cacheHit,
+        ttlMs: 4_000,
+      },
+    });
   } catch (error) {
     console.error('Services error:', error);
     return NextResponse.json({ error: 'Failed to fetch services' }, { status: 500 });
@@ -172,20 +167,29 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Cannot stop the workshop service from the dashboard' }, { status: 400 });
     }
 
+    snapshotCache.invalidate();
+
     // For Minecraft, prefer RCON /stop so the world saves cleanly and the unit
     // exits 0 instead of being SIGTERM'd to status 143.
     if ((action === 'stop' || action === 'restart') && service.startsWith('minecraft-')) {
       await gracefulMinecraftStop(service);
     }
 
-    execSync(`sudo systemctl ${action} ${service}.service`, { timeout: 180000 });
+    execFileSync('sudo', ['systemctl', action, `${service}.service`], { timeout: 180000 });
 
     // Wait a moment for state to settle
     await new Promise(r => setTimeout(r, 1000));
 
-    const info = getServiceInfo(service);
-    return NextResponse.json({ success: true, service: info });
+    const snapshot = snapshotCache.get(true);
+    const info = snapshot.services.find((candidate) => candidate.name === service);
+    return NextResponse.json({
+      success: true,
+      service: info ? toServiceInfo(info) : getServiceInfo(service),
+      services: snapshot.services.map(toServiceInfo),
+      snapshot: { capturedAt: snapshot.capturedAt, cacheHit: false, ttlMs: 4_000 },
+    });
   } catch (error) {
+    snapshotCache.invalidate();
     console.error('Service action error:', error);
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({ error: `Action failed: ${message}` }, { status: 500 });

@@ -6,7 +6,7 @@ import {
   Cpu, MemoryStick, HardDrive, Clock, Activity,
   Play, Square, RotateCcw, ChevronDown, ChevronRight,
   Circle, AlertCircle, Terminal, RefreshCw, Thermometer,
-  Network, BarChart3, Send, Check,
+  Send, Check, ShieldCheck, TriangleAlert, Pause,
 } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
@@ -50,6 +50,12 @@ interface ServiceInfo {
   uptime: string | null;
   startedAt: string | null;
   endpoints: ServiceEndpoint[] | null;
+}
+
+interface ServiceSnapshotMeta {
+  capturedAt: string;
+  cacheHit: boolean;
+  ttlMs: number;
 }
 
 interface LogLine {
@@ -138,6 +144,59 @@ function StatCard({ icon: Icon, label, value, sub }: { icon: React.ElementType; 
       <p className="text-2xl font-bold font-mono text-foreground">{value}</p>
       {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
     </div>
+  );
+}
+
+function ServiceHealthSummary({ services }: { services: ServiceInfo[] }) {
+  const counts = useMemo(() => ({
+    running: services.filter((service) => service.status === 'running').length,
+    stopped: services.filter((service) => service.status === 'stopped').length,
+    failed: services.filter((service) => service.status === 'failed').length,
+    unknown: services.filter((service) => service.status === 'unknown').length,
+  }), [services]);
+  const hasFault = counts.failed > 0;
+  const incomplete = counts.unknown > 0;
+  const Icon = hasFault || incomplete ? TriangleAlert : ShieldCheck;
+  const headline = hasFault
+    ? `${counts.failed} service ${counts.failed === 1 ? 'fault' : 'faults'}`
+    : incomplete
+      ? 'Telemetry incomplete'
+      : 'System nominal';
+  const accent = hasFault
+    ? 'var(--cc-rose)'
+    : incomplete
+      ? 'var(--cc-amber)'
+      : 'var(--cc-lime)';
+
+  return (
+    <section
+      aria-label="Service health summary"
+      className="grid grid-cols-2 gap-px overflow-hidden rounded-[3px] border border-border bg-border lg:grid-cols-[1.6fr_repeat(4,1fr)]"
+    >
+      <div className="col-span-2 flex items-center gap-3 bg-card px-4 py-3 lg:col-span-1">
+        <span
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[3px] border"
+          style={{ color: accent, borderColor: `color-mix(in oklab, ${accent} 35%, transparent)`, backgroundColor: `color-mix(in oklab, ${accent} 8%, transparent)` }}
+        >
+          <Icon className="h-4 w-4" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">Service health</p>
+          <p className="cc-readout truncate text-sm font-semibold" style={{ color: accent }}>{headline}</p>
+        </div>
+      </div>
+      {([
+        ['Running', counts.running, 'var(--cc-lime)'],
+        ['Standby', counts.stopped, 'var(--cc-dim)'],
+        ['Faults', counts.failed, 'var(--cc-rose)'],
+        ['Unknown', counts.unknown, 'var(--cc-amber)'],
+      ] as const).map(([label, count, color]) => (
+        <div key={label} className="bg-card px-4 py-3">
+          <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">{label}</p>
+          <p className="cc-readout mt-0.5 text-xl font-semibold tabular-nums" style={{ color }}>{count}</p>
+        </div>
+      ))}
+    </section>
   );
 }
 
@@ -556,6 +615,19 @@ export default function ServerDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [sparks, setSparks] = useState<Record<string, ServiceSpark>>({});
+  const [snapshot, setSnapshot] = useState<ServiceSnapshotMeta | null>(null);
+  const [clock, setClock] = useState(0);
+
+  useEffect(() => {
+    setClock(Date.now());
+    const timer = setInterval(() => setClock(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const snapshotAge = snapshot && clock
+    ? Math.max(0, Math.floor((clock - new Date(snapshot.capturedAt).getTime()) / 1_000))
+    : null;
+  const snapshotStale = snapshotAge === null || snapshotAge > 15;
 
   // Fetch 6h of CPU% sparkline data for all visible services, refreshed every 60s.
   useEffect(() => {
@@ -615,8 +687,9 @@ export default function ServerDashboard() {
       const servicesData = await servicesRes.json();
       if (statsData.hostname) setStats(statsData);
       if (servicesData.services) setServices(servicesData.services);
+      if (servicesData.snapshot) setSnapshot(servicesData.snapshot);
       setError(null);
-    } catch (err) {
+    } catch {
       setError('Failed to connect to server API');
     }
     setLoading(false);
@@ -647,9 +720,8 @@ export default function ServerDashboard() {
       if (data.error) {
         setError(data.error);
       } else {
-        const servicesRes = await fetch('/api/server/services');
-        const servicesData = await servicesRes.json();
-        if (servicesData.services) setServices(servicesData.services);
+        if (data.services) setServices(data.services);
+        if (data.snapshot) setSnapshot(data.snapshot);
         if (actionIdRef.current === id) setActionDone(id);
       }
     } catch {
@@ -682,20 +754,36 @@ export default function ServerDashboard() {
             <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
               <div className="font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
                 <span className="text-foreground/80">{stats?.hostname ?? 'host'}</span>
-                <span className="opacity-40"> // </span>
+                <span className="opacity-40">{' // '}</span>
                 <span>{stats?.os}</span>
-                <span className="opacity-40"> // </span>
+                <span className="opacity-40">{' // '}</span>
                 <span>{stats?.kernel}</span>
-                <span className="opacity-40"> // </span>
+                <span className="opacity-40">{' // '}</span>
                 <span>{stats?.cpuCount} cores</span>
-                {stats && <><span className="opacity-40"> // </span><span>up {formatUptime(stats.uptimeSeconds)}</span></>}
+                {stats && <><span className="opacity-40">{' // '}</span><span>up {formatUptime(stats.uptimeSeconds)}</span></>}
               </div>
               <div className="flex items-center gap-2">
+                <div
+                  className={`inline-flex items-center gap-1.5 border px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.15em] rounded-[3px] ${
+                    snapshotStale
+                      ? 'border-[color:var(--cc-rose)]/40 bg-[color:var(--cc-rose)]/10 text-[color:var(--cc-rose)]'
+                      : autoRefresh
+                        ? 'border-[color:var(--cc-cyan)]/40 bg-[color:var(--cc-cyan)]/10 text-[color:var(--cc-cyan)]'
+                        : 'border-[color:var(--cc-amber)]/40 bg-[color:var(--cc-amber)]/10 text-[color:var(--cc-amber)]'
+                  }`}
+                  title={snapshot ? `Systemd snapshot captured ${new Date(snapshot.capturedAt).toLocaleString()}${snapshot.cacheHit ? ' (served from short cache)' : ''}` : 'Waiting for service telemetry'}
+                >
+                  {autoRefresh && !snapshotStale
+                    ? <span className="cc-led cc-led-ok cc-led-pulse" aria-hidden />
+                    : <Pause className="h-3 w-3" />}
+                  {snapshotStale ? 'Stale' : autoRefresh ? 'Current' : 'Held'}
+                  {snapshotAge !== null && <span className="opacity-70">· {snapshotAge}s</span>}
+                </div>
                 <button
                   onClick={() => setAutoRefresh(!autoRefresh)}
                   className={`inline-flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-[0.15em] px-3 py-1.5 rounded-md border transition-colors ${
                     autoRefresh
-                      ? 'border-[color:var(--ok)]/40 bg-[color:var(--ok)]/10 text-[color:var(--ok)]'
+                      ? 'border-[color:var(--cc-lime)]/40 bg-[color:var(--cc-lime)]/10 text-[color:var(--cc-lime)]'
                       : 'border-border/50 text-muted-foreground hover:text-foreground'
                   }`}
                 >
@@ -826,6 +914,7 @@ export default function ServerDashboard() {
 
           {/* Services */}
           <div className="space-y-3">
+            <ServiceHealthSummary services={services} />
             <div className="flex items-center gap-2 text-sm font-medium px-1">
               <Activity className="h-4 w-4 text-primary" />
               Services
