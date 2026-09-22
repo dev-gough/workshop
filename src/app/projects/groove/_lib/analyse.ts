@@ -203,7 +203,7 @@ export async function analyseSong(
  * one, which is exactly backwards: a snare in a breakdown is more of an event
  * than the same snare buried in a wall of guitars.
  */
-function pickOnsets(flux: Float32Array[], frameRate: number): Onset[] {
+export function pickOnsets(flux: Float32Array[], frameRate: number): Onset[] {
   const out: Onset[] = [];
   const windowFrames = Math.max(4, Math.round(frameRate * 0.35));
 
@@ -214,14 +214,17 @@ function pickOnsets(flux: Float32Array[], frameRate: number): Onset[] {
 
     const sorted = Float32Array.from(f).sort();
     const ceiling = percentile(sorted, 0.97) || 1;
+    // Prefix sums make every local-mean lookup O(1). The old nested window
+    // scan made onset picking O(frames × window), which became noticeable on
+    // long records after the FFT itself had already finished.
+    const prefix = new Float64Array(n + 1);
+    for (let i = 0; i < n; i++) prefix[i + 1] = prefix[i] + f[i];
 
     for (let i = 0; i < n; i++) {
       // Mean of the window either side of this frame.
       const lo = Math.max(0, i - windowFrames);
       const hi = Math.min(n - 1, i + windowFrames);
-      let local = 0;
-      for (let j = lo; j <= hi; j++) local += f[j];
-      local /= hi - lo + 1;
+      const local = (prefix[hi + 1] - prefix[lo]) / (hi - lo + 1);
 
       const isPeak =
         f[i] > local * 1.55 &&
