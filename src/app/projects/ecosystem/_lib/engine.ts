@@ -271,6 +271,91 @@ export interface Stats {
     pred: Record<TraitKey, number>;
   };
   extinct: { prey: boolean; pred: boolean };
+  signal: EcoSignal;
+}
+
+export type EcoSignalLevel = 'calibrating' | 'stable' | 'watch' | 'tipping';
+
+export interface EcoSignal {
+  level: EcoSignalLevel;
+  label: string;
+  detail: string;
+  /** Change between the early and late halves of the observation window. */
+  change: number;
+}
+
+/**
+ * A deliberately simple early-warning instrument. It compares two halves of
+ * the recent record rather than reacting to one noisy sample.
+ */
+export function classifyEcoSignal(
+  samples: readonly PopSample[],
+  current: Pick<Stats, 'prey' | 'pred' | 'plants'>,
+): EcoSignal {
+  if (current.prey === 0 || current.pred === 0) {
+    const subject = current.prey === 0 && current.pred === 0
+      ? 'Both populations'
+      : current.prey === 0 ? 'Grazers' : 'Hunters';
+    return {
+      level: 'tipping',
+      label: 'Threshold crossed',
+      detail: `${subject} have collapsed to zero.`,
+      change: -1,
+    };
+  }
+
+  const window = samples.slice(-12);
+  if (window.length < 8) {
+    return {
+      level: 'calibrating',
+      label: 'Learning the cycle',
+      detail: `${8 - window.length} more samples before trend detection.`,
+      change: 0,
+    };
+  }
+
+  const split = Math.floor(window.length / 2);
+  const trend = (key: 'prey' | 'pred' | 'plants') => {
+    let early = 0;
+    let late = 0;
+    for (let i = 0; i < split; i++) early += window[i][key];
+    for (let i = split; i < window.length; i++) late += window[i][key];
+    early /= split;
+    late /= window.length - split;
+    return (late - early) / Math.max(1, early);
+  };
+
+  const changes = [
+    { name: 'Grazer', change: trend('prey') },
+    { name: 'Hunter', change: trend('pred') },
+    { name: 'Plant', change: trend('plants') },
+  ];
+  changes.sort((a, b) => a.change - b.change);
+  const weakest = changes[0];
+  const pct = Math.round(Math.abs(weakest.change) * 100);
+
+  if (weakest.change <= -0.35) {
+    return {
+      level: 'tipping',
+      label: `${weakest.name} collapse risk`,
+      detail: `Recent mean is down ${pct}% across the observation window.`,
+      change: weakest.change,
+    };
+  }
+  if (weakest.change <= -0.18) {
+    return {
+      level: 'watch',
+      label: `${weakest.name} pressure`,
+      detail: `Recent mean is down ${pct}%; watch whether the cycle rebounds.`,
+      change: weakest.change,
+    };
+  }
+  return {
+    level: 'stable',
+    label: 'Cycle holding',
+    detail: 'No population is falling fast enough to trigger the watch.',
+    change: weakest.change,
+  };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -309,7 +394,10 @@ export class Ecosystem {
   private rand: () => number;
   private nextId = 1;
   private spare: number | null = null;
-  private grid = new Map<number, Agent[]>();
+  private agentGrids: Record<Species, Map<number, Agent[]>> = {
+    prey: new Map(),
+    pred: new Map(),
+  };
   private plantGrid = new Map<number, Plant[]>();
   private cols = 1;
   private patchCenters: [number, number][] = [];
@@ -335,7 +423,7 @@ export class Ecosystem {
 
     for (let i = 0; i < params.prey.initial; i++) this.founder('prey');
     for (let i = 0; i < params.pred.initial; i++) this.founder('pred');
-    for (let i = 0; i < params.plants.initial; i++) this.plants.push(this.newPlant());
+    for (let i = 0; i < params.plants.initial; i++) this.addPlant(this.newPlant());
   }
 
   private gauss(): number {
@@ -429,21 +517,33 @@ export class Ecosystem {
     return Math.floor(y / CELL) * this.cols + Math.floor(x / CELL);
   }
 
-  private buildGrids() {
-    this.grid.clear();
-    this.plantGrid.clear();
+  private addPlant(plant: Plant) {
+    this.plants.push(plant);
+    const k = this.key(plant.x, plant.y);
+    const cell = this.plantGrid.get(k);
+    if (cell) cell.push(plant);
+    else this.plantGrid.set(k, [plant]);
+  }
+
+  private removePlant(plant: Plant) {
+    const k = this.key(plant.x, plant.y);
+    const cell = this.plantGrid.get(k);
+    if (!cell) return;
+    const i = cell.indexOf(plant);
+    if (i >= 0) cell.splice(i, 1);
+    if (cell.length === 0) this.plantGrid.delete(k);
+  }
+
+  private buildAgentGrids() {
+    this.agentGrids.prey.clear();
+    this.agentGrids.pred.clear();
     for (const a of this.agents) {
       if (!a.alive) continue;
       const k = this.key(a.x, a.y);
-      const cell = this.grid.get(k);
+      const grid = this.agentGrids[a.species];
+      const cell = grid.get(k);
       if (cell) cell.push(a);
-      else this.grid.set(k, [a]);
-    }
-    for (const p of this.plants) {
-      const k = this.key(p.x, p.y);
-      const cell = this.plantGrid.get(k);
-      if (cell) cell.push(p);
-      else this.plantGrid.set(k, [p]);
+      else grid.set(k, [a]);
     }
   }
 
@@ -461,14 +561,15 @@ export class Ecosystem {
     return [dx, dy, Math.sqrt(dx * dx + dy * dy)];
   }
 
-  private nearbyAgents(x: number, y: number, radius: number, out: Agent[]) {
+  private nearbyAgents(species: Species, x: number, y: number, radius: number, out: Agent[]) {
     out.length = 0;
+    const grid = this.agentGrids[species];
     const r = Math.ceil(radius / CELL);
     const cx = Math.floor(x / CELL);
     const cy = Math.floor(y / CELL);
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
-        const cell = this.grid.get((cy + dy) * this.cols + (cx + dx));
+        const cell = grid.get((cy + dy) * this.cols + (cx + dx));
         if (cell) for (const a of cell) out.push(a);
       }
     }
@@ -497,10 +598,10 @@ export class Ecosystem {
     const sprouts = whole + (this.rand() < P.plants.spawnRate - whole ? 1 : 0);
     for (let i = 0; i < sprouts; i++) {
       if (this.plants.length >= P.plants.capacity) break;
-      this.plants.push(this.newPlant());
+      this.addPlant(this.newPlant());
     }
 
-    this.buildGrids();
+    this.buildAgentGrids();
 
     const newborns: Agent[] = [];
     const scratchA: Agent[] = [];
@@ -534,7 +635,7 @@ export class Ecosystem {
       let state: Behavior = 'wander';
 
       if (a.species === 'prey') {
-        this.nearbyAgents(a.x, a.y, g.vision, scratchA);
+        this.nearbyAgents('pred', a.x, a.y, g.vision, scratchA);
         let best = Infinity;
         let px = 0;
         let py = 0;
@@ -566,7 +667,7 @@ export class Ecosystem {
           }
         }
       } else {
-        this.nearbyAgents(a.x, a.y, g.vision, scratchA);
+        this.nearbyAgents('prey', a.x, a.y, g.vision, scratchA);
         let closest = Infinity;
         for (const n of scratchA) {
           if (n.species !== 'prey' || !n.alive) continue;
@@ -624,12 +725,13 @@ export class Ecosystem {
             a.energy += P.plants.energy;
             a.meals++;
             p.eaten = true;
+            this.removePlant(p);
             anyEaten = true;
             break;
           }
         }
       } else {
-        this.nearbyAgents(a.x, a.y, g.size + 20 + sp.reach, scratchA);
+        this.nearbyAgents('prey', a.x, a.y, g.size + 20 + sp.reach, scratchA);
         for (const n of scratchA) {
           if (n.species !== 'prey' || !n.alive) continue;
           const [, , d] = this.delta(a.x, a.y, n.x, n.y);
@@ -792,11 +894,10 @@ export class Ecosystem {
       preyT[k] = div(preyT[k], prey);
       predT[k] = div(predT[k], pred);
     }
+    const current = { prey, pred, plants: this.plants.length };
     return {
       tick: this.tick,
-      prey,
-      pred,
-      plants: this.plants.length,
+      ...current,
       births: this.totalBirths,
       deaths: { ...this.totals },
       maxGen: this.maxGen,
@@ -804,6 +905,7 @@ export class Ecosystem {
       meanEnergy: { prey: div(preyE, prey), pred: div(predE, pred) },
       traits: { prey: preyT, pred: predT },
       extinct: { prey: prey === 0, pred: pred === 0 },
+      signal: classifyEcoSignal(this.pop, current),
     };
   }
 

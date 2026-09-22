@@ -37,6 +37,13 @@ function Row({ label, value, color }: { label: string; value: string; color?: st
 export function Census({ stats }: { stats: Stats }) {
   const total = stats.deaths.starved + stats.deaths.eaten + stats.deaths.aged + stats.deaths.culled;
   const share = (n: number) => (total > 0 ? `${Math.round((n / total) * 100)}%` : '—');
+  const signalColor = stats.signal.level === 'tipping'
+    ? 'var(--destructive)'
+    : stats.signal.level === 'watch'
+      ? 'var(--eco-lamp)'
+      : stats.signal.level === 'stable'
+        ? 'var(--eco-plant)'
+        : 'var(--muted-foreground)';
   return (
     <div className="eco-case px-3 py-2.5">
       <div className="flex items-baseline justify-between">
@@ -66,6 +73,22 @@ export function Census({ stats }: { stats: Stats }) {
           value={`${stats.meanGen.prey.toFixed(1)} · ${stats.meanGen.pred.toFixed(1)}`}
         />
         <Row label="Born, all time" value={stats.births.toLocaleString()} />
+      </div>
+
+      <div className="mt-2 border-t border-border/70 pt-2">
+        <div className="flex items-center gap-2">
+          <span
+            className="h-1.5 w-1.5 shrink-0 rounded-full"
+            style={{ background: signalColor, boxShadow: `0 0 7px ${signalColor}` }}
+          />
+          <span className="eco-etch text-[8px]">Early warning</span>
+          <span className="eco-readout ml-auto text-[10px]" style={{ color: signalColor }}>
+            {stats.signal.label}
+          </span>
+        </div>
+        <p className="mt-1 text-[9px] leading-relaxed text-muted-foreground">
+          {stats.signal.detail}
+        </p>
       </div>
 
       <div className="mt-2 space-y-1 border-t border-border/70 pt-2">
