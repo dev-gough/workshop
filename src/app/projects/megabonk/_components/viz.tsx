@@ -47,14 +47,14 @@ export function ImpactHero({ a, liveDamage }: { a: Analysis; liveDamage?: number
       <div className="pointer-events-none absolute -right-10 -top-14 h-52 w-52 rounded-full"
         style={{ background: 'radial-gradient(circle, var(--color-primary), transparent 68%)', opacity: 0.14 }} />
       <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary">
-        Total damage output
+        {liveDamage != null ? 'In this run' : 'Total damage output'}
       </p>
       <div className="mt-1 flex items-end gap-4">
         <div className="mb-readout mb-molten text-6xl font-bold leading-none sm:text-7xl">
-          {fmtMult(a.total)}
+          {fmtMult(liveDamage != null ? liveDamage : a.total)}
         </div>
         <p className="mb-4 text-[11px] leading-tight text-muted-foreground">
-          vs a bare run with<br />no items or stats
+          {liveDamage != null ? <>damage multiplier<br />from the game</> : <>vs a bare run with<br />no items or stats</>}
         </p>
       </div>
       <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 border-t border-border/70 pt-3">
@@ -63,7 +63,7 @@ export function ImpactHero({ a, liveDamage }: { a: Analysis; liveDamage?: number
           value={a.mode === 'dps' ? fmtMult(a.total) : '—'} muted={a.mode !== 'dps'} />
         <Stat label="Active brackets" value={String(a.brackets.filter(b => b.factor > 1).length)} />
         <Stat label="Contributors" value={String(a.leaves.length)} />
-        {liveDamage != null && <Stat label="In-game damage" value={fmtMult(liveDamage)} />}
+        {liveDamage != null && <Stat label="Loadout model" value={fmtMult(a.total)} />}
       </div>
     </div>
   );

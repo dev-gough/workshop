@@ -12,8 +12,10 @@ import { CharacterPicker, ItemRoster, StatControls, Switch } from './_components
 import { applyLiveSnapshot, type LiveSnapshot } from './_lib/live';
 import { useMegabonkLive, type LiveStatus } from './_lib/use-live';
 
-function LiveLink({ status, httpsPage }: { status: LiveStatus; httpsPage: boolean }) {
-  const label = status === 'live' ? 'Game linked' : status === 'connecting' ? 'Looking for the game' : 'Game offline';
+function LiveLink({ status, httpsPage, inRun }: { status: LiveStatus; httpsPage: boolean; inRun: boolean }) {
+  const label = status === 'live'
+    ? (inRun ? 'Game linked · in a run' : 'Game linked · in the menu')
+    : status === 'connecting' ? 'Looking for the game' : 'Game offline';
   const dot = status === 'live' ? 'bg-primary' : status === 'connecting' ? 'bg-primary/50' : 'bg-border';
   return (
     <div className="mt-0.5">
@@ -37,12 +39,14 @@ export default function MegabonkPage() {
   const [shared, setShared] = useState(false);
   const [followGame, setFollowGame] = useState(true);
   const [liveDamage, setLiveDamage] = useState<number | null>(null);
+  const [inRun, setInRun] = useState(false);
   const followRef = useRef(true);
   followRef.current = followGame;
   const set = (patch: Partial<Build>) => setBuild(b => ({ ...b, ...patch }));
   const a = useMemo(() => analyze(build), [build]);
 
   const onSnapshot = useCallback((snap: LiveSnapshot) => {
+    setInRun(snap.inRun);
     const damage = snap.inRun ? snap.stats?.damageMultiplier : undefined;
     setLiveDamage(typeof damage === 'number' && Number.isFinite(damage) ? damage : null);
     if (!followRef.current || !snap.inRun) return;
@@ -104,7 +108,7 @@ export default function MegabonkPage() {
                   <span className="text-muted-foreground">Follow the game</span>
                   <Switch on={followGame} onChange={setFollowGame} label="Follow the game" />
                 </label>
-                <LiveLink status={live.status} httpsPage={live.httpsPage} />
+                <LiveLink status={live.status} httpsPage={live.httpsPage} inRun={inRun} />
                 <div className="mt-0.5 grid grid-cols-2 gap-1.5">
                   <button
                     onClick={() => void share()}
