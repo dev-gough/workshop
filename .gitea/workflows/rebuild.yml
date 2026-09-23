@@ -1,0 +1,32 @@
+name: Rebuild workshop
+
+on:
+  push:
+    branches:
+      - home-rooms
+
+jobs:
+  rebuild:
+    runs-on: workshop-host
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Clean install and build
+        run: |
+          set -euo pipefail
+          ln -sfn /home/server/devys-workshop/config.json config.json
+          npm ci
+          npm run build
+
+      - name: Publish and restart
+        run: |
+          set -euo pipefail
+          dest=/home/server/workshop-live
+          mkdir -p "$dest"
+          rsync -a --delete --exclude config.json --exclude .git ./ "$dest/"
+          ln -sfn /home/server/devys-workshop/config.json "$dest/config.json"
+          sudo install -m 644 deploy/workshop.service /etc/systemd/system/workshop.service
+          sudo systemctl daemon-reload
+          sudo systemctl restart workshop
+          sudo systemctl is-active workshop
