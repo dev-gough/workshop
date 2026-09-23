@@ -42,12 +42,12 @@ public sealed class Plugin : BasePlugin
             // Raw stat units, matching PlayerStats.GetStat:
             // fractions for crit chance and attack speed, multipliers for the rest.
             // Crit damage is the raw stat; the workshop shows it as raw × 2.
-            var damage = Stat(EStat.DamageMultiplier);
-            var critChance = Stat(EStat.CritChance);
-            var critDamage = Stat(EStat.CritDamage);
-            var attackSpeed = Stat(EStat.AttackSpeed);
-            var elite = Stat(EStat.EliteDamageMultiplier);
-            var poison = Stat(EStat.PoisonDamageMultiplier);
+            var damage = Stat(player, EStat.DamageMultiplier);
+            var critChance = Stat(player, EStat.CritChance);
+            var critDamage = Stat(player, EStat.CritDamage);
+            var attackSpeed = Stat(player, EStat.AttackSpeed);
+            var elite = Stat(player, EStat.EliteDamageMultiplier);
+            var poison = Stat(player, EStat.PoisonDamageMultiplier);
             return "{\"v\":1,\"t\":" + now + ",\"inRun\":true,\"stats\":{"
                 + "\"damageMultiplier\":" + Num(damage) + ","
                 + "\"critChance\":" + Num(critChance) + ","
@@ -64,9 +64,13 @@ public sealed class Plugin : BasePlugin
         }
     }
 
-    static float Stat(EStat stat)
+    static float Stat(MyPlayer player, EStat stat)
     {
-        return PlayerStats.GetStat(stat);
+        var inventory = player.inventory;
+        if (inventory == null) return 0f;
+        var stats = inventory.playerStats;
+        if (stats == null) return 0f;
+        return stats.GetStat(stat);
     }
 
     static string Idle(long now) => "{\"v\":1,\"t\":" + now + ",\"inRun\":false}";

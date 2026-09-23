@@ -64,7 +64,10 @@ public sealed class BridgeServer
                 log.LogWarning($"Bridge accept stopped: {ex.Message}");
                 return;
             }
-            ThreadPool.QueueUserWorkItem(_ => Handshake(client));
+            var accepted = client;
+            var handshake = new Thread(() => Handshake(accepted));
+            handshake.IsBackground = true;
+            handshake.Start();
         }
     }
 
@@ -104,7 +107,10 @@ public sealed class BridgeServer
         stream.ReadTimeout = Timeout.Infinite;
         lock (gate) clients.Add(client);
         log.LogInfo("Workshop page connected");
-        ThreadPool.QueueUserWorkItem(_ => ReadLoop(client));
+        var reading = client;
+        var reader = new Thread(() => ReadLoop(reading));
+        reader.IsBackground = true;
+        reader.Start();
     }
 
     void SendLoop()
