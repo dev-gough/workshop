@@ -104,6 +104,8 @@ export interface Config {
   minecraftServers: MinecraftServer[];
   /** Single shared token gating /api/config writes from the in-app /setup page. */
   setupToken: string | null;
+  /** Laptop Ollama. Null hides generation until a base URL is set. */
+  ollama: { baseUrl: string } | null;
 }
 
 class ConfigError extends Error {
@@ -240,7 +242,24 @@ function validate(raw: unknown): Config {
     riot,
     minecraftServers,
     setupToken: asOptionalString(raw, 'setupToken'),
+    ollama: validateOllama(raw.ollama),
   };
+}
+
+function validateOllama(raw: unknown): { baseUrl: string } | null {
+  if (raw == null) return null;
+  if (!isObject(raw)) throw new ConfigError('ollama must be an object or null');
+  const baseUrl = asString(raw, 'baseUrl', 'ollama').replace(/\/+$/, '');
+  let url: URL;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    throw new ConfigError('ollama.baseUrl must be an http(s) URL');
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new ConfigError('ollama.baseUrl must be an http(s) URL');
+  }
+  return { baseUrl };
 }
 
 let cached: Config | null = null;

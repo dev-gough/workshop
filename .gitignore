@@ -43,6 +43,9 @@ next-env.d.ts
 # config
 config.json
 
+# Parlor generated images
+/data/parlor/
+
 # Mirrored LoL challenge tier tokens (~93MB, populated by
 # `npm run mirror-challenge-icons`; regenerable, never committed).
 /public/lol/challenge-tokens/

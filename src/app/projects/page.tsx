@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
-import { Clock, Grid3X3, Home, Music, Trophy, Server, ArrowRight, Palette, Bug, Brain, Atom, Share2, Film, Wallet, Code2, CandlestickChart } from 'lucide-react';
+import { Clock, Grid3X3, Home, Music, Trophy, Server, ArrowRight, Palette, Bug, Brain, Atom, Share2, Film, Wallet, Code2, CandlestickChart, MessageSquare } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
 import { motion } from 'motion/react';
@@ -576,6 +576,19 @@ export default function ProjectsPage() {
                 Search, download, and share music on the Soulseek P2P network. Track transfers and manage library ingestion.
               </p>
               <SoulseekVisual />
+            </ProjectCard>
+
+            {/* ── The Parlor ── */}
+            <ProjectCard href="/projects/parlor" delay={0.36}
+              className="bg-gradient-to-br from-stone-900/80 to-amber-950/40">
+              <div className="flex items-center gap-2 mb-3">
+                <MessageSquare className="h-4 w-4 text-amber-300" />
+                <span className="text-[10px] uppercase tracking-[0.2em] text-amber-200/60 font-medium">House</span>
+              </div>
+              <h2 className="text-lg font-bold text-white mb-1.5">The Parlor</h2>
+              <p className="text-sm text-white/45 leading-relaxed mb-2">
+                A shared chat for the house. Talk or draw with the laptop, and hide a thread when it isn’t for everyone.
+              </p>
             </ProjectCard>
 
             {/* ── Genetic Algorithms section divider ── */}

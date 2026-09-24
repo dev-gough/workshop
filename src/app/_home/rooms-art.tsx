@@ -423,3 +423,29 @@ export function MegabonkRoom({ className }: { className?: string }) {
     </Door>
   );
 }
+
+// ── 19 · The Parlor — a lamp, a name, a line of talk ──
+
+export function ParlorRoom({ className }: { className?: string }) {
+  return (
+    <Door href="/projects/parlor" number="RM 19" room="The Parlor" className={className}>
+      <div className="parlor-theme flex h-full flex-col justify-between p-3">
+        <div className="flex items-center gap-2">
+          <span className="parlor-lamp" />
+          <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+            The Parlor
+          </span>
+        </div>
+        <div className="flex items-center gap-2 rounded-md bg-card px-2 py-1.5">
+          <span
+            className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+            style={{ background: '#8c334d' }}
+          >
+            D
+          </span>
+          <span className="truncate text-[11px] text-foreground">evening, the lake</span>
+        </div>
+      </div>
+    </Door>
+  );
+}

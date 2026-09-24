@@ -2850,3 +2850,76 @@
     transition: none;
   }
 }
+
+/* ─── Parlor scope — lamp-lit sitting room, applied to /projects/parlor ───
+   Both modes: daylight cream paper, and the same room after dark. */
+.parlor-theme {
+  --parlor-bg:      #f3efe6;
+  --parlor-card:    #fffdf8;
+  --parlor-muted:   #ebe4d6;
+  --parlor-ink:     #2c241c;
+  --parlor-soft:    #7a6e62;
+  --parlor-line:    #e4d9c8;
+  --parlor-accent:  #8c4a32;
+  --parlor-lamp:    #e0a15a;
+
+  --color-background:         var(--parlor-bg);
+  --color-foreground:         var(--parlor-ink);
+  --color-card:               var(--parlor-card);
+  --color-card-foreground:    var(--parlor-ink);
+  --color-popover:            var(--parlor-card);
+  --color-popover-foreground: var(--parlor-ink);
+  --color-muted:              var(--parlor-muted);
+  --color-muted-foreground:   var(--parlor-soft);
+  --color-secondary:          var(--parlor-muted);
+  --color-secondary-foreground: var(--parlor-ink);
+  --color-border:             var(--parlor-line);
+  --color-input:              var(--parlor-line);
+  --color-ring:               var(--parlor-accent);
+  --color-primary:            var(--parlor-accent);
+  --color-primary-foreground: #fffdf8;
+  --color-accent:             var(--parlor-lamp);
+  --color-destructive:        #a33b32;
+
+  color: var(--parlor-ink);
+  background-color: var(--parlor-bg);
+}
+
+.dark .parlor-theme {
+  --parlor-bg:      #1c1612;
+  --parlor-card:    #261e18;
+  --parlor-muted:   #2e241c;
+  --parlor-ink:     #f3eadf;
+  --parlor-soft:    #b3a394;
+  --parlor-line:    #3a2e24;
+  --parlor-accent:  #e0a15a;
+  --parlor-lamp:    #e0a15a;
+
+  --color-background:         var(--parlor-bg);
+  --color-foreground:         var(--parlor-ink);
+  --color-card:               var(--parlor-card);
+  --color-card-foreground:    var(--parlor-ink);
+  --color-popover:            var(--parlor-card);
+  --color-popover-foreground: var(--parlor-ink);
+  --color-muted:              var(--parlor-muted);
+  --color-muted-foreground:   var(--parlor-soft);
+  --color-secondary:          var(--parlor-muted);
+  --color-secondary-foreground: var(--parlor-ink);
+  --color-border:             var(--parlor-line);
+  --color-input:              var(--parlor-line);
+  --color-ring:               var(--parlor-accent);
+  --color-primary:            var(--parlor-accent);
+  --color-primary-foreground: #1c1612;
+  --color-accent:             var(--parlor-lamp);
+  --color-destructive:        #f0a8a2;
+}
+
+.parlor-lamp {
+  display: block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: var(--parlor-lamp, #e0a15a);
+  box-shadow: 0 0 10px var(--parlor-lamp, #e0a15a);
+}
+
