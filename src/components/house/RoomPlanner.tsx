@@ -22,6 +22,9 @@ import {
 } from './model';
 import { getIcon } from './icons';
 import CataloguePanel, { type PlaceSpec } from './CataloguePanel';
+import dynamic from 'next/dynamic';
+
+const RoomViewer3D = dynamic(() => import('./RoomViewer3D'), { ssr: false });
 
 // Sheet margins (px) — room for the dimension strings.
 const MT = 46, ML = 50, MR = 26, MB = 26;
@@ -963,7 +966,7 @@ export default function RoomPlanner() {
         />
       </aside>
 
-      {/* ── The board ── */}
+      {/* ── The board (2D + 3D views) ── */}
       <div className="order-1 flex min-h-0 min-w-0 flex-1 flex-col gap-2 lg:order-2">
         {/* Toolbar */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -1125,18 +1128,20 @@ export default function RoomPlanner() {
           </div>
         </div>
 
-        {/* ── The sheet ── */}
-        <div
-          ref={containerRef}
-          className="bp-paper relative min-h-[420px] flex-1 touch-none overflow-hidden"
-          onClick={(e) => {
-            const t = e.target as HTMLElement;
-            if (t === e.currentTarget || t.tagName === 'CANVAS') { setSelectedId(null); setSelectedDoorId(null); }
-          }}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-        >
-          <canvas ref={canvasRef} className="absolute inset-0" style={{ touchAction: 'none' }} />
+        {/* ── The sheet: 2D plan + 3D twin ── */}
+        <div className="flex min-h-[420px] flex-1 flex-col gap-2 xl:flex-row">
+          {/* 2D Plan */}
+          <div
+            ref={containerRef}
+            className="bp-paper relative min-h-[420px] flex-1 touch-none overflow-hidden"
+            onClick={(e) => {
+              const t = e.target as HTMLElement;
+              if (t === e.currentTarget || t.tagName === 'CANVAS') { setSelectedId(null); setSelectedDoorId(null); }
+            }}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+          >
+            <canvas ref={canvasRef} className="absolute inset-0" style={{ touchAction: 'none' }} />
 
           {/* Furniture */}
           {view && items.map(item => {
@@ -1260,6 +1265,24 @@ export default function RoomPlanner() {
                 <p className="bp-etch" style={{ fontSize: 8, letterSpacing: '0.2em' }}>Sheet</p>
                 <p className="text-[11px]">A-01</p>
               </div>
+            </div>
+          </div>
+          </div>
+
+          {/* 3D View */}
+          <div className="relative min-h-[420px] flex-1">
+            <RoomViewer3D
+              room={room}
+              items={items}
+              doors={doors}
+              selectedId={selectedId}
+              selectedDoorId={selectedDoorId}
+            />
+            {/* 3D view label */}
+            <div className="bp-readout pointer-events-none absolute bottom-0 right-0 z-20 border-l border-t bg-card px-2.5 py-1.5"
+              style={{ borderColor: 'var(--bp-wall)' }}>
+              <p className="bp-etch" style={{ fontSize: 8, letterSpacing: '0.2em' }}>3D View</p>
+              <p className="text-[11px]">Live twin</p>
             </div>
           </div>
         </div>
