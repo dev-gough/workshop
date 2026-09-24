@@ -23,6 +23,7 @@ import {
 import { getIcon } from './icons';
 import CataloguePanel, { type PlaceSpec } from './CataloguePanel';
 import dynamic from 'next/dynamic';
+import RoomViewer3DErrorBoundary from './RoomViewer3DErrorBoundary';
 
 const RoomViewer3D = dynamic(() => import('./RoomViewer3D'), { ssr: false });
 
@@ -1271,13 +1272,15 @@ export default function RoomPlanner() {
 
           {/* 3D View */}
           <div className="relative min-h-[420px] flex-1">
-            <RoomViewer3D
-              room={room}
-              items={items}
-              doors={doors}
-              selectedId={selectedId}
-              selectedDoorId={selectedDoorId}
-            />
+            <RoomViewer3DErrorBoundary>
+              <RoomViewer3D
+                room={room}
+                items={items}
+                doors={doors}
+                selectedId={selectedId}
+                selectedDoorId={selectedDoorId}
+              />
+            </RoomViewer3DErrorBoundary>
             {/* 3D view label */}
             <div className="bp-readout pointer-events-none absolute bottom-0 right-0 z-20 border-l border-t bg-card px-2.5 py-1.5"
               style={{ borderColor: 'var(--bp-wall)' }}>
