@@ -441,9 +441,7 @@ export default function ChallengesPage() {
       {canHover && hover && !selected && (
         <ChallengeHoverCard node={hover.node} rect={hover.rect} history={history} />
       )}
-      {selected && (
-        <ChallengeDetailSheet node={selected} onClose={() => setSelected(null)} history={history} />
-      )}
+      <ChallengeDetailSheet node={selected} onClose={() => setSelected(null)} history={history} />
     </div>
   );
 }

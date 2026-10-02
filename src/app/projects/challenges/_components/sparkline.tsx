@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, type MouseEvent } from 'react';
 import { TIERS, tierVar, type ChallengeNode } from './types';
 
 export type HistoryMap = Record<string, [number, number][]>;
@@ -66,6 +67,21 @@ export function ChallengeSparkline({
     new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
   const gradId = `spark-${node.challengeId}`;
+  const [hover, setHover] = useState<number | null>(null);
+
+  const onMove = (event: MouseEvent<SVGSVGElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const px = ((event.clientX - rect.left) / rect.width) * W;
+    let best = 0;
+    let bestD = Infinity;
+    for (let i = 0; i < points.length; i++) {
+      const d = Math.abs(x(points[i][0]) - px);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    setHover(best);
+  };
+
+  const tipLeft = hover == null ? 0 : Math.min(Math.max((x(points[hover][0]) / W) * 100, 4), 62);
 
   return (
     <div>
@@ -78,8 +94,10 @@ export function ChallengeSparkline({
         </p>
       </div>
 
+      <div className="relative" onMouseLeave={() => setHover(null)}>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img"
-           aria-label={`Progress from ${fmt(ys[0])} to ${fmt(ys[ys.length - 1])}`}>
+           aria-label={`Progress from ${fmt(ys[0])} to ${fmt(ys[ys.length - 1])}`}
+           onMouseMove={onMove}>
         <defs>
           <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={color} stopOpacity="0.28" />
@@ -106,7 +124,24 @@ export function ChallengeSparkline({
         <path d={line} fill="none" stroke={color} strokeWidth="1.5"
               strokeLinejoin="round" strokeLinecap="round" />
         <circle cx={x(t1)} cy={y(ys[ys.length - 1])} r="2.5" fill={color} />
+        {hover != null && (
+          <g>
+            <line
+              x1={x(points[hover][0])} x2={x(points[hover][0])}
+              y1={4} y2={H - PAD_B}
+              stroke={color} strokeWidth="1" opacity="0.7"
+            />
+            <circle cx={x(points[hover][0])} cy={y(points[hover][1])} r="3.5" fill={color} />
+          </g>
+        )}
       </svg>
+      {hover != null && (
+        <div className="lol-tip top-1" style={{ left: `${tipLeft}%` }}>
+          <span className="text-[9px] uppercase tracking-[0.14em] text-muted-foreground">{day(points[hover][0])}</span>
+          <span className="ml-2 font-mono text-[11px] tabular-nums" style={{ color }}>{fmt(points[hover][1])}</span>
+        </div>
+      )}
+      </div>
 
       <div className="flex justify-between text-[9px] text-[var(--lol-text-muted)]">
         <span>{day(t0)}</span>

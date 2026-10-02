@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { AnimatePresence, motion } from 'motion/react';
 import { Award, Users, X } from 'lucide-react';
 import { ChallengeToken, PointsCorner } from './token';
 import {
@@ -30,29 +31,45 @@ const CARD_H = 520;
 function RarityChart({ node }: { node: ChallengeNode }) {
   const vals = ALL_TIERS.map((t) => node.percentiles[t] ?? 0);
   const max = Math.max(...vals);
+  const [hot, setHot] = useState<number | null>(null);
   if (max <= 0) return null;
 
+  const tipLeft = hot == null ? 0 : Math.min(Math.max(((hot + 0.5) / ALL_TIERS.length) * 100, 18), 82);
+
   return (
-    <div className="flex h-12 items-end gap-[3px]" aria-hidden>
-      {ALL_TIERS.map((t, i) => {
-        const v = vals[i];
-        const isCurrent = t === node.level;
-        return (
-          <div
-            key={t}
-            title={`${t}: ${pctLabel(v) ?? '0%'}`}
-            className="relative flex-1 transition-opacity"
-            style={{
-              // A 2px stub keeps a real-but-tiny share visible as a mark rather
-              // than vanishing into the axis — a true zero still renders empty.
-              height: v > 0 ? `${Math.max(8, (v / max) * 100)}%` : 1,
-              background: tierVar(t),
-              opacity: isCurrent ? 1 : 0.4,
-              boxShadow: isCurrent ? `0 0 6px ${tierVar(t)}` : undefined,
-            }}
-          />
-        );
-      })}
+    <div className="relative" onMouseLeave={() => setHot(null)}>
+      {hot != null && (
+        <div className="lol-tip bottom-full mb-1" style={{ left: `${tipLeft}%`, transform: 'translateX(-50%)' }}>
+          <span className="text-[9px] font-semibold uppercase tracking-[0.14em]" style={{ color: tierVar(ALL_TIERS[hot]) }}>
+            {ALL_TIERS[hot] === 'NONE' ? 'Unranked' : ALL_TIERS[hot]}
+          </span>
+          <span className="ml-2 font-mono text-[11px] tabular-nums text-foreground">
+            {pctLabel(vals[hot]) ?? '0%'}
+          </span>
+        </div>
+      )}
+      <div className="flex h-12 items-end gap-[3px]">
+        {ALL_TIERS.map((t, i) => {
+          const v = vals[i];
+          const isCurrent = t === node.level;
+          const active = hot === i;
+          return (
+            <div
+              key={t}
+              className="relative flex-1 cursor-crosshair transition-opacity"
+              onMouseEnter={() => setHot(i)}
+              style={{
+                // A 2px stub keeps a real-but-tiny share visible as a mark rather
+                // than vanishing into the axis — a true zero still renders empty.
+                height: v > 0 ? `${Math.max(8, (v / max) * 100)}%` : 1,
+                background: tierVar(t),
+                opacity: hot == null || active || isCurrent ? 1 : 0.35,
+                boxShadow: active || isCurrent ? `0 0 6px ${tierVar(t)}` : undefined,
+              }}
+            />
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -213,41 +230,69 @@ export function ChallengeHoverCard({ node, rect, history }: {
  * the viewport on narrow screens (within thumb reach) and centres on larger
  * ones, where it doubles as a way to pin a card open with a click.
  */
+const SHEET_EASE = [0.22, 0.9, 0.3, 1] as const;
+
 export function ChallengeDetailSheet({
   node, onClose, history,
-}: { node: ChallengeNode; onClose: () => void; history?: HistoryMap }) {
+}: { node: ChallengeNode | null; onClose: () => void; history?: HistoryMap }) {
   const mounted = useMounted();
 
   useEffect(() => {
+    if (!node) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [node, onClose]);
 
   if (!mounted) return null;
 
   return createPortal(
-    <div
-      className="lol-theme fixed inset-0 z-50 flex items-end justify-center sm:items-center"
-      role="dialog"
-      aria-modal="true"
-      aria-label={node.name}
-    >
-      <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-[2px]"
-        onClick={onClose}
-      />
-      <div className="lol-plate lol-plate-gold relative max-h-[85vh] w-full max-w-[400px] overflow-y-auto shadow-2xl sm:w-[400px]">
-        <button
-          onClick={onClose}
-          aria-label="Close"
-          className="absolute right-2 top-2 z-20 p-1 text-muted-foreground transition-colors hover:text-foreground"
+    <AnimatePresence>
+      {node && (
+        <motion.div
+          key={node.challengeId}
+          className="lol-theme lol-overlay fixed inset-0 z-50 flex items-end justify-center sm:items-center"
+          role="dialog"
+          aria-modal="true"
+          aria-label={node.name}
+          variants={{
+            hidden: { opacity: 0 },
+            shown: { opacity: 1 },
+            exit: { opacity: 0 },
+          }}
+          initial="hidden"
+          animate="shown"
+          exit="exit"
+          transition={{ duration: 0.24, ease: SHEET_EASE }}
         >
-          <X className="h-4 w-4" />
-        </button>
-        <DetailBody node={node} history={history} inset />
-      </div>
-    </div>,
+          <div className="lol-scrim absolute inset-0" onClick={onClose} />
+          <motion.div
+            className="lol-plate lol-sheet relative max-h-[85vh] w-full max-w-[400px] sm:w-[400px]"
+            variants={{
+              hidden: { opacity: 0, y: 22 },
+              shown: { opacity: 1, y: 0 },
+              exit: { opacity: 0, y: 14 },
+            }}
+            transition={{ duration: 0.36, ease: SHEET_EASE }}
+          >
+            <span className="lol-sheet-corner lol-sheet-corner-tl" aria-hidden />
+            <span className="lol-sheet-corner lol-sheet-corner-tr" aria-hidden />
+            <span className="lol-sheet-corner lol-sheet-corner-bl" aria-hidden />
+            <span className="lol-sheet-corner lol-sheet-corner-br" aria-hidden />
+            <button
+              onClick={onClose}
+              aria-label="Close"
+              className="absolute right-3 top-3 z-20 border border-[color:var(--lol-border)] p-1 text-muted-foreground transition-colors hover:border-[color:var(--lol-gold-dark)] hover:text-[color:var(--lol-gold)]"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+            <div className="max-h-[85vh] overflow-y-auto">
+              <DetailBody node={node} history={history} inset />
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>,
     document.body
   );
 }
