@@ -1,16 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Share2 } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
-import FadeIn from '@/components/motion/FadeIn';
 import { useHeaderConfig } from '@/components/header-config';
 import { type Build, defaultBuild, analyze } from './_lib/model';
 import { decodeBuild, encodeBuild } from './_lib/share';
 import { ImpactHero, DamageBar, ContributionList, BracketLadder } from './_components/viz';
-import { CharacterPicker, ItemRoster, StatControls, Switch } from './_components/controls';
+import { ItemRoster, StatControls, Switch } from './_components/controls';
 import { applyLiveSnapshot, type LiveSnapshot } from './_lib/live';
 import { useMegabonkLive, type LiveStatus } from './_lib/use-live';
+import { LiveRun, type DpsPoint } from './_components/live-run';
 
 function LiveLink({ status, httpsPage, inRun }: { status: LiveStatus; httpsPage: boolean; inRun: boolean }) {
   const label = status === 'live'
@@ -40,17 +39,36 @@ export default function MegabonkPage() {
   const [followGame, setFollowGame] = useState(true);
   const [liveDamage, setLiveDamage] = useState<number | null>(null);
   const [inRun, setInRun] = useState(false);
+  const [snap, setSnap] = useState<LiveSnapshot | null>(null);
+  const [dpsHistory, setDpsHistory] = useState<DpsPoint[]>([]);
+  const [view, setView] = useState<'run' | 'model'>('run');
   const followRef = useRef(true);
   followRef.current = followGame;
   const set = (patch: Partial<Build>) => setBuild(b => ({ ...b, ...patch }));
   const a = useMemo(() => analyze(build), [build]);
 
-  const onSnapshot = useCallback((snap: LiveSnapshot) => {
-    setInRun(snap.inRun);
-    const damage = snap.inRun ? snap.stats?.damageMultiplier : undefined;
+  const onSnapshot = useCallback((next: LiveSnapshot) => {
+    setSnap(next);
+    setInRun(next.inRun);
+    const damage = next.inRun ? next.stats?.damageMultiplier : undefined;
     setLiveDamage(typeof damage === 'number' && Number.isFinite(damage) ? damage : null);
-    if (!followRef.current || !snap.inRun) return;
-    setBuild(current => applyLiveSnapshot(current, snap));
+    if (!next.inRun) {
+      setDpsHistory([]);
+    } else if (typeof next.dps === 'number' && Number.isFinite(next.dps)) {
+      const t = next.t / 1000;
+      setDpsHistory(history => {
+        const point = { t, dps: next.dps as number };
+        if (history.length > 0 && t - history[history.length - 1].t < 0.25) {
+          const copy = history.slice();
+          copy[copy.length - 1] = point;
+          return copy;
+        }
+        const copy = history.concat(point);
+        return copy.length > 720 ? copy.slice(copy.length - 720) : copy;
+      });
+    }
+    if (!followRef.current || !next.inRun) return;
+    setBuild(current => applyLiveSnapshot(current, next));
   }, []);
   const live = useMegabonkLive(onSnapshot);
 
@@ -75,89 +93,90 @@ export default function MegabonkPage() {
 
   return (
     <PageTransition>
-      <div className="megabonk-theme min-h-[calc(100vh-57px)]">
-        <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-
-          {/* ── Masthead ── */}
-          <FadeIn>
-            <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary">
-                  RM 15 · Damage Foundry
-                </p>
-                <h1 className="ws-serif mt-0.5 text-4xl font-semibold tracking-tight sm:text-5xl">
-                  Megabonk <span className="mb-molten">Damage</span>
-                </h1>
-                <p className="mt-1.5 max-w-xl text-sm text-muted-foreground">
-                  Build a loadout and see exactly what percentage of your damage each
-                  tome, character, item and stat is really pulling.
-                </p>
+      <div className="megabonk-theme flex h-[calc(100vh-57px)] flex-col overflow-hidden">
+        <div className="mx-auto flex h-full w-full max-w-[1680px] flex-col px-4 py-3 sm:px-5">
+          <div className="flex shrink-0 items-center justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary">RM 15 · Damage Foundry</p>
+              <h1 className="ws-serif truncate text-2xl font-semibold leading-tight">
+                Megabonk <span className="mb-molten">Damage</span>
+              </h1>
+            </div>
+            <div className="flex items-center gap-3">
+              <LiveLink status={live.status} httpsPage={live.httpsPage} inRun={inRun} />
+              <div className="mb-plate flex p-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]">
+                <button
+                  onClick={() => setView('run')}
+                  className={`rounded px-2.5 py-1 ${view === 'run' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}
+                >Run</button>
+                <button
+                  onClick={() => setView('model')}
+                  className={`rounded px-2.5 py-1 ${view === 'model' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}
+                >Model</button>
               </div>
+            </div>
+          </div>
 
-              {/* Global scenario toggles */}
-              <div className="mb-plate flex flex-col gap-2 px-3.5 py-2.5 text-xs">
-                <label className="flex items-center justify-between gap-4">
-                  <span className="text-muted-foreground">Attack speed in total</span>
+          {view === 'run' ? (
+            <div className="mt-2 min-h-0 flex-1">
+              {snap && inRun ? (
+                <LiveRun snap={snap} history={dpsHistory} />
+              ) : (
+                <div className="mb-plate grid h-full place-items-center px-6 text-center">
+                  <div>
+                    <p className="text-sm text-muted-foreground">
+                      {live.status === 'live' ? 'In the menu. The run fills this screen once it starts.' : 'Waiting for the game on this PC.'}
+                    </p>
+                    {live.httpsPage && live.status !== 'live' && (
+                      <p className="mt-2 text-[11px] text-muted-foreground">Open the workshop over http so the browser can reach the local game socket.</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="mt-2 min-h-0 flex-1 overflow-y-auto">
+              <div className="mb-3 flex flex-wrap items-center justify-end gap-3 text-xs">
+                <label className="flex items-center gap-2 text-muted-foreground">
+                  Attack speed in total
                   <Switch on={build.includeAttackSpeed} onChange={v => set({ includeAttackSpeed: v })} label="Attack speed in total" />
                 </label>
-                <label className="flex items-center justify-between gap-4">
-                  <span className="text-muted-foreground">Target is an Elite</span>
+                <label className="flex items-center gap-2 text-muted-foreground">
+                  Target is an Elite
                   <Switch on={build.targetElite} onChange={v => set({ targetElite: v })} label="Target is an Elite" />
                 </label>
-                <label className="flex items-center justify-between gap-4">
-                  <span className="text-muted-foreground">Follow the game</span>
+                <label className="flex items-center gap-2 text-muted-foreground">
+                  Follow the game
                   <Switch on={followGame} onChange={setFollowGame} label="Follow the game" />
                 </label>
-                <LiveLink status={live.status} httpsPage={live.httpsPage} inRun={inRun} />
-                <div className="mt-0.5 grid grid-cols-2 gap-1.5">
-                  <button
-                    onClick={() => void share()}
-                    className="flex items-center justify-center gap-1 rounded-md border border-border py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:border-primary hover:text-primary"
-                  >
-                    {shared ? <Check className="h-3 w-3" /> : <Share2 className="h-3 w-3" />}
-                    {shared ? 'Copied' : 'Share'}
-                  </button>
-                  <button
-                    onClick={() => setBuild(defaultBuild())}
-                    className="rounded-md border border-border py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:border-primary hover:text-primary"
-                  >
-                    Reset
-                  </button>
+                <button onClick={() => void share()} className="rounded-md border border-border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:border-primary hover:text-primary">
+                  {shared ? 'Copied' : 'Share'}
+                </button>
+                <button onClick={() => setBuild(defaultBuild())} className="rounded-md border border-border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:border-primary hover:text-primary">
+                  Reset
+                </button>
+              </div>
+              <div className="grid gap-4 lg:grid-cols-[1fr_minmax(320px,380px)]">
+                <div className="space-y-4">
+                  <ImpactHero a={a} liveDamage={liveDamage} />
+                  <DamageBar a={a} />
+                  <BracketLadder a={a} />
+                  <ContributionList a={a} />
+                </div>
+                <div className="space-y-4">
+                  <ItemRoster build={build} set={set} />
+                  <StatControls build={build} set={set} />
+                  <p className="px-1 text-[10px] leading-relaxed text-muted-foreground">
+                    Item constants and the crit curve are from lukeod/megabonk_research
+                    (IL2CPP constructors and GetCritDamageMultiplier, 2026-01-28).
+                    Joe&apos;s Dagger growth cap of +200% per copy per minute is the v1.0.12
+                    patch note. Character passives and Demonic Soul&apos;s per-kill amount are not
+                    in that dump. Conditional items add nothing until their switch is on.
+                  </p>
                 </div>
               </div>
             </div>
-          </FadeIn>
-
-          {/* ── Two columns: the readout, and the build ── */}
-          <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_minmax(320px,380px)]">
-
-            {/* Left — the visualization */}
-            <FadeIn delay={0.05}>
-              <div className="space-y-4">
-                <ImpactHero a={a} liveDamage={liveDamage} />
-                <DamageBar a={a} />
-                <BracketLadder a={a} />
-                <ContributionList a={a} />
-              </div>
-            </FadeIn>
-
-            {/* Right — the build controls */}
-            <FadeIn delay={0.1}>
-              <div className="space-y-4">
-                <CharacterPicker build={build} set={set} />
-                <ItemRoster build={build} set={set} />
-                <StatControls build={build} set={set} />
-                <p className="px-1 text-[10px] leading-relaxed text-muted-foreground">
-                  Item percents and the crit curve are from the IL2CPP item constructors
-                  and the verified crit function (lukeod/megabonk_research, 2026-01-28).
-                  Character passives and Demonic Soul&apos;s per-kill number were not in
-                  that dump. Conditional items are counted as if their condition is true
-                  right now. With the bridge mod running, Follow the game copies the
-                  live stats in at 5 Hz.
-                </p>
-              </div>
-            </FadeIn>
-          </div>
+          )}
         </div>
       </div>
     </PageTransition>

@@ -54,7 +54,7 @@ export function ImpactHero({ a, liveDamage }: { a: Analysis; liveDamage?: number
           {fmtMult(liveDamage != null ? liveDamage : a.total)}
         </div>
         <p className="mb-4 text-[11px] leading-tight text-muted-foreground">
-          {liveDamage != null ? <>damage multiplier<br />from the game</> : <>vs a bare run with<br />no items or stats</>}
+          {liveDamage != null ? <>damage multiplier<br />from the game</> : <>vs a bare hit with<br />no items and no crit</>}
         </p>
       </div>
       <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 border-t border-border/70 pt-3">
@@ -91,9 +91,9 @@ export function DamageBar({ a }: { a: Analysis }) {
     <div className="mb-plate px-4 py-4 sm:px-5">
       <div className="mb-2.5 flex items-baseline justify-between">
         <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-          Share of your damage multiplier
+          Share of this product
         </p>
-        <p className="text-[10px] text-muted-foreground">sums to 100%</p>
+        <p className="text-[10px] text-muted-foreground">log share, sums to 100%</p>
       </div>
       <div className="flex h-11 w-full overflow-hidden rounded-md ring-1 ring-border"
         onMouseLeave={() => setHover(null)}>
@@ -129,8 +129,8 @@ export function DamageBar({ a }: { a: Analysis }) {
             <span className="text-muted-foreground">
               <span style={{ color: BRACKETS[l.bracket].color }}>■</span>{' '}
               <span className="font-medium text-foreground">{l.emoji} {l.label}</span>
-              {' · '}{l.percent.toFixed(1)}% of your damage
-              {' · '}<span className="text-muted-foreground">{BRACKETS[l.bracket].name} bracket</span>
+              {' · '}{l.percent.toFixed(1)}% of this product
+              {' · '}<span className="text-muted-foreground">{BRACKETS[l.bracket].name}</span>
             </span>
           );
         })() : (
@@ -148,14 +148,14 @@ export function ContributionList({ a }: { a: Analysis }) {
     <div className="mb-plate divide-y divide-border/70">
       <div className="flex items-center justify-between px-4 py-3">
         <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-          What&apos;s carrying your build
+          What is in this hit
         </p>
-        <p className="text-[10px] text-muted-foreground">−% = DPS lost if removed</p>
+        <p className="text-[10px] text-muted-foreground">−% = lost if that one thing is removed</p>
       </div>
       {a.leaves.map(l => <Row key={l.id} l={l} max={max} />)}
       {a.leaves.length === 0 && (
         <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-          Nothing enabled yet — toggle some items on the right.
+          Nothing in this hit yet. A bare hit is ×1.00.
         </p>
       )}
     </div>
@@ -201,11 +201,11 @@ export function BracketLadder({ a }: { a: Analysis }) {
   return (
     <div className="mb-plate px-4 py-4">
       <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-        Why it multiplies
+        How this hit multiplies
       </p>
       <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
-        Bonuses inside a bracket add; brackets then multiply each other. Spreading
-        damage across many brackets beats piling into one.
+        Power items add into one stat. Hit additives add into another. Those
+        stages, crit, and the conditional multipliers then multiply.
       </p>
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
         <span className="mb-readout rounded-md bg-muted px-2 py-1 text-sm font-semibold">1.00×</span>

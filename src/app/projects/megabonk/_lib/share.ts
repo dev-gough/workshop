@@ -1,7 +1,7 @@
-import { CHARACTER_BY_ID, defaultBuild, ITEMS, type Build } from './model';
+import { defaultBuild, ITEMS, STACK_UI_MAX, type Build } from './model';
 
 type SharedBuild = Omit<Build, 'items'> & {
-  items: Record<string, { on: boolean; value: number; stacks: number }>;
+  items: Record<string, { on: boolean; stacks: number }>;
 };
 
 const finite = (value: unknown, fallback: number) =>
@@ -36,36 +36,36 @@ export function decodeBuild(encoded: string): Build | null {
       if (!candidate || typeof candidate !== 'object') continue;
       items[definition.id] = {
         on: typeof candidate.on === 'boolean' ? candidate.on : items[definition.id].on,
-        value: finite(candidate.value, items[definition.id].value),
-        stacks: Math.max(1, Math.min(definition.maxStacks ?? 1, Math.round(finite(candidate.stacks, 1)))),
+        stacks: Math.max(1, Math.min(definition.stackable ? STACK_UI_MAX : 1, Math.round(finite(candidate.stacks, 1)))),
       };
     }
 
     return {
       ...base,
       items,
-      characterId: typeof parsed.characterId === 'string' && CHARACTER_BY_ID.has(parsed.characterId)
-        ? parsed.characterId
-        : base.characterId,
+      hpPercent: finite(parsed.hpPercent, base.hpPercent),
+      maxHp: finite(parsed.maxHp, base.maxHp),
+      chests: finite(parsed.chests, base.chests),
+      idleSeconds: finite(parsed.idleSeconds, base.idleSeconds),
+      joeExecutes: finite(parsed.joeExecutes, base.joeExecutes),
+      phantomStacks: finite(parsed.phantomStacks, base.phantomStacks),
+      airborne: bool(parsed.airborne, base.airborne),
+      enemyAirborne: bool(parsed.enemyAirborne, base.enemyAirborne),
+      enemyHighHp: bool(parsed.enemyHighHp, base.enemyHighHp),
+      inMelee: bool(parsed.inMelee, base.inMelee),
+      evadeHit: bool(parsed.evadeHit, base.evadeHit),
+      timeSlow: bool(parsed.timeSlow, base.timeSlow),
       critChance: finite(parsed.critChance, base.critChance),
       critDamage: finite(parsed.critDamage, base.critDamage),
       critOn: bool(parsed.critOn, base.critOn),
+      forkCritSeparate: bool(parsed.forkCritSeparate, base.forkCritSeparate),
       attackSpeed: finite(parsed.attackSpeed, base.attackSpeed),
       attackSpeedOn: bool(parsed.attackSpeedOn, base.attackSpeedOn),
-      tomeDamage: finite(parsed.tomeDamage, base.tomeDamage),
-      tomeOn: bool(parsed.tomeOn, base.tomeOn),
-      megacrit: finite(parsed.megacrit, base.megacrit),
-      megacritOn: bool(parsed.megacritOn, base.megacritOn),
-      corrupted: finite(parsed.corrupted, base.corrupted),
-      corruptedOn: bool(parsed.corruptedOn, base.corruptedOn),
-      poison: finite(parsed.poison, base.poison),
-      poisonOn: bool(parsed.poisonOn, base.poisonOn),
-      bigBonkChance: finite(parsed.bigBonkChance, base.bigBonkChance),
-      bigBonkMult: finite(parsed.bigBonkMult, base.bigBonkMult),
-      bigBonkOn: bool(parsed.bigBonkOn, base.bigBonkOn),
       includeAttackSpeed: bool(parsed.includeAttackSpeed, base.includeAttackSpeed),
       targetElite: bool(parsed.targetElite, base.targetElite),
       eliteDamage: finite(parsed.eliteDamage, base.eliteDamage),
+      poison: finite(parsed.poison, base.poison),
+      poisonOn: bool(parsed.poisonOn, base.poisonOn),
     };
   } catch {
     return null;

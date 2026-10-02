@@ -1,6 +1,8 @@
 # Megabonk bridge
 
-Read-only BepInEx plugin. Five times a second it reads the player stat block and sends a snapshot to the workshop page on `ws://127.0.0.1:47315`.
+Read-only BepInEx plugin, version 0.2. Five times a second it reads the local run and sends a snapshot to the workshop page on `ws://127.0.0.1:47315`.
+
+The snapshot includes every non-zero stat, item stacks, weapons, tomes, and damage dealt over the last 10 seconds grouped by the game's damage source. That source name is how a weapon or a proc item (Bonker, Cursed Doll, and the rest) shows up in the DPS split.
 
 While this plugin is loaded it forces **Upload Score to Leaderboards** off and skips `QueueLeaderboardUpload` and `UploadLeaderboardScore`, so a run cannot be submitted. That lasts for the session; quit the game before playing a run you want on the board.
 
@@ -22,6 +24,6 @@ If Steam installed the game somewhere else, point `GameDir` at the folder that c
 
 ## Page
 
-The workshop connects to that socket from the browser. An https page is not allowed to open `ws://127.0.0.1`, so open the workshop over http on this PC (the local dev server is fine). "Game linked" means the socket is up. "Follow the game" copies crit, attack speed, elite damage, and poison onto the sliders. The big "In-game damage" figure is `DamageMultiplier` straight from the run.
+The workshop connects to that socket from the browser. An https page is not allowed to open `ws://127.0.0.1`, so open the workshop over http on this PC. "Game linked" means the socket is up. During a run the page shows DPS, the share of damage dealt by each source, inventories, and the stat block. "Follow the game" still copies crit, attack speed, elite damage, and poison onto the calculator sliders.
 
-A game update can rename a stat accessor. If the build fails on `PlayerStats.GetStat` or `MyPlayer.Instance`, the interop assembly in `BepInEx/interop/Assembly-CSharp.dll` is the source of the new names.
+A game update can rename an accessor. If the build fails, the interop assembly in `BepInEx/interop/Assembly-CSharp.dll` is the source of the new names. The types this plugin reads are `PlayerStats.GetStat`, `itemInventory.items`, `weaponInventory.weapons`, `tomeInventory.tomeLevels`, and `Enemy.A_Damage`.

@@ -1,8 +1,5 @@
 using System;
-using System.Globalization;
 using Assets.Scripts.Actors.Player;
-using Assets.Scripts.Inventory__Items__Pickups.Stats;
-using Assets.Scripts.Menu.Shop;
 using BepInEx;
 using BepInEx.Unity.IL2CPP;
 using Il2CppInterop.Runtime.Injection;
@@ -15,7 +12,7 @@ public sealed class Plugin : BasePlugin
 {
     public const string Id = "devys.megabonk.bridge";
     public const string Name = "Megabonk Bridge";
-    public const string Version = "0.1.0";
+    public const string Version = "0.2.0";
 
     internal static BridgeServer Server;
 
@@ -24,6 +21,7 @@ public sealed class Plugin : BasePlugin
         var port = Config.Bind("Bridge", "Port", 47315, "WebSocket port on 127.0.0.1. The workshop page connects here.").Value;
         Server = new BridgeServer(port, Log);
         Server.Start();
+        RunSample.Listen(Log);
         LeaderboardBlock.Apply(Log);
         ClassInjector.RegisterTypeInIl2Cpp<BridgeTicker>();
         AddComponent<BridgeTicker>();
@@ -37,25 +35,11 @@ public sealed class Plugin : BasePlugin
         {
             var player = MyPlayer.Instance;
             if (player == null)
+            {
+                RunSample.ResetRun();
                 return Idle(now);
-
-            // Raw stat units, matching PlayerStats.GetStat:
-            // fractions for crit chance and attack speed, multipliers for the rest.
-            // Crit damage is the raw stat; the workshop shows it as raw × 2.
-            var damage = Stat(player, EStat.DamageMultiplier);
-            var critChance = Stat(player, EStat.CritChance);
-            var critDamage = Stat(player, EStat.CritDamage);
-            var attackSpeed = Stat(player, EStat.AttackSpeed);
-            var elite = Stat(player, EStat.EliteDamageMultiplier);
-            var poison = Stat(player, EStat.PoisonDamageMultiplier);
-            return "{\"v\":1,\"t\":" + now + ",\"inRun\":true,\"stats\":{"
-                + "\"damageMultiplier\":" + Num(damage) + ","
-                + "\"critChance\":" + Num(critChance) + ","
-                + "\"critDamage\":" + Num(critDamage) + ","
-                + "\"attackSpeed\":" + Num(attackSpeed) + ","
-                + "\"eliteDamage\":" + Num(elite) + ","
-                + "\"poisonDamage\":" + Num(poison)
-                + "}}";
+            }
+            return RunSample.Build(player, now);
         }
         catch (Exception ex)
         {
@@ -64,18 +48,7 @@ public sealed class Plugin : BasePlugin
         }
     }
 
-    static float Stat(MyPlayer player, EStat stat)
-    {
-        var inventory = player.inventory;
-        if (inventory == null) return 0f;
-        var stats = inventory.playerStats;
-        if (stats == null) return 0f;
-        return stats.GetStat(stat);
-    }
-
-    static string Idle(long now) => "{\"v\":1,\"t\":" + now + ",\"inRun\":false}";
-
-    static string Num(float value) => value.ToString("0.####", CultureInfo.InvariantCulture);
+    static string Idle(long now) => "{\"v\":2,\"t\":" + now + ",\"inRun\":false}";
 }
 
 public sealed class BridgeTicker : MonoBehaviour
