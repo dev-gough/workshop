@@ -12,6 +12,8 @@ export interface MetricsResponse {
   series: Record<string, Array<Record<string, number | string | null>>>;
 }
 
+const LIVE_REFRESH_MS = 30_000;
+
 export function useUrlWindow() {
   const sp = useSearchParams();
   const router = useRouter();
@@ -19,7 +21,18 @@ export function useUrlWindow() {
   const fromParam = sp.get('from');
   const toParam = sp.get('to');
   const hasUrlWindow = !!(fromParam && toParam);
-  const toMs = toParam ? new Date(toParam).getTime() : Date.now();
+
+  // Sample "now" on a timer. Calling Date.now() during render makes the window
+  // change on every setState, which restarts every in-flight fetch. The fast
+  // queries then starve the slow ones (thermal, network) so those dials never fill.
+  const [liveTo, setLiveTo] = useState(() => Date.now());
+  useEffect(() => {
+    if (hasUrlWindow) return;
+    const id = setInterval(() => setLiveTo(Date.now()), LIVE_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [hasUrlWindow]);
+
+  const toMs = toParam ? new Date(toParam).getTime() : liveTo;
   const fromMs = fromParam ? new Date(fromParam).getTime() : toMs - 3600_000;
 
   const setWindow = useCallback((f: number, t: number) => {
@@ -30,6 +43,7 @@ export function useUrlWindow() {
   }, [sp, router, pathname]);
 
   const clearWindow = useCallback(() => {
+    setLiveTo(Date.now());
     const params = new URLSearchParams(sp.toString());
     params.delete('from');
     params.delete('to');
@@ -65,6 +79,8 @@ export function useMetrics(
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const reqRef = useRef(0);
+  const dataRef = useRef<MetricsResponse | null>(null);
+  dataRef.current = data;
 
   const labelsKey = labels?.join(',') ?? '';
 
@@ -81,7 +97,7 @@ export function useMetrics(
         maxPoints: String(maxPoints),
       });
       if (labelsKey) params.set('labels', labelsKey);
-      setLoading(true);
+      setLoading((prev) => (dataRef.current == null ? true : prev));
       fetch(`/api/server/metrics/v2?${params}`)
         .then((r) => r.json())
         .then((d: MetricsResponse | { error: string }) => {

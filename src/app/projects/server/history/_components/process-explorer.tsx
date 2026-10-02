@@ -3,17 +3,16 @@
 import { useMemo, useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Pin, PinOff, ChevronDown, ChevronRight } from 'lucide-react';
-import UplotChart from '@/components/charts/uplot-chart';
 import Sparkline from '@/components/charts/sparkline';
 import type { Series } from 'uplot';
 import { useMetrics } from '../_lib/use-metrics';
 import { formatBytes, formatPercent } from '../_lib/align';
+import InstrumentChart, { rangeFromZero, tickBytes } from './instrument-chart';
 
 interface ProcessExplorerProps {
   fromMs: number;
   toMs: number;
   onZoom: (fromUnix: number, toUnix: number) => void;
-  onHover: (ts: number | null) => void;
 }
 
 type SortKey = 'cpu' | 'rss' | 'label';
@@ -31,7 +30,7 @@ interface Row {
   rssSeries: Array<number | null>;
 }
 
-export default function ProcessExplorer({ fromMs, toMs, onZoom, onHover }: ProcessExplorerProps) {
+export default function ProcessExplorer({ fromMs, toMs, onZoom }: ProcessExplorerProps) {
   const { data, loading } = useMetrics('process', fromMs, toMs, { maxPoints: 200 });
   const [expanded, setExpanded] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('cpu');
@@ -147,7 +146,6 @@ export default function ProcessExplorer({ fromMs, toMs, onZoom, onHover }: Proce
                   onTogglePin={() => togglePin(row)}
                   pinning={pinning === row.label}
                   onZoom={onZoom}
-                  onHover={onHover}
                 />
               );
             })}
@@ -165,10 +163,9 @@ interface ProcessRowProps {
   onTogglePin: () => void;
   pinning: boolean;
   onZoom: (fromUnix: number, toUnix: number) => void;
-  onHover: (ts: number | null) => void;
 }
 
-function ProcessRow({ row, isOpen, onToggle, onTogglePin, pinning, onZoom, onHover }: ProcessRowProps) {
+function ProcessRow({ row, isOpen, onToggle, onTogglePin, pinning, onZoom }: ProcessRowProps) {
   const cpuSeries: Series[] = useMemo(() => ([
     {},
     { label: 'cpu %', stroke: 'hsl(184 95% 58%)', fill: 'color-mix(in srgb, hsl(184 95% 58%) 16%, transparent)', width: 2, points: { show: false } },
@@ -246,22 +243,26 @@ function ProcessRow({ row, isOpen, onToggle, onTogglePin, pinning, onZoom, onHov
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 p-3">
                   <div className="rounded-lg border border-border/40 bg-card/60 p-2">
                     <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground px-1 mb-1">cpu % over window</div>
-                    <UplotChart
+                    <InstrumentChart
                       data={[row.xs, row.cpuSeries]}
                       series={cpuSeries}
                       height={140}
                       onZoom={onZoom}
-                      onHover={onHover}
+                      format={(v) => formatPercent(v, 1)}
+                      tickFormat={(v) => `${Math.round(v)}%`}
+                      yRange={rangeFromZero}
                     />
                   </div>
                   <div className="rounded-lg border border-border/40 bg-card/60 p-2">
                     <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground px-1 mb-1">resident set over window</div>
-                    <UplotChart
+                    <InstrumentChart
                       data={[row.xs, row.rssSeries]}
                       series={rssSeries}
                       height={140}
                       onZoom={onZoom}
-                      onHover={onHover}
+                      format={(v) => formatBytes(v)}
+                      tickFormat={tickBytes}
+                      yRange={rangeFromZero}
                     />
                   </div>
                 </div>

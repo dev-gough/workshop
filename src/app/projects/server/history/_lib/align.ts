@@ -61,7 +61,7 @@ export function formatBytes(n: number | null | undefined): string {
   // '—' only for missing data; a genuine zero reading (e.g. no swap used)
   // still shows as '0 B'.
   if (n == null || !Number.isFinite(n)) return '—';
-  return fmtBytes(n, '0 B');
+  return fmtBytes(Math.round(n), '0 B');
 }
 
 export function formatRate(bytesPerSec: number | null | undefined): string {

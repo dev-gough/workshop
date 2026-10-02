@@ -4,10 +4,9 @@ import { useMemo, useCallback } from 'react';
 import { Suspense } from 'react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
-import UplotChart from '@/components/charts/uplot-chart';
-import { useSyncCursor } from '@/components/charts/sync-cursor';
 import type { Series } from 'uplot';
 import ChartCard, { type CardStatus } from './_components/chart-card';
+import InstrumentChart, { rangeFromZero, tickBytes, tickRate } from './_components/instrument-chart';
 import NavigatorStrip from './_components/navigator-strip';
 import RangeControls from './_components/range-controls';
 import ProcessExplorer from './_components/process-explorer';
@@ -38,8 +37,6 @@ export default function ServerHistoryPage() {
 
 function HistoryInner() {
   const { fromMs, toMs, setWindow, clearWindow, setRangeFromNow } = useUrlWindow();
-  const { setActiveTs } = useSyncCursor();
-  const onHover = useCallback((ts: number | null) => setActiveTs(ts), [setActiveTs]);
   const onZoom = useCallback((f: number, t: number) => setWindow(f * 1000, t * 1000), [setWindow]);
 
   // Fetches — all in parallel.
@@ -134,6 +131,24 @@ function HistoryInner() {
     const aligned = alignSeries(disk.data, 'writeBytesRate');
     return { ...aligned, data: scaleData(aligned.data, 512) };
   }, [disk.data]);
+  const diskReadSeries: Series[] = useMemo(() => ([
+    {},
+    ...diskReadData.labels.map((lbl, i) => ({
+      label: lbl,
+      stroke: CC_CHART[i % CC_CHART.length],
+      width: 1.75,
+      points: { show: false as const },
+    })),
+  ]), [diskReadData.labels]);
+  const diskWriteSeries: Series[] = useMemo(() => ([
+    {},
+    ...diskWriteData.labels.map((lbl, i) => ({
+      label: lbl,
+      stroke: CC_CHART[i % CC_CHART.length],
+      width: 1.75,
+      points: { show: false as const },
+    })),
+  ]), [diskWriteData.labels]);
 
   // ── Misc gauges ────────────────────────────────────────────────────────
   const tcpNow = lastValue(misc.data, 'tcpEstablished');
@@ -198,12 +213,14 @@ function HistoryInner() {
               status={cpuStatus}
               accent="var(--cc-cyan)"
             >
-              <UplotChart
+              <InstrumentChart
                 data={loadData.data}
                 series={loadSeries}
-                height={150}
+                height={168}
                 onZoom={onZoom}
-                onHover={onHover}
+                format={(v) => v.toFixed(2)}
+                tickFormat={(v) => v.toFixed(1)}
+                yRange={rangeFromZero}
               />
             </ChartCard>
 
@@ -215,12 +232,14 @@ function HistoryInner() {
               status={memStatus}
               accent="var(--cc-amber)"
             >
-              <UplotChart
+              <InstrumentChart
                 data={memData.data}
                 series={memSeries}
-                height={150}
+                height={168}
                 onZoom={onZoom}
-                onHover={onHover}
+                format={(v) => formatBytes(v)}
+                tickFormat={tickBytes}
+                yRange={rangeFromZero}
               />
             </ChartCard>
           </div>
@@ -234,15 +253,14 @@ function HistoryInner() {
             status={cpuStatus}
             accent="var(--cc-violet)"
           >
-            <UplotChart
+            <InstrumentChart
               data={cpuCoreData.data}
               series={cpuCoreSeries}
-              height={180}
+              height={200}
               onZoom={onZoom}
-              onHover={onHover}
-              opts={{
-                scales: { y: { range: [0, 100] } },
-              }}
+              format={(v) => formatPercent(v, 0)}
+              tickFormat={(v) => `${Math.round(v)}%`}
+              yRange={[0, 100]}
             />
           </ChartCard>
 
@@ -255,12 +273,14 @@ function HistoryInner() {
               status={netStatus}
               accent="var(--cc-cyan)"
             >
-              <UplotChart
+              <InstrumentChart
                 data={netRxData.data}
                 series={netSeries}
-                height={130}
+                height={148}
                 onZoom={onZoom}
-                onHover={onHover}
+                format={(v) => formatRate(v)}
+                tickFormat={tickRate}
+                yRange={rangeFromZero}
               />
             </ChartCard>
 
@@ -271,12 +291,14 @@ function HistoryInner() {
               status={netStatus}
               accent="var(--cc-violet)"
             >
-              <UplotChart
+              <InstrumentChart
                 data={netTxData.data}
                 series={netSeries}
-                height={130}
+                height={148}
                 onZoom={onZoom}
-                onHover={onHover}
+                format={(v) => formatRate(v)}
+                tickFormat={tickRate}
+                yRange={rangeFromZero}
               />
             </ChartCard>
 
@@ -288,12 +310,17 @@ function HistoryInner() {
               status={tempStatus}
               accent="var(--cc-amber)"
             >
-              <UplotChart
+              <InstrumentChart
                 data={tempData.data}
                 series={tempSeries}
-                height={130}
+                height={148}
                 onZoom={onZoom}
-                onHover={onHover}
+                format={(v) => `${v.toFixed(1)}°`}
+                tickFormat={(v) => `${Math.round(v)}°`}
+                yRange={(_u, min, max) => {
+                  const pad = Math.max((max - min) * 0.15, 1);
+                  return [min - pad, max + pad];
+                }}
               />
             </ChartCard>
           </div>
@@ -307,20 +334,14 @@ function HistoryInner() {
               status={diskRTotal > 0 ? 'ok' : 'idle'}
               accent="var(--cc-lime)"
             >
-              <UplotChart
+              <InstrumentChart
                 data={diskReadData.data}
-                series={[
-                  {},
-                  ...diskReadData.labels.map((lbl, i) => ({
-                    label: lbl,
-                    stroke: CC_CHART[i % CC_CHART.length],
-                    width: 1.75,
-                    points: { show: false } as const,
-                  })),
-                ]}
-                height={130}
+                series={diskReadSeries}
+                height={148}
                 onZoom={onZoom}
-                onHover={onHover}
+                format={(v) => formatRate(v)}
+                tickFormat={tickRate}
+                yRange={rangeFromZero}
               />
             </ChartCard>
 
@@ -331,20 +352,14 @@ function HistoryInner() {
               status={diskWTotal > 0 ? 'ok' : 'idle'}
               accent="var(--cc-rose)"
             >
-              <UplotChart
+              <InstrumentChart
                 data={diskWriteData.data}
-                series={[
-                  {},
-                  ...diskWriteData.labels.map((lbl, i) => ({
-                    label: lbl,
-                    stroke: `var(--color-chart-${(i % 5) + 1})`,
-                    width: 1.25,
-                    points: { show: false } as const,
-                  })),
-                ]}
-                height={130}
+                series={diskWriteSeries}
+                height={148}
                 onZoom={onZoom}
-                onHover={onHover}
+                format={(v) => formatRate(v)}
+                tickFormat={tickRate}
+                yRange={rangeFromZero}
               />
             </ChartCard>
           </div>
@@ -357,7 +372,7 @@ function HistoryInner() {
             <MiniReadout label="PROCS RUNNING"   value={formatNumber(lastValue(misc.data, 'procsRunning'))} accent="var(--cc-violet)" />
           </div>
 
-          <ProcessExplorer fromMs={fromMs} toMs={toMs} onZoom={onZoom} onHover={onHover} />
+          <ProcessExplorer fromMs={fromMs} toMs={toMs} onZoom={onZoom} />
         </div>
       </FadeIn>
     </PageTransition>
