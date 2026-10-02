@@ -18,6 +18,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
@@ -94,6 +95,7 @@ export function VisualizerStage({
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [fullscreen, setFullscreen] = useState(false);
   const [idle, setIdle] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, selected); } catch { /* unavailable */ }
@@ -159,13 +161,38 @@ export function VisualizerStage({
     window.addEventListener('pointermove', wake, { passive: true });
     window.addEventListener('pointerdown', wake, { passive: true });
     window.addEventListener('keydown', wake);
+    window.addEventListener('wheel', wake, { passive: true });
     return () => {
       clearTimeout(timer);
       window.removeEventListener('pointermove', wake);
       window.removeEventListener('pointerdown', wake);
       window.removeEventListener('keydown', wake);
+      window.removeEventListener('wheel', wake);
     };
   }, [open]);
+
+  // The picker is a horizontal strip. A vertical wheel would otherwise do
+  // nothing, so while the lounge is open it drives scrollLeft.
+  useEffect(() => {
+    if (!open) return;
+    const stage = stageRef.current;
+    if (!stage) return;
+    const onWheel = (event: WheelEvent) => {
+      const picker = pickerRef.current;
+      if (!picker) return;
+      const dominant = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+      const delta = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? dominant * 16
+        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+          ? dominant * picker.clientWidth
+          : dominant;
+      if (delta === 0) return;
+      event.preventDefault();
+      picker.scrollLeft += delta;
+    };
+    stage.addEventListener('wheel', onWheel, { passive: false });
+    return () => stage.removeEventListener('wheel', onWheel);
+  }, [open, stageRef]);
 
   const title = currentSongName
     ? cleanSongDisplay(currentSongName, currentAlbum?.artist, currentAlbum?.name)
@@ -282,7 +309,7 @@ export function VisualizerStage({
                 </Button>
               </div>
 
-              <div className="bar-viz-picker flex gap-2 overflow-x-auto p-2.5" role="listbox" aria-label="Visualizer backgrounds">
+              <div ref={pickerRef} className="bar-viz-picker flex gap-2 overflow-x-auto p-2.5" role="listbox" aria-label="Visualizer backgrounds">
                 {VISUALIZERS.map((visualizer) => {
                   const own = visualizer.origin === 'barfoo';
                   const active = visualizer.id === selected;
