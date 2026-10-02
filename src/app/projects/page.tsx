@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
-import { Clock, Grid3X3, Home, Music, Trophy, Server, ArrowRight, Palette, Bug, Brain, Atom, Share2, Film, Wallet, Code2, CandlestickChart, MessageSquare } from 'lucide-react';
+import { Clock, Grid3X3, Home, Music, Trophy, Server, ArrowRight, Palette, Bug, Brain, Atom, Share2, Film, Wallet, Code2, CandlestickChart, MessageSquare, Rocket } from 'lucide-react';
 import PageTransition from '@/components/motion/PageTransition';
 import FadeIn from '@/components/motion/FadeIn';
 import { motion } from 'motion/react';
@@ -588,6 +588,19 @@ export default function ProjectsPage() {
               <h2 className="text-lg font-bold text-white mb-1.5">The Parlor</h2>
               <p className="text-sm text-white/45 leading-relaxed mb-2">
                 A shared chat for the house. Talk or draw with the laptop, and hide a thread when it isn’t for everyone.
+              </p>
+            </ProjectCard>
+
+            {/* ── Super Heavy ── */}
+            <ProjectCard href="/projects/super-heavy" delay={0.37}
+              className="bg-gradient-to-br from-slate-950/80 to-zinc-900/50">
+              <div className="flex items-center gap-2 mb-3">
+                <Rocket className="h-4 w-4 text-sky-300" />
+                <span className="text-[10px] uppercase tracking-[0.2em] text-sky-300/60 font-medium">Flight</span>
+              </div>
+              <h2 className="text-lg font-bold text-white mb-1.5">Super Heavy</h2>
+              <p className="text-sm text-white/45 leading-relaxed mb-2">
+                Two opposite grid fins, and a banked S-turn for the third axis the missing pair would have covered.
               </p>
             </ProjectCard>
 

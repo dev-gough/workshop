@@ -426,6 +426,30 @@ export function MegabonkRoom({ className }: { className?: string }) {
 
 // ── 19 · The Parlor — a lamp, a name, a line of talk ──
 
+export function SuperHeavyRoom({ className }: { className?: string }) {
+  return (
+    <Door href="/projects/super-heavy" number="RM 20" room="Super Heavy" className={className}>
+      <div className="relative h-full overflow-hidden bg-[#07080c]">
+        <svg viewBox="0 0 160 100" className="absolute inset-0 h-full w-full" preserveAspectRatio="xMidYMid slice">
+          <path
+            d="M12 48 C 32 48, 36 26, 64 26 C 92 26, 88 72, 118 72 C 142 72, 148 56, 150 52"
+            fill="none"
+            stroke="#e2a04a"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+          />
+          <g transform="translate(64 32)">
+            <rect x="-3.2" y="-18" width="6.4" height="30" rx="2.2" fill="#9aa3ad" />
+            <rect x="-12" y="-16" width="7" height="9" fill="#2c3138" />
+            <rect x="5" y="-16" width="7" height="9" fill="#2c3138" />
+            <path d="M8 -6 L16 -2" stroke="#9fd7e8" strokeWidth="1.4" strokeLinecap="round" />
+          </g>
+        </svg>
+      </div>
+    </Door>
+  );
+}
+
 export function ParlorRoom({ className }: { className?: string }) {
   return (
     <Door href="/projects/parlor" number="RM 19" room="The Parlor" className={className}>
