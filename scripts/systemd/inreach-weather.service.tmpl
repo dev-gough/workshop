@@ -1,0 +1,11 @@
+[Unit]
+Description=Workshop inReach weather bot (IMAP poll + 6am daily)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=$SERVER_USER
+WorkingDirectory=$WORKSHOP_DIR
+ExecStart=/usr/bin/env npx tsx scripts/inreach-weather.ts
+TimeoutStartSec=90

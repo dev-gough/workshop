@@ -1,0 +1,80 @@
+INREACH WX BOT
+one inbound text each time. check-ins are free to send.
+
+SETUP (do before you leave cell)
+- bot gmail is the only recipient on all 3 check-ins. sync devices.
+- tracking on, or do a message check after you send. device listens ~10 min after send, then ~hourly.
+- first ever message to the bot (a check-in is fine) opens the reply thread.
+
+6AM  (you send nothing)
+  today's CALL at your last check-in GPS
+  (pinned trip camp if you have never checked in; else the lat/lon fallback)
+  one copy per MapShare name. checking in again does not add another 6am.
+
+CHECK-INS
+  okay / everything is okay     today's CALL
+  starting my trip              NOW  next 3 hours
+  ending my trip                TOM  tomorrow's CALL
+
+CALL looks like
+  EARLY 8/29 d2 47.21,-80.22
+  SW20g38 6mm SHWR
+  TSTM 15-19
+  18/9
+
+  line 1  GO | EARLY | SIT   then date   then dN lat,lon
+  line 2  wind + rain + sky
+  line 3  thunderstorm window if any, and/or EC alert
+  last    hi/lo C
+
+  GO     gusts <30, rain <8mm, no storms
+  EARLY  gusts 30-39, or 8mm+, or storms today, or an alert
+  SIT    gusts 40+, or 15mm+, or storms in travel hours with wind up
+
+NOW looks like
+  QUIET d2 47.15,-80.18 SW10 18c
+    nothing happening. you still got a reply.
+  NOW d2 ...
+  14 SW18g30 17c
+  15 SW22g36 16c TSTM
+  16 SW20g40 16c 2mm
+
+TOM is tomorrow's CALL (tonight's camp). tap it when you set camp.
+
+IF NOTHING COMES BACK
+  sky view. wait 10 min. send the same check-in again.
+  Garmin Weather on the device still works (1 text, your GPS).
+  type STOP to mute 6am. type GO to unmute.
+
+SHORTHAND
+  dN        trip day N (d1 = startDate). omitted when the point is GPS.
+  47.21,-80.22   forecast point. last check-in GPS, else camp.
+
+  SW20g38   wind from SW 20 km/h, gusts 38
+  6mm       rain in that window
+  18/9      high 18 C / low 9 C
+  18c       air temp now-ish
+  14-18     hours, 24h local (America/Toronto)
+  15h       one hour
+
+  CLR  clear          PC   partly cloudy     CLD  cloudy
+  FOG  fog            DZ   drizzle
+  SHWR showers        HVYSH heavy showers    HVY  heavy rain
+  RAIN rain           TSTM thunderstorm      DWNPR downpour
+
+  YEL/ORG/RED   EC alert colour
+  warn / watch / statement   EC alert type
+
+  +   we hit 160 chars and chopped the rest. still one message.
+
+COST  (Essential = 50/month, send+receive)
+  check-in out     free
+  our reply        1 inbound
+  6am push         1 inbound, you send nothing
+  Garmin Weather   1 text, separate from this bot
+
+TRIP  last check-in GPS is the forecast point. that is last night's camp
+  if you tapped okay/end at the site.
+  startDate in config is calendar day 1 of a pinned tripSlug, used only
+  when there is no GPS yet. mark day-end camps in the paddle planner.
+  null tripSlug does not auto-pick a park trip.
