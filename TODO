@@ -1,3 +1,7 @@
+# Compute node (devy-l)
+
+- [ ] Control surface / monitoring for the laptop compute unit (`devy-l`, `192.168.2.51`, `ssh devy-l`). Fans, temps, GPU, CPU governor, Ollama, and whether a job is running, reachable from the homeserver. The performance power profile pins the fans even when the machine is idle, so the surface needs a way to see that and set a sane profile.
+
 # Data Vis
 
 We can calculate like, infinite generations of any given grid.  So, if we start at a gridsize of 1x1, can we simulate every position on every given starting orientation of every possible grid dimensions.  Can we also calculate if a given starting orientation will ever settle?  Sample for X generations and a loop is defined as....? 
