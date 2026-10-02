@@ -163,8 +163,9 @@ parse_tv() {
   # Fractional episodes ("S01E13.5") are recap specials with no real episode
   # slot — flag before normalization turns the dot into a space and the number
   # silently collides with the real SxxExx episode.
+  # The fraction is one digit. "S03E12.1080p" is a resolution tag, not E12.1.
   local fractional=0
-  [[ "$raw" =~ [sS][0-9]{1,2}[[:space:]]?[eE][0-9]{1,3}[.][0-9] ]] && fractional=1
+  [[ "$raw" =~ [sS][0-9]{1,2}[[:space:]]?[eE][0-9]{1,3}[.][0-9]([^0-9]|$) ]] && fractional=1
 
   raw="$(normalize_separators "$raw")"
 
