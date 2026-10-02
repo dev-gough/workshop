@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 148" width="220" height="148" role="img" aria-label="Megabonk">
+  <rect width="220" height="148" fill="#f3f0e8"/>
+  <rect x="0.5" y="0.5" width="219" height="147" fill="none" stroke="#e4ddd2"/>
+  <text x="16" y="22" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" letter-spacing="1.5" fill="#8a8175">RM 15</text>
+  <g transform="translate(78,40)" fill="none" stroke="#3c3833" stroke-width="1.25" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M6 36 V22 H18 V36"/>
+<path d="M26 36 V12 H38 V36"/>
+<path d="M46 36 V4 H58 V36"/>
+<path d="M4 36 H62"/>
+  </g>
+  <line x1="16" y1="108" x2="204" y2="108" stroke="#e4ddd2"/>
+  <text x="16" y="130" font-family="Georgia, 'Iowan Old Style', Palatino, serif" font-size="16" fill="#2a2724">Megabonk</text>
+</svg>
+

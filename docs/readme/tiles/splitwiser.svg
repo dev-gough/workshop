@@ -1,39 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 240" width="200" height="240" role="img" aria-label="Splitwiser">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#fb7185" stop-opacity="0.10"/>
-      <stop offset="0.4" stop-color="#0a0a0d" stop-opacity="1"/>
-      <stop offset="1" stop-color="#0a0a0d" stop-opacity="1"/>
-    </linearGradient>
-    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="2"/>
-    </filter>
-  </defs>
-  <rect width="200" height="240" rx="8" ry="8" fill="url(#bg)"/>
-  <rect x="0.5" y="0.5" width="199" height="239" rx="7.5" ry="7.5" fill="none" stroke="#fb7185" stroke-opacity="0.55" stroke-width="1">
-    <animate attributeName="stroke-opacity" values="0.55;0.95;0.55" dur="3.2s" repeatCount="indefinite"/>
-  </rect>
-
-  <!-- atomic number -->
-  <text x="14" y="26" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="700" fill="#fb7185" fill-opacity="0.65">12</text>
-  <!-- category small caps in upper right -->
-  <text x="186" y="26" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="9" letter-spacing="1.4" fill="#fb7185" fill-opacity="0.55">TOOL</text>
-
-  <!-- glow halo behind symbol -->
-  <text x="100" y="120" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="78" font-weight="800" fill="#fb7185" fill-opacity="0.20" filter="url(#glow)">Sw</text>
-  <!-- big symbol -->
-  <text x="100" y="120" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="78" font-weight="800" fill="#fb7185">Sw</text>
-
-  <!-- name -->
-  <text x="100" y="158" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="600" fill="#fafafa" fill-opacity="0.92">Splitwiser</text>
-
-  <!-- glyph -->
-  <g transform="translate(70,200)" stroke="#fb7185" fill="none" stroke-width="1.5">
-        <path d="M 4 6 L 56 6 M 50 0 l 6 6 l -6 6"/>
-        <path d="M 56 22 L 4 22 M 10 16 l -6 6 l 6 6"/>
-      </g>
-
-  <!-- bottom rule -->
-  <line x1="20" y1="218" x2="180" y2="218" stroke="#fb7185" stroke-opacity="0.25" stroke-width="0.6"/>
-  <text x="100" y="232" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="8" letter-spacing="2" fill="#fb7185" fill-opacity="0.45">/splitwiser</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 148" width="220" height="148" role="img" aria-label="SplitWiser">
+  <rect width="220" height="148" fill="#f3f0e8"/>
+  <rect x="0.5" y="0.5" width="219" height="147" fill="none" stroke="#e4ddd2"/>
+  <text x="16" y="22" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" letter-spacing="1.5" fill="#8a8175">RM 09</text>
+  <g transform="translate(78,40)" fill="none" stroke="#3c3833" stroke-width="1.25" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M4 12 H48"/>
+<path d="M42 6 L50 12 L42 18"/>
+<path d="M60 28 H16"/>
+<path d="M22 22 L14 28 L22 34"/>
+  </g>
+  <line x1="16" y1="108" x2="204" y2="108" stroke="#e4ddd2"/>
+  <text x="16" y="130" font-family="Georgia, 'Iowan Old Style', Palatino, serif" font-size="16" fill="#2a2724">SplitWiser</text>
 </svg>
+

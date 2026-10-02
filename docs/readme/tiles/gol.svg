@@ -1,45 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 240" width="200" height="240" role="img" aria-label="Game of Life">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#4ade80" stop-opacity="0.10"/>
-      <stop offset="0.4" stop-color="#0a0a0d" stop-opacity="1"/>
-      <stop offset="1" stop-color="#0a0a0d" stop-opacity="1"/>
-    </linearGradient>
-    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="2"/>
-    </filter>
-  </defs>
-  <rect width="200" height="240" rx="8" ry="8" fill="url(#bg)"/>
-  <rect x="0.5" y="0.5" width="199" height="239" rx="7.5" ry="7.5" fill="none" stroke="#4ade80" stroke-opacity="0.55" stroke-width="1">
-    <animate attributeName="stroke-opacity" values="0.55;0.95;0.55" dur="3.2s" repeatCount="indefinite"/>
-  </rect>
-
-  <!-- atomic number -->
-  <text x="14" y="26" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="700" fill="#4ade80" fill-opacity="0.65">02</text>
-  <!-- category small caps in upper right -->
-  <text x="186" y="26" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="9" letter-spacing="1.4" fill="#4ade80" fill-opacity="0.55">AUTOMATON</text>
-
-  <!-- glow halo behind symbol -->
-  <text x="100" y="120" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="78" font-weight="800" fill="#4ade80" fill-opacity="0.20" filter="url(#glow)">Gl</text>
-  <!-- big symbol -->
-  <text x="100" y="120" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="78" font-weight="800" fill="#4ade80">Gl</text>
-
-  <!-- name -->
-  <text x="100" y="158" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="600" fill="#fafafa" fill-opacity="0.92">Game of Life</text>
-
-  <!-- glyph -->
-  <g transform="translate(70,196)" stroke="#4ade80" stroke-opacity="0.55" fill="none" stroke-width="1">
-        <rect width="60" height="30"/>
-        <line x1="20" y1="0" x2="20" y2="30"/><line x1="40" y1="0" x2="40" y2="30"/>
-        <line x1="0" y1="10" x2="60" y2="10"/><line x1="0" y1="20" x2="60" y2="20"/>
-        <rect x="2" y="12" width="6" height="6" fill="#4ade80" stroke="none"/>
-        <rect x="22" y="22" width="6" height="6" fill="#4ade80" stroke="none"/>
-        <rect x="42" y="2"  width="6" height="6" fill="#4ade80" stroke="none"/>
-        <rect x="42" y="12" width="6" height="6" fill="#4ade80" stroke="none"/>
-        <rect x="22" y="2"  width="6" height="6" fill="#4ade80" stroke="none"/>
-      </g>
-
-  <!-- bottom rule -->
-  <line x1="20" y1="218" x2="180" y2="218" stroke="#4ade80" stroke-opacity="0.25" stroke-width="0.6"/>
-  <text x="100" y="232" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="8" letter-spacing="2" fill="#4ade80" fill-opacity="0.45">/gol</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 148" width="220" height="148" role="img" aria-label="Game of Life">
+  <rect width="220" height="148" fill="#f3f0e8"/>
+  <rect x="0.5" y="0.5" width="219" height="147" fill="none" stroke="#e4ddd2"/>
+  <text x="16" y="22" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" letter-spacing="1.5" fill="#8a8175">RM 06</text>
+  <g transform="translate(78,40)" fill="none" stroke="#3c3833" stroke-width="1.25" stroke-linejoin="round" stroke-linecap="round">
+    <rect x="4" y="4" width="56" height="32"/>
+<path d="M18 4 V36 M32 4 V36 M46 4 V36 M4 15 H60 M4 26 H60"/>
+<rect x="6" y="17" width="10" height="7" fill="#3c3833" stroke="none"/>
+<rect x="20" y="28" width="10" height="6" fill="#3c3833" stroke="none"/>
+<rect x="34" y="6" width="10" height="7" fill="#3c3833" stroke="none"/>
+<rect x="48" y="17" width="10" height="7" fill="#3c3833" stroke="none"/>
+  </g>
+  <line x1="16" y1="108" x2="204" y2="108" stroke="#e4ddd2"/>
+  <text x="16" y="130" font-family="Georgia, 'Iowan Old Style', Palatino, serif" font-size="16" fill="#2a2724">Game of Life</text>
 </svg>
+

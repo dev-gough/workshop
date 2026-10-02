@@ -1,370 +1,121 @@
-<div align="center">
-  <img src="docs/readme/hero.svg" alt="Devy's Workshop" width="100%">
-</div>
+<img src="docs/readme/hero.svg" alt="Devy's Workshop. Twenty rooms off one hallway." width="100%">
 
-<p align="center">
-  <a href="https://devydev.ca"><img src="https://img.shields.io/badge/live-devydev.ca-e879f9?style=flat-square&labelColor=0a0a0d" alt="devydev.ca"></a>
-  <img src="https://img.shields.io/badge/projects-13-22d3ee?style=flat-square&labelColor=0a0a0d" alt="13 projects">
-  <img src="https://img.shields.io/badge/Next.js-15-fafafa?style=flat-square&logo=nextdotjs&logoColor=fafafa&labelColor=0a0a0d" alt="Next.js 15">
-  <img src="https://img.shields.io/badge/React-19-22d3ee?style=flat-square&logo=react&logoColor=22d3ee&labelColor=0a0a0d" alt="React 19">
-  <img src="https://img.shields.io/badge/TypeScript-5-3178c6?style=flat-square&logo=typescript&logoColor=3178c6&labelColor=0a0a0d" alt="TypeScript">
-  <img src="https://img.shields.io/badge/Postgres-16-336791?style=flat-square&logo=postgresql&logoColor=336791&labelColor=0a0a0d" alt="Postgres">
-  <img src="https://img.shields.io/badge/Tailwind-4-22d3ee?style=flat-square&logo=tailwindcss&logoColor=22d3ee&labelColor=0a0a0d" alt="Tailwind 4">
-</p>
+**Devy's Workshop** is the site at [devydev.ca](https://devydev.ca). It is one Next.js application: a plain hallway, and twenty rooms that do not share a visual language. Simulations, a music library, a paper brokerage, a canoe atlas, a house chat that draws. Each room is allowed to look like the thing it is.
 
-<p align="center">
-  <em>A self-hosted playground for genetic algorithms, simulations, media pipelines, and assorted curios — all served from one Next.js app under one roof.</em>
-</p>
+The plates below open the live rooms. Source for a room is `src/app/projects/<slug>`.
 
----
+## Rooms
 
-## What is this?
-
-`devys-workshop` is the monorepo behind [**devydev.ca**](https://devydev.ca) — a single Next.js 15 / React 19 application hosting **thirteen** small projects that each get their own page, their own database tables, and their own opinions about what makes a good interface. Some are evolutionary playgrounds (BrainFuck GA, image evolver, neuroevolution); some are personal infrastructure (Jellyfin ingestion, Soulseek bridge, server dashboard); some are tools I wanted that didn't exist quite the way I wanted them (polar clock, house planner, splitwiser).
-
-Each project is allowed to look and feel like its own thing. The shared chrome is light on purpose.
-
-```
-17 page routes · 60 API routes · 31 components · 8 migrations · 27k LOC of TypeScript
-```
-
----
-
-## The Workbench
-
-<table align="center">
+<table>
 <tr>
-<td><a href="https://devydev.ca/projects/brainfuck"><img src="docs/readme/tiles/brainfuck.svg" alt="BrainFuck GA" width="160"/></a></td>
-<td><a href="https://devydev.ca/projects/gol"><img src="docs/readme/tiles/gol.svg" alt="Game of Life" width="160"/></a></td>
-<td><a href="https://devydev.ca/projects/ecosystem"><img src="docs/readme/tiles/ecosystem.svg" alt="Ecosystem" width="160"/></a></td>
-<td><a href="https://devydev.ca/projects/neuroevolution"><img src="docs/readme/tiles/neuroevolution.svg" alt="Neuroevolution" width="160"/></a></td>
-<td><a href="https://devydev.ca/projects/image-evolver"><img src="docs/readme/tiles/image-evolver.svg" alt="Image Evolver" width="160"/></a></td>
+<td><a href="https://devydev.ca/projects/server"><img src="docs/readme/tiles/server.svg" alt="Control Center" width="200"></a></td>
+<td><a href="https://devydev.ca/projects/barfoo"><img src="docs/readme/tiles/barfoo.svg" alt="BarFoo Records" width="200"></a></td>
+<td><a href="https://devydev.ca/projects/spaceflight"><img src="docs/readme/tiles/spaceflight.svg" alt="Mission Control" width="200"></a></td>
+<td><a href="https://devydev.ca/projects/challenges"><img src="docs/readme/tiles/challenges.svg" alt="Challenges" width="200"></a></td>
 </tr>
 <tr>
-<td><a href="https://devydev.ca/projects/polar-clock"><img src="docs/readme/tiles/polar-clock.svg" alt="Polar Clock" width="160"/></a></td>
-<td><a href="https://devydev.ca/projects/house"><img src="docs/readme/tiles/house.svg" alt="House Planner" width="160"/></a></td>
-<td><a href="https://devydev.ca/projects/challenges"><img src="docs/readme/tiles/challenges.svg" alt="LoL Challenges" width="160"/></a></td>
-<td><a href="https://devydev.ca/projects/jellyfin"><img src="docs/readme/tiles/jellyfin.svg" alt="Jellyfin Ingest" width="160"/></a></td>
-<td><a href="https://devydev.ca/projects/soulseek"><img src="docs/readme/tiles/soulseek.svg" alt="Soulseek" width="160"/></a></td>
+<td><a href="https://devydev.ca/projects/polar-clock"><img src="docs/readme/tiles/polar-clock.svg" alt="Polar Clock" width="200"></a></td>
+<td><a href="https://devydev.ca/projects/gol"><img src="docs/readme/tiles/gol.svg" alt="Game of Life" width="200"></a></td>
+<td><a href="https://devydev.ca/projects/brainfuck"><img src="docs/readme/tiles/brainfuck.svg" alt="The Tape Lab" width="200"></a></td>
+<td><a href="https://devydev.ca/projects/jellyfin"><img src="docs/readme/tiles/jellyfin.svg" alt="Screening Room" width="200"></a></td>
 </tr>
 <tr>
-<td><a href="https://devydev.ca/projects/barfoo"><img src="docs/readme/tiles/barfoo.svg" alt="BarFoo Player" width="160"/></a></td>
-<td><a href="https://devydev.ca/projects/splitwiser"><img src="docs/readme/tiles/splitwiser.svg" alt="Splitwiser" width="160"/></a></td>
-<td><a href="https://devydev.ca/projects/server"><img src="docs/readme/tiles/server.svg" alt="Server Status" width="160"/></a></td>
-<td colspan="2" align="center"><sub>each tile links to the live project on<br/><a href="https://devydev.ca">devydev.ca</a></sub></td>
+<td><a href="https://devydev.ca/projects/splitwiser"><img src="docs/readme/tiles/splitwiser.svg" alt="SplitWiser" width="200"></a></td>
+<td><a href="https://devydev.ca/projects/soulseek"><img src="docs/readme/tiles/soulseek.svg" alt="Soulseek Wire" width="200"></a></td>
+<td><a href="https://devydev.ca/projects/house"><img src="docs/readme/tiles/house.svg" alt="Drafting Room" width="200"></a></td>
+<td><a href="https://devydev.ca/projects/ecosystem"><img src="docs/readme/tiles/ecosystem.svg" alt="The Vivarium" width="200"></a></td>
+</tr>
+<tr>
+<td><a href="https://devydev.ca/projects/neuroevolution"><img src="docs/readme/tiles/neuroevolution.svg" alt="Driving School" width="200"></a></td>
+<td><a href="https://devydev.ca/projects/image-evolver"><img src="docs/readme/tiles/image-evolver.svg" alt="Image Evolver" width="200"></a></td>
+<td><a href="https://devydev.ca/projects/megabonk"><img src="docs/readme/tiles/megabonk.svg" alt="Megabonk" width="200"></a></td>
+<td><a href="https://devydev.ca/projects/groove"><img src="docs/readme/tiles/groove.svg" alt="The Groove" width="200"></a></td>
+</tr>
+<tr>
+<td><a href="https://devydev.ca/projects/paper-trading"><img src="docs/readme/tiles/paper-trading.svg" alt="Paper Trading" width="200"></a></td>
+<td><a href="https://devydev.ca/projects/paddle"><img src="docs/readme/tiles/paddle.svg" alt="The Outfitter" width="200"></a></td>
+<td><a href="https://devydev.ca/projects/parlor"><img src="docs/readme/tiles/parlor.svg" alt="The Parlor" width="200"></a></td>
+<td><a href="https://devydev.ca/projects/super-heavy"><img src="docs/readme/tiles/super-heavy.svg" alt="Super Heavy" width="200"></a></td>
 </tr>
 </table>
 
----
+## Directory
 
-## Under the Hood
+| | Room | |
+|---|---|---|
+| RM 01 | [Control Center](https://devydev.ca/projects/server) | The machine this site runs on. CPU, memory, disk, process history, and service health. Minecraft RCON is there when a server is configured. |
+| RM 02 | [BarFoo Records](https://devydev.ca/projects/barfoo) | The local music library, shelved by album. Playback, playlists, and a visualizer lounge. Not a recommendation feed. |
+| RM 03 | [Mission Control](https://devydev.ca/projects/spaceflight) | Orbital launches since Sputnik, from a GCAT mirror, with live SpaceX figures folded in. A transfer desk sits beside the record. |
+| RM 04 | [Challenges](https://devydev.ca/projects/challenges) | League of Legends challenge progress. A poller reads the Riot API, and the page keeps the closest goals in reach. |
+| RM 05 | [Polar Clock](https://devydev.ca/projects/polar-clock) | Time as concentric rings, projected over a choice of backgrounds. Palettes, a few cities, and an export that becomes a desktop wallpaper. |
+| RM 06 | [Game of Life](https://devydev.ca/projects/gol) | Conway on an infinite board. Draw, pan, load a pattern, or open the census of oscillators and still lifes. |
+| RM 07 | [The Tape Lab](https://devydev.ca/projects/brainfuck) | A genetic algorithm that breeds Brainfuck programs toward a target string. The interpreter is the vendored `brainfuck-genetic` submodule, run as a Python process. |
+| RM 08 | [Screening Room](https://devydev.ca/projects/jellyfin) | A magnet lands in Transmission, gets a sensible name, and shows up in Jellyfin. Progress, ratio, and a log of finished jobs. |
+| RM 09 | [SplitWiser](https://devydev.ca/projects/splitwiser) | Shared expenses for a trip or a household. Balances, a settle-up that tries to use as few payments as possible, and invite links. |
+| RM 10 | [Soulseek Wire](https://devydev.ca/projects/soulseek) | Search and transfer through a local slskd daemon. Quality is ranked, a transfer can be cancelled, and files wait for a metadata check before they join the library. |
+| RM 11 | [Drafting Room](https://devydev.ca/projects/house) | A measured floor plan, including L-shaped rooms. Furniture from a catalogue, doors with a swing, layouts you can keep. |
+| RM 12 | [The Vivarium](https://devydev.ca/projects/ecosystem) | Predators and prey that inherit their own behavior. Populations swing, crash, or settle. A warning shows up as a population approaches a collapse. |
+| RM 13 | [Driving School](https://devydev.ca/projects/neuroevolution) | Small networks learn a circuit by surviving it. Seasons can be replayed from a fixed seed. |
+| RM 14 | [Image Evolver](https://devydev.ca/projects/image-evolver) | A photograph, approximated by semi-transparent polygons. Fitness can spend more care as the picture starts to resolve. |
+| RM 15 | [Megabonk](https://devydev.ca/projects/megabonk) | A damage model for the game, and a live read of the run in progress when the bridge plugin is loaded on the same PC. Builds can be shared as a link. |
+| RM 16 | [The Groove](https://devydev.ca/projects/groove) | Pick a song from the library. The page reads its tempo and turns the track into a side-scrolling course. |
+| RM 17 | [Paper Trading](https://devydev.ca/projects/paper-trading) | Paper accounts, orders, and a book of positions. The desk shows concentration, not just a total. |
+| RM 18 | [The Outfitter](https://devydev.ca/projects/paddle) | Canoe routes on Ontario park charts. Plan a day, pin a camp, and come back to the same trip. |
+| RM 19 | [The Parlor](https://devydev.ca/projects/parlor) | A house chat. Talk and draw through Ollama on the laptop. Drawing runs over SSH, with the prompt on stdin rather than the command line. |
+| RM 20 | [Super Heavy](https://devydev.ca/projects/super-heavy) | A small study of a booster that steers with two grid fins and an S-turn. |
+
+The [village viewer](https://devydev.ca/projects/village) is in the repo and not on the hallway. It is a first-person view of a MineColonies settlement: fly the colony, ride a citizen, open an overhead radar.
+
+## How it is put together
+
+Next.js 15 on the App Router, React 19, TypeScript, and Tailwind 4. Postgres 16 is the memory for the rooms that keep anything. The web app uses a `workshop` role. Soulseek ingest and the challenge poller each have their own, so a scraper does not hold the same credential as the site.
 
 ```mermaid
 flowchart LR
-    classDef ui fill:#0a0a0d,stroke:#e879f9,color:#fafafa
-    classDef srv fill:#0a0a0d,stroke:#22d3ee,color:#fafafa
-    classDef data fill:#0a0a0d,stroke:#34d399,color:#fafafa
-    classDef ext fill:#0a0a0d,stroke:#fbbf24,color:#fafafa
+    classDef box fill:#f3f0e8,stroke:#5c564e,color:#2a2724
+    Browser["Browser"]:::box
+    App["Next.js"]:::box
+    DB[("Postgres")]:::box
+    Py["Brainfuck interpreter"]:::box
+    Side["slskd · Jellyfin · Transmission · Riot"]:::box
+    Laptop["Ollama on the laptop"]:::box
 
-    Browser["Browser<br/>React 19 / Tailwind 4"]:::ui
-    Next["Next.js 15<br/>App Router · 60 API routes"]:::srv
-    PG[("Postgres 16<br/>workshop")]:::data
-    PY["Python · BF GA<br/>subprocess"]:::srv
-    Slskd["slskd<br/>Soulseek"]:::ext
-    Jellyfin["Jellyfin"]:::ext
-    Trans["Transmission"]:::ext
-    Riot["Riot API"]:::ext
-
-    Browser <-->|HTTPS| Next
-    Next <-->|pg pool, scoped roles| PG
-    Next -->|spawn / JSON lines| PY
-    Next <-->|REST| Slskd
-    Next <-->|REST| Jellyfin
-    Next <-->|RPC| Trans
-    Next <-->|REST| Riot
+    Browser --> App
+    App --> DB
+    App --> Py
+    App --> Side
+    App --> Laptop
 ```
 
-Each long-running side process talks to Postgres through its own scoped role (`workshop`, `soulseek_ingest`, `challenge_poller`) — no shared admin credential touches the runtime path.
+Configuration is `config.json`, which `npm run setup` writes from `config.example.json`. Anything optional — music path, slskd, Transmission, Jellyfin, Riot, Minecraft RCON, the Ollama host — is filled in afterward at [/setup](http://localhost:3000/setup). Per-service notes are in [`docs/setup/`](docs/setup/).
 
----
-
-## Projects
-
-### Evolution & algorithms
-
-<table>
-<tr>
-<td width="180" valign="top"><a href="https://devydev.ca/projects/brainfuck"><img src="docs/readme/tiles/brainfuck.svg" alt="" width="160"/></a></td>
-<td valign="top">
-
-#### `01` · BrainFuck Genetic Algorithm
-
-Evolves BrainFuck source code that prints a target string. Tournament selection over a tape-themed hyperparameter form, a fitness cache, and a custom RLE interpreter that compiles `++++++++` into a single `(ADD, 8)` op before dispatching.
-
-<img src="https://img.shields.io/badge/RLE_interpreter-e879f9?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/tournament_select-e879f9?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/preset_slots-e879f9?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/live_tape_animator-e879f9?style=flat-square&labelColor=0a0a0d"/>
-
-<details>
-<summary><b>Throughput journey →</b></summary>
-
-| | gens/sec | per-interp | speedup |
-|--|--|--|--|
-| original (Java shell-out per eval) | 5.8 | ~170 ms | 1× |
-| pure-Python interpreter | 569 | 1.8 ms | 98× |
-| + tournament + RLE compile | **7,544** | **0.4 ms** | **1,300×** |
-
-Seven-letter target now reaches fitness 1777/1792 in 200k gens / **4 minutes** — same workload took **15 minutes** for 133k gens before the throughput pass. Each commit on the BF reference repo is auto-tagged by the workshop's benchmark suite so regressions show up immediately.
-
-</details>
-</td>
-</tr>
-</table>
-
-<table>
-<tr>
-<td valign="top">
-
-#### `05` · Image Evolver
-
-Genetic approximation of a target photograph using semi-transparent polygons. Mutates vertex positions and colors; selection is greedy on per-pixel SSE. Watch the abstract version of your face slowly resolve.
-
-<img src="https://img.shields.io/badge/canvas_diff-22d3ee?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/preset_targets-22d3ee?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/fitness_chart-22d3ee?style=flat-square&labelColor=0a0a0d"/>
-
-</td>
-<td width="180" valign="top"><a href="https://devydev.ca/projects/image-evolver"><img src="docs/readme/tiles/image-evolver.svg" alt="" width="160"/></a></td>
-</tr>
-</table>
-
-<table>
-<tr>
-<td width="180" valign="top"><a href="https://devydev.ca/projects/neuroevolution"><img src="docs/readme/tiles/neuroevolution.svg" alt="" width="160"/></a></td>
-<td valign="top">
-
-#### `04` · Neuroevolution
-
-Tiny feed-forward networks learn to steer a car around procedurally generated racetracks. Each generation, the survivors crossover and mutate; the population graph next to the track shows the lineage of the best driver.
-
-<img src="https://img.shields.io/badge/canvas_track-60a5fa?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/raycast_sensors-60a5fa?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/lineage_graph-60a5fa?style=flat-square&labelColor=0a0a0d"/>
-
-</td>
-</tr>
-</table>
-
-<table>
-<tr>
-<td valign="top">
-
-#### `03` · Ecosystem
-
-Predator–prey simulation where both species mutate their own behavioral parameters across generations. Population swings, extinction events, sometimes equilibria. Reset the seed and watch a different drama play out.
-
-<img src="https://img.shields.io/badge/agent_swarm-34d399?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/co--evolution-34d399?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/population_graph-34d399?style=flat-square&labelColor=0a0a0d"/>
-
-</td>
-<td width="180" valign="top"><a href="https://devydev.ca/projects/ecosystem"><img src="docs/readme/tiles/ecosystem.svg" alt="" width="160"/></a></td>
-</tr>
-</table>
-
-<table>
-<tr>
-<td width="180" valign="top"><a href="https://devydev.ca/projects/gol"><img src="docs/readme/tiles/gol.svg" alt="" width="160"/></a></td>
-<td valign="top">
-
-#### `02` · Game of Life
-
-Conway's classic on an infinite canvas. Pan, zoom, draw cells by hand, or load classic patterns (glider, gosper gun, R-pentomino). Generation counter and step-by-step controls.
-
-<img src="https://img.shields.io/badge/infinite_canvas-4ade80?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/pattern_library-4ade80?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/pan_zoom-4ade80?style=flat-square&labelColor=0a0a0d"/>
-
-</td>
-</tr>
-</table>
-
----
-
-### Visualization & tools
-
-<table>
-<tr>
-<td valign="top">
-
-#### `06` · Polar Clock
-
-Time encoded as concentric rings — seconds, minutes, hours, days, months, day-of-year. Each ring fills as its unit progresses. Eight color palettes (Aurora, Cyberpunk, Sunset, …), timezone selector, exports to a Lively-compatible wallpaper.
-
-<img src="https://img.shields.io/badge/8_palettes-a78bfa?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/wallpaper_export-a78bfa?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/gol_background-a78bfa?style=flat-square&labelColor=0a0a0d"/>
-
-</td>
-<td width="180" valign="top"><a href="https://devydev.ca/projects/polar-clock"><img src="docs/readme/tiles/polar-clock.svg" alt="" width="160"/></a></td>
-</tr>
-</table>
-
-<table>
-<tr>
-<td width="180" valign="top"><a href="https://devydev.ca/projects/house"><img src="docs/readme/tiles/house.svg" alt="" width="160"/></a></td>
-<td valign="top">
-
-#### `07` · House Planner
-
-Drag-and-drop interior layout tool. SVG furniture symbols on a snap-grid, rotate / lock / group, save layouts as JSON or PNG. Built when I was rearranging my actual living room and decided I needed a tool I could share a link to.
-
-<img src="https://img.shields.io/badge/svg_furniture-d6d3d1?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/snap_grid-d6d3d1?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/json_export-d6d3d1?style=flat-square&labelColor=0a0a0d"/>
-
-</td>
-</tr>
-</table>
-
----
-
-### Media stack
-
-<table>
-<tr>
-<td valign="top">
-
-#### `09` · Jellyfin Ingest
-
-Magnet/torrent → Transmission → renamed → Jellyfin library. Live transfer progress, seeding leaderboard, history log of finished jobs. The "drop a magnet, walk away" pipeline I always wanted.
-
-<img src="https://img.shields.io/badge/transmission_rpc-818cf8?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/jellyfin_api-818cf8?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/auto_rename-818cf8?style=flat-square&labelColor=0a0a0d"/>
-
-</td>
-<td width="180" valign="top"><a href="https://devydev.ca/projects/jellyfin"><img src="docs/readme/tiles/jellyfin.svg" alt="" width="160"/></a></td>
-</tr>
-</table>
-
-<table>
-<tr>
-<td width="180" valign="top"><a href="https://devydev.ca/projects/soulseek"><img src="docs/readme/tiles/soulseek.svg" alt="" width="160"/></a></td>
-<td valign="top">
-
-#### `10` · Soulseek
-
-Browser frontend over a local `slskd` daemon for searching and pulling music off the Soulseek P2P network. Quality-tier badges (FLAC > V0 > 320 > everything else), expandable per-user trees, drag-to-queue, staged metadata review before files land in the library.
-
-<img src="https://img.shields.io/badge/slskd_bridge-38bdf8?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/quality_filter-38bdf8?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/staged_ingest-38bdf8?style=flat-square&labelColor=0a0a0d"/>
-
-</td>
-</tr>
-</table>
-
-<table>
-<tr>
-<td valign="top">
-
-#### `11` · BarFoo Player
-
-Album-first music player that walks your local FLAC/MP3 library and serves it through a grid of cover art. Click an album, listen. The opposite of an algorithmic "for you" feed.
-
-<img src="https://img.shields.io/badge/cover_grid-f59e0b?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/flac_/_mp3-f59e0b?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/local_first-f59e0b?style=flat-square&labelColor=0a0a0d"/>
-
-</td>
-<td width="180" valign="top"><a href="https://devydev.ca/projects/barfoo"><img src="docs/readme/tiles/barfoo.svg" alt="" width="160"/></a></td>
-</tr>
-</table>
-
----
-
-### Trackers & utilities
-
-<table>
-<tr>
-<td width="180" valign="top"><a href="https://devydev.ca/projects/challenges"><img src="docs/readme/tiles/challenges.svg" alt="" width="160"/></a></td>
-<td valign="top">
-
-#### `08` · LoL Challenges
-
-League of Legends in-game achievement tracker — six categories, per-champion completion data, tier badges with the game's actual color codes. A background poller hits the Riot API on a cron and the UI animates whenever a tier-up arrives.
-
-<img src="https://img.shields.io/badge/riot_api-fbbf24?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/cron_poller-fbbf24?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/tier_glow-fbbf24?style=flat-square&labelColor=0a0a0d"/>
-
-</td>
-</tr>
-</table>
-
-<table>
-<tr>
-<td valign="top">
-
-#### `12` · Splitwiser
-
-A Splitwise-shaped tool for groups (trips, roommates, dinners). Add expenses, auto-settle debts, see who owes whom in real time. QR-link logins for invitees who don't want yet another account.
-
-<img src="https://img.shields.io/badge/group_balances-fb7185?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/qr_invites-fb7185?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/auto_settle-fb7185?style=flat-square&labelColor=0a0a0d"/>
-
-</td>
-<td width="180" valign="top"><a href="https://devydev.ca/projects/splitwiser"><img src="docs/readme/tiles/splitwiser.svg" alt="" width="160"/></a></td>
-</tr>
-</table>
-
-<table>
-<tr>
-<td width="180" valign="top"><a href="https://devydev.ca/projects/server"><img src="docs/readme/tiles/server.svg" alt="" width="160"/></a></td>
-<td valign="top">
-
-#### `13` · Server Status
-
-The dashboard that watches the box hosting all of the above. CPU/memory/disk gauges, per-process metrics, live-streaming systemd journal logs, RCON commands for the Minecraft server. The instrument panel for the workshop itself.
-
-<img src="https://img.shields.io/badge/live_metrics-2dd4bf?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/journal_stream-2dd4bf?style=flat-square&labelColor=0a0a0d"/> <img src="https://img.shields.io/badge/minecraft_rcon-2dd4bf?style=flat-square&labelColor=0a0a0d"/>
-
-</td>
-</tr>
-</table>
-
----
-
-## Stack
-
-<p>
-  <img src="https://img.shields.io/badge/Next.js_15-fafafa?style=for-the-badge&logo=nextdotjs&logoColor=fafafa&labelColor=0a0a0d" alt="Next.js"/>
-  <img src="https://img.shields.io/badge/React_19-22d3ee?style=for-the-badge&logo=react&logoColor=22d3ee&labelColor=0a0a0d" alt="React"/>
-  <img src="https://img.shields.io/badge/TypeScript-3178c6?style=for-the-badge&logo=typescript&logoColor=3178c6&labelColor=0a0a0d" alt="TypeScript"/>
-  <img src="https://img.shields.io/badge/Tailwind_4-22d3ee?style=for-the-badge&logo=tailwindcss&logoColor=22d3ee&labelColor=0a0a0d" alt="Tailwind"/>
-  <img src="https://img.shields.io/badge/Motion-e879f9?style=for-the-badge&labelColor=0a0a0d" alt="Motion"/>
-  <img src="https://img.shields.io/badge/Radix_UI-fafafa?style=for-the-badge&labelColor=0a0a0d" alt="Radix"/>
-</p>
-<p>
-  <img src="https://img.shields.io/badge/Postgres_16-336791?style=for-the-badge&logo=postgresql&logoColor=336791&labelColor=0a0a0d" alt="Postgres"/>
-  <img src="https://img.shields.io/badge/Python-fbbf24?style=for-the-badge&logo=python&logoColor=fbbf24&labelColor=0a0a0d" alt="Python"/>
-  <img src="https://img.shields.io/badge/systemd-fafafa?style=for-the-badge&logo=systemd&logoColor=fafafa&labelColor=0a0a0d" alt="systemd"/>
-  <img src="https://img.shields.io/badge/Transmission_RPC-d23535?style=for-the-badge&labelColor=0a0a0d" alt="Transmission"/>
-  <img src="https://img.shields.io/badge/Jellyfin-00a4dc?style=for-the-badge&logo=jellyfin&logoColor=00a4dc&labelColor=0a0a0d" alt="Jellyfin"/>
-  <img src="https://img.shields.io/badge/slskd-38bdf8?style=for-the-badge&labelColor=0a0a0d" alt="slskd"/>
-</p>
-
----
-
-## Quick Start
+## Running it
 
 ```bash
 git clone --recurse-submodules git@github.com:dev-gough/workshop.git devys-workshop
 cd devys-workshop
 npm install
-npm run setup            # creates DB + roles, applies migrations, builds the BF venv,
-                         # writes config.json with generated passwords + a setup token
-npm run dev              # → http://localhost:3000
+npm run setup    # roles, migrations, the Brainfuck venv, config.json
+npm run dev      # http://localhost:3000
 ```
 
-Then open <http://localhost:3000/setup> and fill in the optional services (slskd, Transmission, Jellyfin, Riot API, music directory, Minecraft RCON) in the browser. The six **browser-pure** projects (polar clock, GoL, house planner, image evolver, ecosystem, neuroevolution, splitwiser) work immediately; the others light up as you connect their dependencies.
+`npm run setup` needs Postgres and Python 3.10 or newer. Docker Compose can bring up Postgres, slskd, and Transmission together; see [`docs/setup/quick-docker.md`](docs/setup/quick-docker.md). For a host that should keep running: `bash scripts/install-systemd.sh`.
 
-| Project | Needs |
+Once the database exists, the clock, the simulations, the drafting room, SplitWiser, and Super Heavy do not need another service. These rooms do.
+
+| Room | Also needs |
 |---|---|
-| BrainFuck GA | Python 3.10+ venv (auto-installed by `npm run setup`) |
-| BarFoo, Soulseek | `paths.musicDirectory`, slskd daemon |
-| Jellyfin Ingest | Transmission RPC, Jellyfin server |
-| LoL Challenges | Riot API key + summoner |
-| Server Dashboard | Linux + systemd (RCON commands need `minecraftServers`) |
+| The Tape Lab | The Python venv from `npm run setup`, and a clone that includes submodules. |
+| BarFoo Records, The Groove | `paths.musicDirectory` |
+| Soulseek Wire | slskd, and the music directory for ingest |
+| Screening Room | Transmission and a Jellyfin server |
+| Challenges | A Riot API key |
+| Control Center | A Linux host for the metrics. RCON only if you want the Minecraft console. |
+| The Parlor | `ollama.baseUrl`. Drawing also needs SSH to `ollama.sshHost`. |
+| Megabonk | Nothing, for the calculator. The live run needs the bridge plugin, and the page opened over http on that machine. |
+| The Outfitter | Park tiles imported with the paddle scripts |
+| Mission Control | A GCAT mirror for the full launch record. The SpaceX range stands on its own. |
+| Village viewer | A MineColonies world served over HTTP |
+| Paper Trading | Outbound network access for quotes |
 
-Per-service install guides (Postgres, slskd, Transmission, Jellyfin, Riot API, music library layout, Minecraft RCON) live in [`docs/setup/`](docs/setup/). For systemd unit files: `bash scripts/install-systemd.sh`.
-
----
-
-<div align="center">
-
-<sub>
-built &amp; broken in equal measure by <a href="https://devydev.ca">Devy</a> · 
-<a href="https://github.com/dev-gough/workshop">github</a> · 
-<a href="https://devydev.ca">devydev.ca</a>
-</sub>
-
-</div>
+Plates are regenerated with `python3 docs/readme/_gen_tiles.py`.
