@@ -91,6 +91,25 @@ export interface MinecraftServer {
   password: string;
 }
 
+export interface InreachWeatherConfig {
+  gmailUser: string;
+  gmailAppPassword: string;
+  /** Fallback forecast point when no paddle trip is loaded. */
+  lat: number;
+  lon: number;
+  timezone: string;
+  /** Local hour (0-23) to push the daily brief. */
+  sendHour: number;
+  /** Repo-relative or absolute JSON file of subscribers / seen UIDs. */
+  stateFile: string;
+  /** Paddle trip slug. Null = stay on lat/lon until a trip is pinned. */
+  tripSlug: string | null;
+  /** Park of the pinned trip. Unused until tripSlug is set. */
+  park: string;
+  /** Calendar date of trip day 1 (YYYY-MM-DD, America/Toronto). */
+  startDate: string | null;
+}
+
 export interface Config {
   postgres: PostgresConfig;
   paths: PathsConfig;
@@ -102,10 +121,15 @@ export interface Config {
   };
   riot: RiotConfig | null;
   minecraftServers: MinecraftServer[];
+  /**
+   * Optional Garmin inReach weather bot (Gmail IMAP + Garmin txtmsg POST).
+   * Kept off the /setup PATCH allowlist so the setup UI cannot clobber it.
+   */
+  inreachWeather: InreachWeatherConfig | null;
   /** Single shared token gating /api/config writes from the in-app /setup page. */
   setupToken: string | null;
   /** Laptop Ollama. Null hides generation until a base URL is set. */
-  ollama: { baseUrl: string } | null;
+  ollama: { baseUrl: string; sshHost: string } | null;
 }
 
 class ConfigError extends Error {
@@ -235,18 +259,21 @@ function validate(raw: unknown): Config {
     });
   }
 
+  const inreachWeather = validateInreachWeather(raw.inreachWeather);
+
   return {
     postgres,
     paths,
     services,
     riot,
     minecraftServers,
+    inreachWeather,
     setupToken: asOptionalString(raw, 'setupToken'),
     ollama: validateOllama(raw.ollama),
   };
 }
 
-function validateOllama(raw: unknown): { baseUrl: string } | null {
+function validateOllama(raw: unknown): { baseUrl: string; sshHost: string } | null {
   if (raw == null) return null;
   if (!isObject(raw)) throw new ConfigError('ollama must be an object or null');
   const baseUrl = asString(raw, 'baseUrl', 'ollama').replace(/\/+$/, '');
@@ -259,7 +286,39 @@ function validateOllama(raw: unknown): { baseUrl: string } | null {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new ConfigError('ollama.baseUrl must be an http(s) URL');
   }
-  return { baseUrl };
+  const sshHost = raw.sshHost == null || raw.sshHost === '' ? 'devy-l' : asString(raw, 'sshHost', 'ollama');
+  if (!/^[A-Za-z0-9_.:@-]+$/.test(sshHost)) {
+    throw new ConfigError('ollama.sshHost must be a host or user@host');
+  }
+  return { baseUrl, sshHost };
+}
+
+function validateInreachWeather(raw: unknown): InreachWeatherConfig | null {
+  if (raw == null) return null;
+  if (!isObject(raw)) throw new ConfigError('inreachWeather must be an object or null');
+  const sendHour = raw.sendHour == null ? 6 : asNumber(raw, 'sendHour', 'inreachWeather');
+  if (!Number.isInteger(sendHour) || sendHour < 0 || sendHour > 23) {
+    throw new ConfigError('inreachWeather.sendHour must be an integer 0-23');
+  }
+  return {
+    gmailUser: asString(raw, 'gmailUser', 'inreachWeather'),
+    gmailAppPassword: asString(raw, 'gmailAppPassword', 'inreachWeather'),
+    lat: raw.lat == null ? 47.075 : asNumber(raw, 'lat', 'inreachWeather'),
+    lon: raw.lon == null ? -80.15 : asNumber(raw, 'lon', 'inreachWeather'),
+    timezone:
+      typeof raw.timezone === 'string' && raw.timezone.length > 0
+        ? raw.timezone
+        : 'America/Toronto',
+    sendHour,
+    stateFile:
+      typeof raw.stateFile === 'string' && raw.stateFile.length > 0
+        ? raw.stateFile
+        : 'data/inreach-weather.json',
+    tripSlug: asOptionalString(raw, 'tripSlug'),
+    park:
+      typeof raw.park === 'string' && raw.park.length > 0 ? raw.park : 'temagami',
+    startDate: asOptionalString(raw, 'startDate'),
+  };
 }
 
 let cached: Config | null = null;

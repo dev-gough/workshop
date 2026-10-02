@@ -171,6 +171,50 @@
 }
 .lol-plate-gold { border-color: color-mix(in srgb, var(--lol-gold-dark) 70%, transparent); }
 
+/* Detail sheet. The scrim is a navy wash, not a blackout — the shelf
+   should stay visible behind the plate. Corners are mitred gold, matching
+   the client's frames. */
+/* The sheet root carries lol-theme for tokens, which also paints an opaque
+   background. Clear it so only the scrim dims the shelf. */
+.lol-theme.lol-overlay {
+  background-color: transparent;
+  background-image: none;
+}
+.lol-scrim {
+  /* Light enough that the shelf, dial, and type stay readable behind the plate. */
+  background: hsl(207 45% 3% / 0.28);
+}
+.lol-sheet {
+  background:
+    linear-gradient(168deg, color-mix(in srgb, var(--lol-bg-elevated) 80%, var(--lol-gold-dark)) 0%, var(--lol-bg-surface) 22%, var(--lol-bg-deep) 100%);
+  border-color: color-mix(in srgb, var(--lol-gold) 48%, var(--lol-border));
+  box-shadow:
+    0 12px 28px hsl(210 70% 1% / 0.28),
+    inset 0 1px 0 color-mix(in srgb, var(--lol-gold) 42%, transparent);
+}
+.lol-tip {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  padding: 3px 7px 4px;
+  background: color-mix(in srgb, var(--lol-bg-deep) 94%, transparent);
+  border: 1px solid color-mix(in srgb, var(--lol-gold) 42%, var(--lol-border));
+  box-shadow: 0 8px 18px hsl(210 60% 1% / 0.4);
+  white-space: nowrap;
+}
+.lol-sheet-corner {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  z-index: 21;
+  pointer-events: none;
+  color: var(--lol-gold);
+}
+.lol-sheet-corner-tl { top: 6px; left: 6px; border-top: 1px solid; border-left: 1px solid; }
+.lol-sheet-corner-tr { top: 6px; right: 6px; border-top: 1px solid; border-right: 1px solid; }
+.lol-sheet-corner-bl { bottom: 6px; left: 6px; border-bottom: 1px solid; border-left: 1px solid; }
+.lol-sheet-corner-br { bottom: 6px; right: 6px; border-bottom: 1px solid; border-right: 1px solid; }
+
 /* Section heading rule: label, then a hairline running to the edge. */
 .lol-rule {
   flex: 1;
@@ -440,10 +484,11 @@
   font-size: 10px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  background: transparent;
-  border: none;
+  background: var(--cc-card-2);
+  border: 1px solid var(--cc-border);
+  border-radius: 2px;
   margin-top: 6px;
-  padding: 0 6px;
+  padding: 4px 8px;
 }
 .cc-scope .u-legend * {
   background: transparent !important;
@@ -477,10 +522,33 @@
 .cc-scope .u-legend .u-series.u-off * { opacity: 0.45; }
 .cc-scope .u-legend .u-series.u-off .u-value { color: var(--cc-muted); }
 
+/* Keep the hairline inside this chart. An oversized cursor layer is what
+   draws the same line across the card beside it. */
+.cc-scope .u-wrap {
+  overflow: hidden;
+}
+
+/* Hover readout — sits on the instrument glass, not the page grid. */
+.cc-plot-plate {
+  position: absolute;
+  top: 28px;
+  z-index: 5;
+  pointer-events: none;
+  max-width: min(240px, 72%);
+  padding: 6px 8px 6px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--cc-bg) 94%, transparent);
+  border: 1px solid var(--cc-bezel);
+  box-shadow:
+    0 10px 24px hsl(220 50% 2% / 0.72),
+    inset 0 1px 0 hsl(220 30% 24% / 0.45);
+}
+
 /* uPlot axes / grid / cursor — inherit from --color-grid + --cc-text */
 .cc-scope .u-cursor-x,
 .cc-scope .u-cursor-y {
-  border-color: color-mix(in srgb, var(--cc-cyan) 55%, transparent) !important;
+  border-right-style: solid !important;
+  border-color: color-mix(in srgb, var(--cc-cyan) 70%, transparent) !important;
 }
 .cc-scope .u-cursor-pt {
   border-color: var(--cc-cyan) !important;
@@ -2879,6 +2947,7 @@
   --color-primary:            var(--parlor-accent);
   --color-primary-foreground: #fffdf8;
   --color-accent:             var(--parlor-lamp);
+  --color-accent-foreground:  var(--parlor-ink);
   --color-destructive:        #a33b32;
 
   color: var(--parlor-ink);
@@ -2911,7 +2980,17 @@
   --color-primary:            var(--parlor-accent);
   --color-primary-foreground: #1c1612;
   --color-accent:             var(--parlor-lamp);
+  --color-accent-foreground:  var(--parlor-ink);
   --color-destructive:        #f0a8a2;
+}
+
+/* A pool of lamplight at the top of the room. */
+.parlor-room {
+  background-image: radial-gradient(
+    ellipse 90% 42% at 50% -8%,
+    color-mix(in srgb, var(--parlor-lamp) 22%, transparent),
+    transparent 70%
+  );
 }
 
 .parlor-lamp {
@@ -2921,5 +3000,142 @@
   border-radius: 999px;
   background: var(--parlor-lamp, #e0a15a);
   box-shadow: 0 0 10px var(--parlor-lamp, #e0a15a);
+}
+
+.parlor-lamp.is-lit {
+  animation: parlor-lamp-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes parlor-lamp-pulse {
+  0%, 100% { box-shadow: 0 0 8px var(--parlor-lamp, #e0a15a); opacity: 1; }
+  50% { box-shadow: 0 0 18px var(--parlor-lamp, #e0a15a); opacity: 0.65; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .parlor-lamp.is-lit { animation: none; }
+}
+
+.parlor-md {
+  font-size: 0.875rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.parlor-md > :first-child { margin-top: 0; }
+.parlor-md > :last-child { margin-bottom: 0; }
+.parlor-md p,
+.parlor-md ul,
+.parlor-md ol,
+.parlor-md pre,
+.parlor-md blockquote,
+.parlor-md table { margin: 0.65em 0; }
+.parlor-md h1,
+.parlor-md h2,
+.parlor-md h3 {
+  font-family: var(--font-ws-serif), Georgia, serif;
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 0.8em 0 0.35em;
+}
+.parlor-md h1 { font-size: 1.25rem; }
+.parlor-md h2 { font-size: 1.1rem; }
+.parlor-md h3 { font-size: 1rem; }
+.parlor-md ul { list-style: disc; padding-left: 1.25em; }
+.parlor-md ol { list-style: decimal; padding-left: 1.25em; }
+.parlor-md li + li { margin-top: 0.2em; }
+.parlor-md a {
+  color: var(--parlor-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.parlor-md blockquote {
+  border-left: 2px solid var(--parlor-accent);
+  padding-left: 0.75rem;
+  color: var(--parlor-soft);
+}
+.parlor-md :not(pre) > code {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.85em;
+  background: var(--parlor-muted);
+  border-radius: 0.25rem;
+  padding: 0.1em 0.35em;
+}
+.parlor-md pre {
+  overflow-x: auto;
+  background: var(--parlor-muted);
+  border: 1px solid var(--parlor-line);
+  border-radius: 0.375rem;
+  padding: 0.65rem 0.75rem;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+.parlor-md pre code {
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+}
+.parlor-md hr {
+  border: 0;
+  border-top: 1px solid var(--parlor-line);
+  margin: 0.8em 0;
+}
+.parlor-md table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+.parlor-md th,
+.parlor-md td {
+  border: 1px solid var(--parlor-line);
+  padding: 0.25rem 0.45rem;
+  text-align: left;
+  vertical-align: top;
+}
+.parlor-md th { font-weight: 600; }
+.parlor-md img {
+  max-width: 100%;
+  max-height: 28rem;
+  border-radius: 0.375rem;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Super Heavy scope — applied to /projects/super-heavy.
+   Deliberately dark-always: a night pad. Stainless, frost, and
+   the amber of a banked path against a black sky.
+   ──────────────────────────────────────────────────────────── */
+.sh-theme {
+  --sh-bg:     #07080c;
+  --sh-card:   #12141a;
+  --sh-ink:    #e7e4dc;
+  --sh-dim:    #9a958a;
+  --sh-line:   #2c3038;
+  --sh-frost:  #9fd7e8;
+  --sh-amber:  #e2a04a;
+
+  --color-background:         var(--sh-bg);
+  --color-foreground:         var(--sh-ink);
+  --color-card:               var(--sh-card);
+  --color-card-foreground:    var(--sh-ink);
+  --color-popover:            var(--sh-card);
+  --color-popover-foreground: var(--sh-ink);
+  --color-muted:              #1a1d24;
+  --color-muted-foreground:   var(--sh-dim);
+  --color-secondary:          #1a1d24;
+  --color-secondary-foreground: var(--sh-ink);
+  --color-border:             var(--sh-line);
+  --color-input:              var(--sh-line);
+  --color-ring:               var(--sh-frost);
+  --color-primary:            var(--sh-frost);
+  --color-primary-foreground: #071016;
+  --color-accent:             #1a1d24;
+  --color-accent-foreground:  var(--sh-ink);
+  --color-destructive:        #e15b4a;
+  --color-destructive-foreground: #fff7f4;
+
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  color: var(--sh-ink);
+  background-color: var(--sh-bg);
+  background-image:
+    radial-gradient(ellipse 70% 42% at 50% -8%, rgba(159, 215, 232, 0.08), transparent 68%);
 }
 
