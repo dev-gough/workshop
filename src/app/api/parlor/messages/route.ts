@@ -14,8 +14,10 @@ import {
   shapeMessage,
   touchChat,
 } from '@/lib/parlor-db';
+import { LaptopImageError, generateLaptopImage } from '@/lib/laptop-image';
 import { OllamaError, ollamaBaseUrl, ollamaChatStream, ollamaGenerateImage } from '@/lib/ollama';
 import { extractGeneratedImage, parseChatChunk } from '@/lib/parlor';
+import { laptopImageModel } from '@/lib/parlor-models';
 
 export const dynamic = 'force-dynamic';
 
@@ -69,10 +71,76 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: chat.error }, { status: chat.status });
   }
 
+  const drawer = mode === 'image' ? laptopImageModel(model) : null;
+  if (drawer) {
+    return sendLaptopImage(user.id, chat.id, chat.created, model, drawer, content);
+  }
   if (mode === 'image') {
     return sendImage(user.id, chat.id, chat.created, model, content, baseUrl);
   }
   return sendChat(user.id, chat.id, chat.created, model, content, baseUrl, request.signal);
+}
+
+async function sendLaptopImage(
+  userId: number,
+  chatId: number,
+  created: boolean,
+  model: string,
+  drawer: NonNullable<ReturnType<typeof laptopImageModel>>,
+  content: string,
+) {
+  const userMessage = await insertMessage(chatId, { role: 'user', kind: 'text', content, model });
+  await touchChat(chatId, content);
+  const encoder = new TextEncoder();
+  let closed = false;
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (event: unknown) => {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        } catch {
+          closed = true;
+        }
+      };
+      const chat = await getVisibleChat(chatId, userId);
+      send({ type: 'chat', chat: chat ? shapeChat(chat, userId) : null, message: shapeMessage(userMessage) });
+      send({ type: 'progress', phase: 'loading' });
+      try {
+        const bytes = await generateLaptopImage(content, drawer, (progress) => {
+          send({ type: 'progress', phase: 'drawing', ...progress });
+        });
+        const image = extractGeneratedImage({ image: bytes.toString('base64') });
+        if (!image.ok) throw new LaptopImageError(image.error);
+        const imagePath = await saveImage(image.bytes);
+        const assistant = await insertMessage(chatId, {
+          role: 'assistant',
+          kind: 'image',
+          content,
+          model,
+          imagePath,
+        });
+        await touchChat(chatId, content);
+        send({ type: 'done', message: shapeMessage(assistant) });
+      } catch (err) {
+        await deleteMessage(userMessage.id);
+        if (created) await pool.query(`DELETE FROM parlor_chats WHERE id = $1`, [chatId]);
+        const message = err instanceof LaptopImageError ? err.message : 'The laptop couldn’t draw that.';
+        send({ type: 'error', error: message, dropped: true });
+      }
+      if (!closed) controller.close();
+    },
+    cancel() {
+      closed = true;
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'application/x-ndjson; charset=utf-8',
+      'Cache-Control': 'no-cache',
+      'X-Accel-Buffering': 'no',
+    },
+  });
 }
 
 async function sendImage(
@@ -88,7 +156,9 @@ async function sendImage(
     generated = await ollamaGenerateImage(baseUrl, model, content);
   } catch (err) {
     if (created) await pool.query(`DELETE FROM parlor_chats WHERE id = $1`, [chatId]);
-    const message = err instanceof OllamaError ? err.message : 'The laptop couldn’t draw that.';
+    const message = err instanceof OllamaError || err instanceof LaptopImageError
+      ? err.message
+      : 'The laptop couldn’t draw that.';
     return NextResponse.json({ error: message }, { status: 502 });
   }
   const image = extractGeneratedImage(generated);

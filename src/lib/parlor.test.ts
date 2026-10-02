@@ -3,6 +3,9 @@ import { describe, it } from 'node:test';
 import {
   chatVisible,
   classifyModels,
+  parlorModelLabel,
+  parlorModelLists,
+  parseImageProgress,
   extractGeneratedImage,
   hashPassword,
   messagesForChatModel,
@@ -49,6 +52,33 @@ describe('parlor models and transcripts', () => {
       chat: ['gpt-oss:20b', 'qwen2.5:7b'],
       image: ['qwen-image', 'x/z-image-turbo'],
     });
+  });
+
+  it('hides raw Hugging Face tags and adds Qwen Image under a short label', () => {
+    assert.deepEqual(parlorModelLists([
+      { name: 'laptop-qwen3:latest', capabilities: ['completion'] },
+      { name: 'hf.co/unsloth/Qwen3-8B-GGUF:UD-Q4_K_XL', capabilities: ['completion'] },
+      { name: 'gpt-oss:20b', capabilities: ['completion'] },
+    ]), {
+      chat: ['laptop-qwen3:latest', 'gpt-oss:20b'],
+      image: ['qwen-image-2.1', 'z-image-turbo'],
+    });
+    assert.equal(parlorModelLabel('laptop-qwen3:latest'), 'Qwen3 8B');
+    assert.equal(parlorModelLabel('laptop-coder:latest'), 'Coder 7B');
+    assert.equal(parlorModelLabel('laptop-qwen35'), 'Qwen3.5 4B');
+    assert.equal(parlorModelLabel('laptop-coder-3b'), 'Coder 3B');
+    assert.equal(parlorModelLabel('laptop-gemma4'), 'Gemma 4 E2B');
+    assert.equal(parlorModelLabel('qwen-image-2.1'), 'Qwen Image 2.1');
+    assert.equal(parlorModelLabel('z-image-turbo'), 'Z-Image Turbo');
+  });
+
+  it('reads denoising steps and ignores tensor-load bars', () => {
+    assert.deepEqual(parseImageProgress('  |==============================>                   | 12/20 - 33.91s/it\u001b[K'), {
+      step: 12,
+      total: 20,
+      secondsPerStep: 33.91,
+    });
+    assert.equal(parseImageProgress('  |##################################################| 8/8 - 582.09MB/s'), null);
   });
 
   it('turns an image turn into a short note for the chat model', () => {

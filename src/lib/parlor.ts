@@ -1,11 +1,16 @@
 import crypto from 'crypto';
 import path from 'path';
 
-const COLORS = ['#8c4a32', '#2f6f4e', '#3d5a80', '#8c334d', '#a16207', '#6d28d9', '#0f766e', '#b45309'];
+export {
+  QWEN_IMAGE_MODEL,
+  classifyModels,
+  isImageModel,
+  parlorModelLabel,
+  parlorModelLists,
+  parseImageProgress,
+} from './parlor-models';
 
-/** Name fragments that mean "this Ollama tag draws pictures" when the server
- *  omits capabilities (Ollama before the capabilities field existed). */
-const IMAGE_NAME = /qwen[-_ ]?image|z-image|flux|imagegen|stable-diffusion|\bsdxl\b/i;
+const COLORS = ['#8c4a32', '#2f6f4e', '#3d5a80', '#8c334d', '#a16207', '#6d28d9', '#0f766e', '#b45309'];
 
 export interface PublicUser {
   id: number;
@@ -85,22 +90,6 @@ export function titleFromPrompt(content: string): string {
   const flat = content.replace(/\s+/g, ' ').trim();
   if (!flat) return 'New chat';
   return flat.length > 72 ? `${flat.slice(0, 72).trimEnd()}…` : flat;
-}
-
-export function isImageModel(name: string, capabilities?: string[]): boolean {
-  if (capabilities && capabilities.length > 0) return capabilities.includes('image');
-  return IMAGE_NAME.test(name);
-}
-
-export function classifyModels(models: { name: string; capabilities?: string[] }[]): { chat: string[]; image: string[] } {
-  const chat: string[] = [];
-  const image: string[] = [];
-  for (const model of models) {
-    if (!model.name) continue;
-    if (isImageModel(model.name, model.capabilities)) image.push(model.name);
-    else chat.push(model.name);
-  }
-  return { chat, image };
 }
 
 /** Text the chat model should see. Pictures become a short note, not bytes. */

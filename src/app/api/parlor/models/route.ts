@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { classifyModels } from '@/lib/parlor';
+import { parlorModelLists } from '@/lib/parlor-models';
 import { getParlorUser, parlorUnauthorized } from '@/lib/parlor-auth';
 import { OllamaError, ollamaBaseUrl, ollamaTags } from '@/lib/ollama';
 
@@ -14,7 +14,7 @@ export async function GET() {
   }
   try {
     const models = await ollamaTags(baseUrl);
-    return NextResponse.json({ ...classifyModels(models), error: null });
+    return NextResponse.json({ ...parlorModelLists(models), error: null });
   } catch (err) {
     const message = err instanceof OllamaError ? err.message : 'The laptop isn’t answering.';
     return NextResponse.json({ chat: [], image: [], error: message });
