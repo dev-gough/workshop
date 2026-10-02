@@ -3,7 +3,7 @@ name: Rebuild workshop
 on:
   push:
     branches:
-      - home-rooms
+      - master
 
 jobs:
   rebuild:
