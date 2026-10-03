@@ -14,6 +14,8 @@ export async function GET() {
               generations, evaluations, wall_seconds,
               evals_per_sec, gens_per_sec,
               best_fitness, found, status, error,
+              trials, solved, solve_rate, median_gens, p90_gens,
+              seed, runtime, host, cpu, repeats, found_at, protocol, cache_hit_rate,
               started_at, completed_at
        FROM brainfuck_benchmarks
        ORDER BY started_at DESC

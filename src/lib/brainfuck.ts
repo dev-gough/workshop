@@ -2,12 +2,19 @@ import { spawn, ChildProcess, execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import readline from 'node:readline';
 import pool from '@/lib/db';
-import { brainfuckRepoPath, pythonBinPath } from '@/lib/config';
+import { brainfuckRepoPath, brainfuckRunnerArgv } from '@/lib/config';
+import { SOLVE_PRESET, THROUGHPUT_PRESET, benchCaseArgs, type BenchCase } from '@/lib/brainfuck-benchmarks';
 
 const REPO_DIR = brainfuckRepoPath();
-const PYTHON = pythonBinPath();
-const RUNNER = 'runner.py';
 const CWD = REPO_DIR;
+
+function spawnRunner(args: string[]): ChildProcess {
+  const argv = brainfuckRunnerArgv();
+  return spawn(argv[0], [...argv.slice(1), ...args], {
+    cwd: CWD,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+}
 
 // ── GA hyperparameter config ────────────────────────────────────────────────
 // Mirrors util.GAConfig in the Python side. Keep field names in sync.
@@ -178,6 +185,20 @@ type BenchmarkEvent = {
   gens_per_sec: number;
   best_fitness: number;
   found: boolean;
+  // fixed-v1 fields. Absent on a runner that predates the protocol.
+  protocol?: string;
+  runtime?: string;
+  host?: string;
+  cpu?: string;
+  trials?: number;
+  solved?: number;
+  solve_rate?: number;
+  median_gens?: number | null;
+  p90_gens?: number | null;
+  seed?: number;
+  repeats?: number | null;
+  found_at?: number | null;
+  cache_hit_rate?: number;
 };
 type ErrorEvent = { type: 'error'; message: string };
 // Diversity-mechanism events emitted by runner.py. Previously dropped on the
@@ -247,8 +268,8 @@ interface ActiveLane {
 }
 let activeLanes: ActiveLane[] = [];
 let activeBenchmarkId: number | null = null;
-// All lanes of the currently-running benchmark row (1 for throughput rows,
-// SOLVE_LANES for solve rows racing to the first find).
+// Child processes of the benchmark row currently executing. Preset rows use
+// one process; trials happen inside it. A lanes value above 1 still races.
 let activeBenchLanes: ChildProcess[] = [];
 // IDs that were intentionally killed because a sibling won the race. The
 // child's exit handler checks this set and writes 'superseded' rather than
@@ -332,20 +353,14 @@ async function spawnLane(
   // without re-querying the runs row.
   const runContext = { target, config, versionHash };
 
-  const child = spawn(
-    PYTHON,
-    [
-      RUNNER,
-      '--target', target,
-      // PyPy emits ~90k gens/sec. Per-event UPDATE+INSERT through Node's
-      // serialized chain caps at ~1k DB ops/sec — at the old 50-gen cadence
-      // the chain backlogged minutes behind Python and the UI looked frozen.
-      // 5000 keeps us comfortably ahead while still showing live progress.
-      '--progress-every', '5000',
-      ...configToCliArgs(config),
-    ],
-    { cwd: CWD, stdio: ['ignore', 'pipe', 'pipe'] },
-  );
+  const child = spawnRunner([
+    '--target', target,
+    // Per-event UPDATE+INSERT through Node's serialized chain caps near
+    // ~1k DB ops/sec. 5000 gens between progress lines stays ahead of that
+    // even when a faster runtime pushes the search well past PyPy.
+    '--progress-every', '5000',
+    ...configToCliArgs(config),
+  ]);
 
   activeLanes.push({ runId: id, raceId, child });
 
@@ -538,76 +553,21 @@ export function getActiveRunId(): number | null {
 }
 
 // ── Benchmarks ────────────────────────────────────────────────────────────
+// Cases live in brainfuck-benchmarks.ts. Re-exported so the API route can
+// keep importing them from this module.
 
-// Suite of configs every benchmark click runs. Sweeps short→long targets and
-// pop/gen scaling so a single click captures throughput at a few operating
-// points, not just one. Sequential — they share the JVM lock.
-export const BENCHMARK_PRESET: { target: string; popSize: number; maxGen: number }[] = [
-  { target: 'hi',       popSize: 50,  maxGen: 50  },
-  { target: 'devy',     popSize: 50,  maxGen: 100 },
-  { target: 'hello',    popSize: 100, maxGen: 100 },
-  // Heavy probe: 8-char target the recent algo can solve in ~1m gens with
-  // racing+lexicase but earlier versions can't touch. Runs full 1m gens on
-  // commits where it doesn't solve, giving a real throughput delta vs the
-  // old algos. Use scripts/backfill-bf-benchmarks.ts to populate this row
-  // for historical commits.
-  { target: 'sparqsys', popSize: 100, maxGen: 1_000_000 },
-];
-
-// Solve-rate suite: repeated default-config runs per target, measuring
-// whether (and at what generation) the algorithm actually solves — the
-// metric that makes hyperparameter comparisons meaningful, where the
-// throughput suite only measures evals/s. A target ladder: 4 chars should
-// be routine, 8 the former ceiling, 12 (with a space, far from lowercase
-// ASCII) hard enough that flat-repair alone can't close it under the
-// 300-char budget — the discriminator for future operator work.
-//
-// Solve rows race SOLVE_LANES independent runner processes; the first lane
-// to solve wins and the row records its generations/wall (per-attempt solve
-// probability ~67-100% makes a race-of-4 miss vanishingly rare, which is
-// how the interactive rig is meant to be driven). Throughput rows stay
-// single-lane — racing shares cores and would corrupt evals/s.
-export const SOLVE_LANES = 4;
-export const SOLVE_REPS = 3;
-
-// The ladder: 4 → 20 chars, three reps each (the UI averages reps per
-// target). Longer rungs mix in spaces and punctuation — bytes far from
-// the lowercase cluster stress different loop structures than all-letter
-// targets do. Caps scale with expected difficulty so a capped rep stays
-// affordable (~1-3 min at PyPy speed) without silently truncating runs
-// that were about to land.
-const SOLVE_LADDER: { target: string; maxGen: number }[] = [
-  { target: 'devy',                 maxGen: 100_000 },  //  4 ch
-  { target: 'genome',               maxGen: 150_000 },  //  6 ch
-  { target: 'sparqsys',             maxGen: 250_000 },  //  8 ch
-  { target: 'brainfuck!',           maxGen: 250_000 },  // 10 ch, punctuation
-  { target: 'the tape lab',         maxGen: 300_000 },  // 12 ch, spaces
-  { target: 'genetic splice',       maxGen: 400_000 },  // 14 ch
-  { target: 'hall of machines',     maxGen: 500_000 },  // 16 ch
-  { target: 'evolution eats tapes', maxGen: 750_000 },  // 20 ch
-];
-
-export const SOLVE_PRESET: { target: string; popSize: number; maxGen: number; lanes: number }[] =
-  SOLVE_LADDER.flatMap((rung) =>
-    Array.from({ length: SOLVE_REPS }, () => ({
-      target: rung.target,
-      popSize: 100,
-      maxGen: rung.maxGen,
-      lanes: SOLVE_LANES,
-    })),
-  );
+export const BENCHMARK_PRESET = THROUGHPUT_PRESET;
+export { SOLVE_PRESET };
 
 export type BenchmarkSuite = 'throughput' | 'solve';
 
 interface BatchQueueItem {
   rowId: number;
-  target: string;
-  popSize: number;
-  maxGen: number;
-  lanes: number;
+  suite: BenchmarkSuite;
+  case: BenchCase;
   // Full GA config override for sweep cells; null = repo defaults (the
-  // preset's popSize/maxGen still apply — maxGen is passed last so it wins
-  // over the config's own value).
+  // case's popSize/maxGen still apply — those flags are passed last so
+  // they win over the config's own values).
   config: GAConfig | null;
 }
 
@@ -634,32 +594,31 @@ export async function startBenchmarkBatch(
   const batchId = String(Date.now());
   benchmarkBatchStopped = false;
 
-  // Pre-create one row per config so the UI can show all configs in the batch
-  // immediately (queued ones too). With a config override, the override's
-  // pop_size replaces the preset's (the preset still owns target/maxGen/lanes)
-  // and the full config is recorded on the row — sweep cells self-describe.
+  // Pre-create one row per case so the UI can show the whole batch
+  // immediately, including rows still queued. A config override replaces
+  // pop_size only; the case still owns the target, the budget, and the
+  // trial count. The full override is stored so a sweep cell self-describes.
   const rowIds: number[] = [];
-  for (const cfg of preset) {
-    const lanes = 'lanes' in cfg ? (cfg as { lanes: number }).lanes : 1;
-    const popSize = config?.pop_size ?? cfg.popSize;
+  for (const benchCase of preset) {
+    const popSize = config?.pop_size ?? benchCase.popSize;
     const { rows } = await pool.query(
       `INSERT INTO brainfuck_benchmarks
          (version_hash, version_subject, version_label, batch_id, suite,
-          target, pop_size, max_generations, lanes, config_json, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'queued')
+          target, pop_size, max_generations, lanes, config_json,
+          seed, protocol, trials, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'fixed-v1', $12, 'queued')
        RETURNING id`,
-      [version.hash, version.subject, label, batchId, suite, cfg.target, popSize, cfg.maxGen, lanes,
-       config ? JSON.stringify(config) : null],
+      [version.hash, version.subject, label, batchId, suite, benchCase.target, popSize,
+       benchCase.maxGen, benchCase.lanes, config ? JSON.stringify(config) : null,
+       benchCase.seed, benchCase.trials],
     );
     rowIds.push(rows[0].id);
   }
 
   benchmarkBatchQueue = rowIds.map((rowId, i) => ({
     rowId,
-    target: preset[i].target,
-    popSize: config?.pop_size ?? preset[i].popSize,
-    maxGen: preset[i].maxGen,
-    lanes: 'lanes' in preset[i] ? (preset[i] as { lanes: number }).lanes : 1,
+    suite,
+    case: { ...preset[i], popSize: config?.pop_size ?? preset[i].popSize },
     config,
   }));
 
@@ -697,12 +656,11 @@ function spawnNextBenchmarkInBatch(): void {
     [next.rowId],
   ).catch((e) => console.error('[brainfuck] mark running', e));
 
-  // Race `next.lanes` identical runner processes. The first lane to exit
-  // with found=true wins the row and its siblings are killed; if nobody
-  // finds, the row records the best-fitness lane's stats with found=false.
-  // The next config spawns only after ALL lanes have exited so two rows
-  // never overlap on the CPU.
-  const lanes = Math.max(1, next.lanes);
+  // One process per row. Trials, when the case asks for them, run inside
+  // that process. lanes>1 is the old race path, kept so a queued row from
+  // a previous build can still be described; current presets leave it at 1.
+  // The next case spawns only after every process has exited.
+  const lanes = Math.max(1, next.case.lanes);
   let winner: BenchmarkEvent | null = null;
   const alsoRan: BenchmarkEvent[] = [];
   const errors: string[] = [];
@@ -717,24 +675,13 @@ function spawnNextBenchmarkInBatch(): void {
   activeBenchmarkId = next.rowId;
   activeBenchLanes = [];
 
-  // Config override args go first; the preset row's --max-gen and
-  // --pop-size come last so argparse's last-wins keeps the row's budget
-  // authoritative even when a full config is present.
+  // Config override args go first; the case's budget flags come last so
+  // argparse's last-wins keeps the row's generation cap authoritative.
   const configArgs = next.config ? configToCliArgs(next.config) : [];
+  const caseArgs = benchCaseArgs(next.suite, next.case);
 
   for (let lane = 0; lane < lanes; lane++) {
-    const child = spawn(
-      PYTHON,
-      [
-        RUNNER,
-        '--benchmark',
-        '--target', next.target,
-        ...configArgs,
-        '--max-gen', String(next.maxGen),
-        '--pop-size', String(next.popSize),
-      ],
-      { cwd: CWD, stdio: ['ignore', 'pipe', 'pipe'] },
-    );
+    const child = spawnRunner([...configArgs, ...caseArgs]);
     activeBenchLanes.push(child);
 
     if (lane === 0 && child.pid) {
@@ -824,6 +771,20 @@ async function finalizeBenchmarkRow(
            gens_per_sec = $6,
            best_fitness = $7,
            found = $8,
+           trials = $9,
+           solved = $10,
+           solve_rate = $11,
+           median_gens = $12,
+           p90_gens = $13,
+           seed = $14,
+           runtime = $15,
+           host = $16,
+           cpu = $17,
+           repeats = $18,
+           found_at = $19,
+           protocol = $20,
+           cache_hit_rate = $21,
+           result_json = $22,
            completed_at = NOW()
        WHERE id = $1`,
       [
@@ -835,6 +796,20 @@ async function finalizeBenchmarkRow(
         result.gens_per_sec,
         result.best_fitness,
         result.found,
+        result.trials ?? null,
+        result.solved ?? null,
+        result.solve_rate ?? null,
+        result.median_gens ?? null,
+        result.p90_gens ?? null,
+        result.seed ?? null,
+        result.runtime ?? null,
+        result.host ?? null,
+        result.cpu ?? null,
+        result.repeats ?? null,
+        result.found_at ?? null,
+        result.protocol ?? 'fixed-v1',
+        result.cache_hit_rate ?? null,
+        JSON.stringify(result),
       ],
     );
     return;

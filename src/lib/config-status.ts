@@ -29,6 +29,10 @@ export function getProjectStatus(slug: ProjectSlug): ProjectStatus {
     case 'brainfuck':
       if (!existsSync(c.paths.brainfuckRepo)) missing.push(`BrainFuck repo not found at ${c.paths.brainfuckRepo}`);
       if (!existsSync(c.paths.pythonBin))     missing.push(`Python venv not found at ${c.paths.pythonBin}`);
+      const runnerBin = c.paths.brainfuckRunner?.[0];
+      if (runnerBin && runnerBin.includes('/') && !existsSync(runnerBin)) {
+        missing.push(`BrainFuck runner not found at ${runnerBin}`);
+      }
       if (missing.length) setupAnchor = 'brainfuck';
       break;
 

@@ -347,11 +347,46 @@ interface Benchmark {
   found: boolean | null;
   status: string;
   error: string | null;
+  // fixed-v1. Null on older one-shot rows.
+  trials: number | null;
+  solved: number | null;
+  solve_rate: number | null;
+  median_gens: number | null;
+  p90_gens: number | null;
+  seed: number | null;
+  runtime: string | null;
+  host: string | null;
+  cpu: string | null;
+  repeats: number | null;
+  found_at: number | null;
+  protocol: string | null;
+  cache_hit_rate: number | null;
   started_at: string;
   completed_at: string | null;
 }
 
-interface BenchmarkPresetItem { target: string; popSize: number; maxGen: number; lanes?: number }
+interface BenchmarkPresetItem {
+  target: string;
+  popSize: number;
+  maxGen: number;
+  lanes?: number;
+  trials?: number;
+  warmupGens?: number;
+  minSeconds?: number;
+  seed?: number;
+}
+
+function fmtRate(n: number | null): string {
+  if (n == null || !Number.isFinite(n)) return '—';
+  if (Math.abs(n) >= 100) return Math.round(n).toLocaleString();
+  return n.toFixed(1);
+}
+
+function fmtWall(seconds: number | null): string {
+  if (seconds == null || !Number.isFinite(seconds)) return '—';
+  if (seconds < 10) return `${seconds.toFixed(2)}s`;
+  return `${seconds.toFixed(1)}s`;
+}
 
 function fmtTime(iso: string | null): string {
   if (!iso) return '';
@@ -1293,9 +1328,9 @@ export default function BrainfuckPage() {
                 <div className="space-y-3">
                   <p className="text-[11px] text-muted-foreground leading-relaxed">
                     {benchSuite === 'solve'
-                      ? 'Solve-rate suite: repeated racing runs per target (first lane to solve wins the row) — did it solve, and at what generation.'
-                      : 'Throughput suite: timed silent runs measuring raw evals/s at a few operating points.'}
-                    {' '}Auto-tagged with the current BF repo commit.
+                      ? 'Quick targets, many independent trials in one process. The row is how often it solved, and the median generation among the ones that did.'
+                      : 'One seeded generation budget, run to the end. Finding the string does not stop the clock. A warmup is discarded and the same seed repeats until the window covers a couple of seconds, so a faster language is timed on the same work.'}
+                    {' '}Tagged with the commit, the runtime, and the machine.
                   </p>
 
                   <div className="flex items-center gap-1">
@@ -1329,12 +1364,16 @@ export default function BrainfuckPage() {
                         const grouped: { c: BenchmarkPresetItem; n: number }[] = [];
                         for (const c of list) {
                           const last = grouped[grouped.length - 1];
-                          if (last && last.c.target === c.target && last.c.popSize === c.popSize
-                            && last.c.maxGen === c.maxGen && (last.c.lanes ?? 1) === (c.lanes ?? 1)) {
-                            last.n++;
-                          } else {
-                            grouped.push({ c, n: 1 });
-                          }
+                          const same = last
+                            && last.c.target === c.target
+                            && last.c.popSize === c.popSize
+                            && last.c.maxGen === c.maxGen
+                            && (last.c.lanes ?? 1) === (c.lanes ?? 1)
+                            && (last.c.trials ?? 1) === (c.trials ?? 1)
+                            && (last.c.warmupGens ?? 0) === (c.warmupGens ?? 0)
+                            && (last.c.minSeconds ?? 0) === (c.minSeconds ?? 0);
+                          if (last && same) last.n++;
+                          else grouped.push({ c, n: 1 });
                         }
                         return grouped.map(({ c, n }, i) => (
                           <div key={i}>
@@ -1342,7 +1381,17 @@ export default function BrainfuckPage() {
                             <span className="text-foreground/90">&quot;{c.target}&quot;</span>
                             {n > 1 && <span className="text-foreground/90"> ×{n}</span>}
                             {' · '}pop <span className="text-foreground/90">{c.popSize}</span>
-                            {' · '}<span className="text-foreground/90">{c.maxGen.toLocaleString()}</span> cap
+                            {' · '}<span className="text-foreground/90">{c.maxGen.toLocaleString()}</span>
+                            {benchSuite === 'solve' ? ' cap' : ' gen'}
+                            {(c.trials ?? 1) > 1 && (
+                              <span> · <span className="text-foreground/90">{c.trials}</span> trials</span>
+                            )}
+                            {(c.warmupGens ?? 0) > 0 && (
+                              <span> · warm <span className="text-foreground/90">{c.warmupGens!.toLocaleString()}</span></span>
+                            )}
+                            {(c.minSeconds ?? 0) > 0 && (
+                              <span> · ≥<span className="text-foreground/90">{c.minSeconds}s</span></span>
+                            )}
                             {(c.lanes ?? 1) > 1 && (
                               <span className="text-primary/70"> · ×{c.lanes} lanes</span>
                             )}
@@ -1584,26 +1633,26 @@ function groupBenchmarksByBatch(rows: Benchmark[]): BenchmarkGroup[] {
 function BenchmarkBatchCard({
   group, onDelete,
 }: { group: BenchmarkGroup; onDelete: (id: number) => void }) {
-  // Aggregate stats for the batch where possible
-  const completed = group.rows.filter((r) => r.status === 'completed' && r.evals_per_sec != null);
-  const avgEps = completed.length
-    ? completed.reduce((sum, r) => sum + (r.evals_per_sec ?? 0), 0) / completed.length
-    : null;
   const totalWall = group.rows.reduce((s, r) => s + (r.wall_seconds ?? 0), 0);
   const inFlight = group.rows.some((r) => r.status === 'running' || r.status === 'queued');
   const isSolve = group.suite === 'solve';
-  // Solve-suite headline: solved n/m plus median gens-to-solve among solves.
+  // Legacy solve cards counted rows. fixed-v1 cards count trials inside a row,
+  // so a 19/20 on "devy" is not flattened into one success.
   const finished = group.rows.filter((r) => r.status === 'completed' && r.found != null);
   const solvedRows = finished.filter((r) => r.found);
+  const trialRows = group.rows.filter((r) => r.status === 'completed' && r.trials != null && r.solved != null && (r.trials ?? 0) > 1);
+  const trialSolved = trialRows.reduce((s, r) => s + (r.solved ?? 0), 0);
+  const trialCount = trialRows.reduce((s, r) => s + (r.trials ?? 0), 0);
   const medianGens = (() => {
     if (solvedRows.length === 0) return null;
     const gens = solvedRows.map((r) => r.generations).sort((a, b) => a - b);
     return gens[Math.floor(gens.length / 2)];
   })();
+  const machine = group.rows.find((r) => r.runtime || r.host);
 
   return (
     <div className="rounded-lg bg-background/30 border border-border/30 overflow-hidden">
-      <div className="flex items-center gap-3 px-3 py-2 bg-background/40 text-[11px]">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 bg-background/40 text-[11px]">
         <div className="font-mono text-primary flex items-center gap-1" title={group.versionSubject ?? ''}>
           <GitCommit className="h-3 w-3" />
           {group.versionHash ?? '—'}
@@ -1619,10 +1668,21 @@ function BenchmarkBatchCard({
             {group.versionLabel}
           </span>
         )}
+        {machine && (
+          <span className="min-w-0 truncate text-[10px] text-muted-foreground" title={machine.cpu ?? undefined}>
+            {[machine.runtime, machine.host].filter(Boolean).join(' · ')}
+          </span>
+        )}
         {inFlight && <Loader className="h-3 w-3 text-chart-4 animate-spin" />}
         <div className="ml-auto flex items-center gap-3 text-muted-foreground tabular-nums">
           {isSolve ? (
-            finished.length > 0 && (
+            trialRows.length > 0 ? (
+              <span>
+                solved <span className={trialSolved === trialCount ? 'text-ok' : trialSolved === 0 ? 'text-warn' : 'text-foreground/90'}>
+                  {trialSolved}/{trialCount}
+                </span>
+              </span>
+            ) : finished.length > 0 && (
               <span>
                 solved <span className={solvedRows.length === finished.length ? 'text-ok' : 'text-foreground/90'}>
                   {solvedRows.length}/{finished.length}
@@ -1632,14 +1692,8 @@ function BenchmarkBatchCard({
                 )}
               </span>
             )
-          ) : (
-            avgEps != null && (
-              <span>
-                avg <span className="text-foreground/90">{avgEps.toFixed(1)}</span> evals/s
-              </span>
-            )
-          )}
-          <span>{totalWall.toFixed(1)}s wall</span>
+          ) : null}
+          <span>{fmtWall(totalWall)} wall</span>
           <span className="text-[10px]">{fmtTime(group.startedAt)}</span>
         </div>
       </div>
@@ -1691,6 +1745,11 @@ function SolveTargetAggList({
         const finished = g.rows.filter((r) => r.status === 'completed' && r.found != null);
         const solved = finished.filter((r) => r.found);
         const running = g.rows.some((r) => r.status === 'running' || r.status === 'queued');
+        const trialRows = g.rows.filter((r) => r.status === 'completed' && r.trials != null && r.solved != null && (r.trials ?? 0) > 1);
+        const trialSolved = trialRows.reduce((s, r) => s + (r.solved ?? 0), 0);
+        const trialCount = trialRows.reduce((s, r) => s + (r.trials ?? 0), 0);
+        const medians = trialRows.map((r) => r.median_gens).filter((n): n is number => n != null).sort((a, b) => a - b);
+        const trialMedian = medians.length ? medians[Math.floor(medians.length / 2)] : null;
         const avgGens = solved.length
           ? Math.round(solved.reduce((s, r) => s + r.generations, 0) / solved.length)
           : null;
@@ -1698,34 +1757,42 @@ function SolveTargetAggList({
           ? finished.reduce((s, r) => s + (r.wall_seconds ?? 0), 0) / finished.length
           : null;
         // Nothing solved: the closest miss is the informative number.
-        const bestFit = !solved.length && finished.length
-          ? Math.max(...finished.map((r) => r.best_fitness ?? 0))
-          : null;
+        const bestFit = trialRows.length > 0
+          ? (trialSolved === 0 ? Math.max(...trialRows.map((r) => r.best_fitness ?? 0)) : null)
+          : !solved.length && finished.length
+            ? Math.max(...finished.map((r) => r.best_fitness ?? 0))
+            : null;
         const open = openTarget === g.target;
         return (
           <div key={g.target}>
             <button
               onClick={() => setOpenTarget((cur) => (cur === g.target ? null : g.target))}
-              className="flex w-full items-center gap-2 rounded px-1 py-1 text-left hover:bg-foreground/5 transition-colors"
+              className="flex w-full flex-wrap items-center gap-x-2 gap-y-0.5 rounded px-1 py-1 text-left hover:bg-foreground/5 transition-colors"
             >
               {open ? <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
                     : <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />}
-              <span className="min-w-0 flex-1 truncate font-mono text-foreground/90">
+              <span className="font-mono text-foreground/90">
                 &quot;{g.target}&quot;
               </span>
               {running && <Loader className="h-3 w-3 shrink-0 animate-spin text-chart-4" />}
-              <span className="flex shrink-0 items-center gap-2 font-mono text-[10px] tabular-nums text-muted-foreground">
-                {finished.length > 0 && (
+              <span className="ml-auto flex flex-wrap items-center justify-end gap-x-2 font-mono text-[10px] tabular-nums text-muted-foreground">
+                {trialRows.length > 0 ? (
+                  <span className={trialSolved === trialCount ? 'text-ok'
+                    : trialSolved === 0 ? 'text-warn' : 'text-foreground/80'}>
+                    {trialSolved}/{trialCount}
+                  </span>
+                ) : finished.length > 0 && (
                   <span className={solved.length === finished.length ? 'text-ok'
                     : solved.length === 0 ? 'text-warn' : 'text-foreground/80'}>
                     {solved.length}/{finished.length}
                   </span>
                 )}
-                {avgGens != null && <span>avg {avgGens.toLocaleString()} gen</span>}
+                {trialMedian != null ? <span>med {trialMedian.toLocaleString()} gen</span>
+                  : avgGens != null && <span>avg {avgGens.toLocaleString()} gen</span>}
                 {bestFit != null && (
                   <span>best {bestFit}/{256 * g.target.length}</span>
                 )}
-                {avgWall != null && <span>{avgWall.toFixed(1)}s</span>}
+                {avgWall != null && <span>{fmtWall(avgWall)}</span>}
               </span>
             </button>
             {open && (
@@ -1743,33 +1810,61 @@ function SolveTargetAggList({
 }
 
 function BenchmarkConfigRow({ b, onDelete }: { b: Benchmark; onDelete: () => void }) {
-  const evalsPerSec = b.evals_per_sec != null ? b.evals_per_sec.toFixed(1) : '—';
-  const gensPerSec = b.gens_per_sec != null ? b.gens_per_sec.toFixed(1) : '—';
-  const wall = b.wall_seconds != null ? `${b.wall_seconds.toFixed(1)}s` : '—';
+  const evalsPerSec = fmtRate(b.evals_per_sec);
+  const gensPerSec = fmtRate(b.gens_per_sec);
+  const wall = fmtWall(b.wall_seconds);
+  const fixed = b.protocol === 'fixed-v1';
+  const multi = (b.trials ?? 0) > 1;
   const statusColor =
     b.status === 'completed' ? 'text-ok/80'
     : b.status === 'running' ? 'text-chart-4'
     : b.status === 'queued' ? 'text-muted-foreground/80'
     : b.status === 'stopped' ? 'text-warn'
     : 'text-destructive';
+  const outcome = (() => {
+    if (b.status !== 'completed' || b.found == null) {
+      return <span className={`text-[10px] ${statusColor}`}>{b.status}</span>;
+    }
+    if (multi && b.solved != null && b.trials != null) {
+      const tone = b.solved === b.trials ? 'text-ok' : b.solved === 0 ? 'text-warn' : 'text-foreground/80';
+      return (
+        <span className={`text-[10px] tabular-nums whitespace-nowrap ${tone}`}>
+          {b.solved}/{b.trials}
+          {b.median_gens != null && <> · med {b.median_gens.toLocaleString()}</>}
+          {b.p90_gens != null && <> · p90 {b.p90_gens.toLocaleString()}</>}
+        </span>
+      );
+    }
+    if (fixed && b.suite !== 'solve') {
+      return b.found_at != null ? (
+        <span className="text-[10px] text-ok tabular-nums whitespace-nowrap">
+          hit @ {b.found_at.toLocaleString()}
+        </span>
+      ) : (
+        <span className="text-[10px] text-muted-foreground whitespace-nowrap">full budget</span>
+      );
+    }
+    return b.found ? (
+      <span className="text-[10px] text-ok tabular-nums whitespace-nowrap">
+        ✓ gen {b.generations.toLocaleString()}
+      </span>
+    ) : (
+      <span className="text-[10px] text-warn whitespace-nowrap">✗ capped</span>
+    );
+  })();
   return (
     <>
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
         <span className="font-mono text-foreground/90 truncate">&quot;{b.target}&quot;</span>
-        {b.status === 'completed' && b.found != null ? (
-          b.found ? (
-            <span className="text-[10px] text-ok tabular-nums whitespace-nowrap">
-              ✓ gen {b.generations.toLocaleString()}
-            </span>
-          ) : (
-            <span className="text-[10px] text-warn whitespace-nowrap">✗ capped</span>
-          )
-        ) : (
-          <span className={`text-[10px] ${statusColor}`}>{b.status}</span>
-        )}
+        {outcome}
         <span className="text-[10px] text-muted-foreground tabular-nums whitespace-nowrap">
-          pop {b.pop_size} · {b.max_generations.toLocaleString()} cap
+          pop {b.pop_size} · {b.max_generations.toLocaleString()} {fixed && b.suite !== 'solve' ? 'gen' : 'cap'}
+          {(b.repeats ?? 0) > 1 && <span> · ×{b.repeats}</span>}
+          {multi && <span> · {b.trials} trials</span>}
           {(b.lanes ?? 1) > 1 && <span className="text-primary/70"> · ×{b.lanes}</span>}
+          {fixed && b.cache_hit_rate != null && (
+            <span> · cache {Math.round(b.cache_hit_rate * 100)}%</span>
+          )}
         </span>
       </div>
       <div className="text-right tabular-nums font-mono text-foreground/90">{evalsPerSec}</div>

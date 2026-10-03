@@ -40,6 +40,12 @@ export interface PathsConfig {
   /** Path to the Python interpreter for the BrainFuck venv. Defaults to `<brainfuckRepo>/.venv/bin/python`. */
   pythonBin: string;
   /**
+   * Argv of the GA runner. Null uses `[pythonBin, "runner.py"]`.
+   * A C, C++, or Rust port sets this to its binary; it has to speak the
+   * same CLI and the fixed-v1 benchmark JSON line as runner.py.
+   */
+  brainfuckRunner: string[] | null;
+  /**
    * Root of the paddle park data — tile pyramids and cached ArcGIS layer JSON,
    * laid out as `<root>/<slug>/{dem,imagery,jeff,*.json}`. Defaults to
    * `../paddle-cache`, i.e. deliberately OUTSIDE the repo.
@@ -207,10 +213,12 @@ function validate(raw: unknown): Config {
     typeof p.pythonBin === 'string' && p.pythonBin.length > 0
       ? p.pythonBin
       : `${brainfuckRepo}/.venv/bin/python`;
+  const brainfuckRunner = validateBrainfuckRunner(p.brainfuckRunner);
   const paths: PathsConfig = {
     musicDirectory: asOptionalString(p, 'musicDirectory'),
     brainfuckRepo,
     pythonBin,
+    brainfuckRunner,
     paddleCache:
       typeof p.paddleCache === 'string' && p.paddleCache.length > 0
         ? p.paddleCache
@@ -404,12 +412,37 @@ export function brainfuckRepoPath(): string {
     : path.resolve(process.cwd(), c.paths.brainfuckRepo);
 }
 
+function validateBrainfuckRunner(raw: unknown): string[] | null {
+  if (raw == null) return null;
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > 8) {
+    throw new ConfigError('paths.brainfuckRunner must be an argv array of 1–8 strings');
+  }
+  const argv: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'string' || item.length === 0 || item.length > 512 || item.includes('\0')) {
+      throw new ConfigError('paths.brainfuckRunner entries must be non-empty strings');
+    }
+    argv.push(item);
+  }
+  return argv;
+}
+
 /** Resolve `paths.pythonBin` to an absolute path (relative paths use cwd). */
 export function pythonBinPath(): string {
   const c = getConfig();
   return path.isAbsolute(c.paths.pythonBin)
     ? c.paths.pythonBin
     : path.resolve(process.cwd(), c.paths.pythonBin);
+}
+
+/**
+ * Argv used to spawn the GA. Defaults to the configured Python plus runner.py.
+ * `paths.brainfuckRunner` replaces that when a compiled port should run instead.
+ */
+export function brainfuckRunnerArgv(): string[] {
+  const custom = getConfig().paths.brainfuckRunner;
+  if (custom && custom.length > 0) return custom;
+  return [pythonBinPath(), 'runner.py'];
 }
 
 /**
