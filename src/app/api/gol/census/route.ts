@@ -82,6 +82,7 @@ function sanitize(body: unknown): CensusResult | null {
     periods, oscExamples, stillLifeExamples, done, elapsedMs,
   };
   if (b.via === 'transpose') result.via = 'transpose';
+  if (b.engine === 'gpu') result.engine = 'gpu';
   return result;
 }
 

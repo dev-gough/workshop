@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
+import Link from 'next/link';
 import GameOfLife, { type GameOfLifeHandle } from '@/components/GameOfLife';
 import GolCensus from '@/components/GolCensus';
 import PageTransition from '@/components/motion/PageTransition';
@@ -81,6 +82,12 @@ export default function GameOfLifePage() {
                 {t.label}
               </button>
             ))}
+            <Link
+              href="/projects/gol/benchmarks"
+              className="border-b-2 border-transparent pb-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground hover:text-foreground"
+            >
+              Benchmarks
+            </Link>
           </div>
         </div>
       </div>

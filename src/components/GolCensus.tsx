@@ -71,7 +71,25 @@ function saveResult(s: Size, r: CensusResult) {
 // ── Server persistence (shared across browsers) ───────────────────────────
 
 const API_URL = '/api/gol/census';
+const GPU_URL = '/api/gol/census/gpu';
 const SERVER_SAVE_MS = 10_000;
+
+interface GpuLive {
+  w: number;
+  h: number;
+  running: boolean;
+  rate: number | null;
+  error: string | null;
+}
+
+function withExamples(prev: CensusResult | undefined, next: CensusResult): CensusResult {
+  if (!prev) return next;
+  return {
+    ...next,
+    oscExamples: next.oscExamples.length > 0 ? next.oscExamples : prev.oscExamples,
+    stillLifeExamples: next.stillLifeExamples.length > 0 ? next.stillLifeExamples : prev.stillLifeExamples,
+  };
+}
 
 /** Pick the further-along of two checkpoints; ties keep `a`. */
 function better(a: CensusResult | null | undefined, b: CensusResult | null | undefined): CensusResult | null {
@@ -468,6 +486,7 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
   const [gallerySort, setGallerySort] = useState<GallerySort>('period');
   const [galleryAsc, setGalleryAsc] = useState(false);
   const [galleryExpanded, setGalleryExpanded] = useState(false);
+  const [gpu, setGpu] = useState<GpuLive | null>(null);
   const poolRef = useRef<CensusPool | null>(null);
   const rateRef = useRef<{ t: number; classified: number } | null>(null);
   const lastSaveRef = useRef(0);
@@ -633,8 +652,85 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
     }
   }, []);
 
+  const applyGpuResult = useCallback((r: CensusResult) => {
+    const s = { w: r.w, h: r.h };
+    const local = loadResult(s);
+    const merged = withExamples(local ?? undefined, r);
+    if (!local || merged.processed > local.processed || (merged.done && !local.done)) saveResult(s, merged);
+    setResults(prev => ({ ...prev, [sizeKey(s)]: withExamples(prev[sizeKey(s)], merged) }));
+  }, []);
+
+  useEffect(() => {
+    const es = new EventSource(`${GPU_URL}/stream`);
+    const take = (msg: {
+      type?: string;
+      message?: string;
+      job?: { w: number; h: number; running: boolean; result: CensusResult | null; rate: number | null; error: string | null } | null;
+    }) => {
+      if (msg.type === 'hello') {
+        if (msg.job?.running) {
+          setGpu({ w: msg.job.w, h: msg.job.h, running: true, rate: msg.job.rate, error: msg.job.error });
+          if (msg.job.result) applyGpuResult(msg.job.result);
+        } else {
+          setGpu(prev => (prev?.running ? null : prev));
+        }
+        return;
+      }
+      if ((msg.type === 'progress' || msg.type === 'result') && msg.job) {
+        const j = msg.job;
+        setGpu({ w: j.w, h: j.h, running: msg.type === 'progress', rate: j.rate, error: j.error });
+        if (j.result) {
+          applyGpuResult(j.result);
+          if (msg.type === 'result' && j.result.done && j.result.w !== j.result.h) {
+            adoptEverywhere(transposeResult(j.result));
+          }
+        }
+        return;
+      }
+      if (msg.type === 'error') {
+        setGpu(prev => prev
+          ? { ...prev, running: false, error: msg.message ?? 'The 3060 census failed.' }
+          : { w: 0, h: 0, running: false, rate: null, error: msg.message ?? 'The 3060 census failed.' });
+        return;
+      }
+      if (msg.type === 'idle') {
+        setGpu(prev => (prev?.error ? { ...prev, running: false } : null));
+      }
+    };
+    es.onmessage = (ev) => {
+      try { take(JSON.parse(ev.data)); } catch { /* keep the stream */ }
+    };
+    return () => es.close();
+  }, [applyGpuResult, adoptEverywhere]);
+
+  const startGpu = useCallback(() => {
+    if (poolRef.current || gpu?.running) return;
+    const s = sel;
+    setGpu({ w: s.w, h: s.h, running: true, rate: null, error: null });
+    fetch(GPU_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ w: s.w, h: s.h }),
+    }).then(async (res) => {
+      if (res.ok) return;
+      const data = await res.json().catch(() => null);
+      setGpu({ w: s.w, h: s.h, running: false, rate: null, error: data?.error ?? 'The 3060 census failed to start.' });
+    }).catch(() => {
+      setGpu({ w: s.w, h: s.h, running: false, rate: null, error: 'The 3060 census failed to start.' });
+    });
+  }, [sel, gpu]);
+
+  const stopGpu = useCallback(() => {
+    if (!gpu) return;
+    fetch(GPU_URL, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ w: gpu.w, h: gpu.h }),
+    }).catch(() => { /* stream reports the stop */ });
+  }, [gpu]);
+
   const startDeep = useCallback(() => {
-    if (poolRef.current) return;
+    if (poolRef.current || gpu?.running) return;
     const s = sel;
     const initialClassified = results[sizeKey(s)] ? classifiedTotal(results[sizeKey(s)]) : 0;
     rateRef.current = null;
@@ -668,9 +764,13 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
     poolRef.current = pool;
     setRunningSize(s);
     pool.start();
-  }, [sel, results, persistThrottled, queuePoolUi, trackRate, adoptEverywhere]);
+  }, [sel, results, persistThrottled, queuePoolUi, trackRate, adoptEverywhere, gpu]);
 
   const pauseDeep = useCallback(() => {
+    if (gpu?.running) {
+      stopGpu();
+      return;
+    }
     const pool = poolRef.current;
     if (!pool) return;
     const snapshot = pool.stop();
@@ -680,12 +780,21 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
     queuePoolUi(snapshot, null, true);
     setLiveProgress(null);
     persistThrottled(snapshot, true);
-  }, [persistThrottled, queuePoolUi]);
+  }, [persistThrottled, queuePoolUi, gpu, stopGpu]);
 
   const resetDeep = useCallback(() => {
     if (runningSize) return;
     try { localStorage.removeItem(storageKey(sel)); } catch { /* ignore */ }
-    fetch(`${API_URL}?w=${sel.w}&h=${sel.h}`, { method: 'DELETE' }).catch(() => { /* offline */ });
+    const s = sel;
+    // Stop the laptop job before dropping the shared row, so its final
+    // checkpoint can't land after the delete and resurrect the board.
+    void fetch(GPU_URL, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ w: s.w, h: s.h, checkpoint: true }),
+    }).catch(() => { /* offline */ }).finally(() => {
+      fetch(`${API_URL}?w=${s.w}&h=${s.h}`, { method: 'DELETE' }).catch(() => { /* offline */ });
+    });
     setResults(prev => {
       const next = { ...prev };
       delete next[sizeKey(sel)];
@@ -727,6 +836,7 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
   const selTotal = totalOf(sel);
   const selClassified = selResult ? classifiedTotal(selResult) : 0;
   const selIsRunning = sameSize(runningSize, sel);
+  const gpuHere = !!(gpu?.running && sameSize(gpu, sel));
   const shownClassified = selIsRunning && liveProgress
     ? Math.max(selClassified, liveProgress.classified)
     : selClassified;
@@ -734,8 +844,12 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
     ? Math.max(selClassified, liveProgress.checkpointed)
     : selClassified;
   const awaitingCheckpoint = Math.max(0, shownClassified - checkpointedClassified);
-  const selPct = (shownClassified / selTotal) * 100;
-  const etaSeconds = rate && rate > 0 ? Math.round((selTotal - shownClassified) / rate) : 0;
+  const barCount = gpuHere && selResult ? selResult.processed : shownClassified;
+  const selPct = (barCount / selTotal) * 100;
+  const gpuRate = gpuHere ? gpu?.rate ?? null : null;
+  const etaSeconds = gpuHere && gpuRate && gpuRate > 0
+    ? Math.round((selTotal - (selResult?.processed ?? 0)) / gpuRate)
+    : rate && rate > 0 ? Math.round((selTotal - shownClassified) / rate) : 0;
 
   // ── Oscillator gallery pool ──
   //
@@ -775,9 +889,9 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
         <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
           Every starting configuration on a bounded W×H board, simulated to its cycle and
           classified as dies&nbsp;out, still&nbsp;life, or oscillator. Boards to a million states
-          compute on arrival; bigger ones run on every core this machine has. The walls do
-          real work here — so each gallery specimen is also released onto an infinite plane
-          and badged with its true, unbounded fate.
+          compute on arrival; bigger ones run on every core this machine has, or on the
+          laptop’s RTX 3060. The walls do real work here — so each gallery specimen is also
+          released onto an infinite plane and badged with its true, unbounded fate.
         </p>
       </div>
 
@@ -813,7 +927,7 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
                 const pctVal = hasData ? oscPercent(r) : null;
                 const heat = pctVal !== null ? heatColor(pctVal) : null;
                 const selected = sameSize(sel, s);
-                const isRun = sameSize(runningSize, s);
+                const isRun = sameSize(runningSize, s) || !!(gpu?.running && sameSize(gpu, s));
                 return (
                   <button
                     key={sizeKey(s)}
@@ -851,29 +965,41 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
                 </span>
               </h3>
               <p className="text-xs text-muted-foreground mt-0.5 max-w-lg">
-                One worker per core sweeps the state space in resumable chunks — symmetry
-                pruning, bit-parallel stepping, Brent cycle detection. Progress checkpoints
-                to the workshop database, so any browser can resume a run — and a finished
-                board fills in its transpose for free.
+                This browser sweeps the state space in resumable chunks — symmetry pruning,
+                bit-parallel stepping, Brent cycle detection. <span className="text-foreground">3060</span> runs
+                the same census on the laptop GPU and checkpoints there, so a pause can resume.
+                A finished board fills in its transpose for free.
               </p>
             </div>
             <div className="flex items-center gap-1.5">
-              {runningSize ? (
+              {runningSize || gpu?.running ? (
                 <Button size="sm" variant="secondary" className="h-8 gap-1.5" onClick={pauseDeep}>
-                  <Pause className="h-3.5 w-3.5" /> Pause {runningSize.w}×{runningSize.h}
+                  <Pause className="h-3.5 w-3.5" /> Pause {runningSize ? `${runningSize.w}×${runningSize.h}` : `${gpu!.w}×${gpu!.h}`}
                 </Button>
               ) : (
-                <Button
-                  size="sm"
-                  className="h-8 gap-1.5"
-                  onClick={startDeep}
-                  disabled={selResult?.done}
-                >
-                  <Play className="h-3.5 w-3.5" />
-                  {selResult && !selResult.done && selResult.processed > 0 ? 'Resume' : 'Start'}
-                </Button>
+                <>
+                  <Button
+                    size="sm"
+                    className="h-8 gap-1.5"
+                    onClick={startDeep}
+                    disabled={selResult?.done}
+                  >
+                    <Play className="h-3.5 w-3.5" />
+                    {selResult && !selResult.done && selResult.processed > 0 ? 'Resume' : 'Start'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="h-8"
+                    onClick={startGpu}
+                    disabled={selResult?.done}
+                    title="Run the symmetry census on the laptop RTX 3060"
+                  >
+                    {selResult?.engine === 'gpu' && !selResult.done && selResult.processed > 0 ? 'Resume 3060' : '3060'}
+                  </Button>
+                </>
               )}
-              <Button size="sm" variant="ghost" className="h-8 gap-1.5" onClick={resetDeep} disabled={!!runningSize}>
+              <Button size="sm" variant="ghost" className="h-8 gap-1.5" onClick={resetDeep} disabled={!!runningSize || !!gpu?.running}>
                 <RotateCcw className="h-3.5 w-3.5" /> Reset
               </Button>
             </div>
@@ -883,6 +1009,14 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
             <p className="text-[11px] text-muted-foreground">
               {runningSize.w}×{runningSize.h} is mid-count — pause it to start {sel.w}×{sel.h}.
             </p>
+          )}
+          {gpu?.running && !gpuHere && (
+            <p className="text-[11px] text-muted-foreground">
+              {gpu.w}×{gpu.h} is on the 3060 — pause it to start {sel.w}×{sel.h}.
+            </p>
+          )}
+          {gpu?.error && !gpu.running && (
+            <p className="text-[11px] text-destructive">{gpu.error}</p>
           )}
 
           {selResult && (
@@ -895,14 +1029,22 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
               </div>
               <div className="flex flex-wrap items-center justify-between gap-x-3 text-[10px] text-muted-foreground font-mono tabular-nums">
                 <span
-                  title={`${shownClassified.toLocaleString()} of ${selTotal.toLocaleString()} states classified · ${checkpointedClassified.toLocaleString()} safely checkpointed · index cursor at ${selResult.processed.toLocaleString()}`}
+                  title={gpuHere
+                    ? `${(selResult.processed).toLocaleString()} of ${selTotal.toLocaleString()} indexes swept · ${shownClassified.toLocaleString()} states classified`
+                    : `${shownClassified.toLocaleString()} of ${selTotal.toLocaleString()} states classified · ${checkpointedClassified.toLocaleString()} safely checkpointed · index cursor at ${selResult.processed.toLocaleString()}`}
                 >
-                  {selPct.toFixed(2)}% · {fmtCount(shownClassified)} / {fmtCount(selTotal)} classified
+                  {selPct.toFixed(2)}% · {fmtCount(gpuHere ? selResult.processed : shownClassified)} / {fmtCount(selTotal)} {gpuHere ? 'swept' : 'classified'}
                 </span>
                 <span className="flex items-center gap-3">
                   {selIsRunning && rate !== null && rate > 0 && (
                     <>
                       <span>{fmtCount(Math.round(rate))} states/s · {poolRef.current?.workerCount ?? poolWorkerCount()} workers</span>
+                      <span>ETA {fmtEta(etaSeconds)}</span>
+                    </>
+                  )}
+                  {gpuHere && gpuRate !== null && gpuRate > 0 && (
+                    <>
+                      <span>{fmtCount(Math.round(gpuRate))} states/s · RTX 3060</span>
                       <span>ETA {fmtEta(etaSeconds)}</span>
                     </>
                   )}
@@ -914,6 +1056,7 @@ export default function GolCensus({ onShowOnBoard }: GolCensusProps) {
                   {selResult.done && (
                     <span className="text-chart-4">
                       complete in {fmtDuration(Math.max(1, Math.round(selResult.elapsedMs / 1000)))}
+                      {selResult.engine === 'gpu' ? ' on the 3060' : ''}
                     </span>
                   )}
                 </span>

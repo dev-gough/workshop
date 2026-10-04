@@ -27,6 +27,8 @@ export interface CensusResult {
   /** Set when the result was derived from its finished transpose (W×H ↔ H×W
    *  is a bijection that commutes with the Life rule) rather than computed. */
   via?: 'transpose';
+  /** Set when the laptop 3060 produced this checkpoint. */
+  engine?: 'gpu';
 }
 
 /** Ask a worker to census the index slice [start, end) of a w×h board. */
